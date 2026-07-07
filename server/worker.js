@@ -11,11 +11,12 @@
 // SIGINT: finish the current job, then exit (a second SIGINT force-quits).
 import {
   claimNextJob, peekNextJob, completeJob, failJob, enqueueJob,
-  listPoliticians, getPolitician,
+  listPoliticians, getPolitician, sourceHealth, pruneFetchRuns,
 } from "./store.js";
-import { ingestFor } from "./ingest.js";
+import { ingestFor, FETCHER_NAMES } from "./ingest.js";
 import { generateReport } from "./report-generator.js";
 import { maybeDiscover } from "./scandal-discovery.js";
+import { classifyHealth } from "./health.js";
 import { startScheduler } from "./scheduler.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,6 +29,7 @@ export const MIN_GAP_MS = {
   discover_scandals: 0,    // self-rate-limits via its own 12h meta cursor
   ingest_politician: 0,
   ingest_all: 0,
+  source_health: 0,
   noop: 0,
 };
 
@@ -57,6 +59,17 @@ export const HANDLERS = {
   // Scandal auto-discovery. maybeDiscover already self-rate-limits (12h cursor).
   async discover_scandals() {
     return await maybeDiscover();
+  },
+  // Fetcher-health sweep: aggregate fetch_runs, warn on ROTTED sources, and
+  // prune ledger rows older than 90 days. Read-mostly; no network, no LLM.
+  async source_health({ days = 14 } = {}) {
+    const health = sourceHealth(days);
+    const { rotted, stale } = classifyHealth(health, FETCHER_NAMES);
+    for (const r of rotted) {
+      console.warn(`[health] ROTTED ${r.source}: ${Math.round(r.ok_rate * 100)}% ok, ${r.total_items} items over ${days}d — ${r.last_error ?? "no error logged"}`);
+    }
+    const pruned = pruneFetchRuns(90);
+    return { sources: health.length, rotted: rotted.length, stale: stale.length, pruned };
   },
   // Built-in health/verification job: does nothing but echo its payload. Safe to
   // enqueue anywhere (no network, no LLM) to confirm the worker is consuming.

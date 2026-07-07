@@ -12,6 +12,7 @@ import { enqueueJob, getMeta, setMeta } from "./store.js";
 export const SCHEDULES = [
   { type: "discover_scandals", payload: {}, everyMs: 6 * 3600_000 },       // ~every 6h
   { type: "ingest_all",        payload: {}, everyMs: 7 * 24 * 3600_000 },  // ~weekly
+  { type: "source_health",     payload: {}, everyMs: 24 * 3600_000 },      // ~daily
 ];
 
 const metaKey = (type) => `sched_last_enqueue_${type}`;

@@ -11,8 +11,8 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import https from "node:https";
-import { listPoliticians, addEvidence } from "./store.js";
-import { fetchText, htmlToText, fetchPdfText, UA, fetchJson } from "./fetchers/http.js";
+import { listPoliticians, addEvidence, recordFetchRun } from "./store.js";
+import { fetchText, htmlToText, fetchPdfText, UA, fetchJson, sleep, mapLimit } from "./fetchers/http.js";
 import { fetchMyNetaProfile } from "./sources/myneta-full.js";
 import { fetchWikipedia } from "./sources/wikipedia.js";
 import { fetchNews } from "./sources/news.js";
@@ -40,41 +40,77 @@ import { fetchSECEdgar } from "./fetchers/sec-edgar.js";
 // (officialSourceLinks, archiveLinks) — generic "search portal X for this name"
 // URLs with no content — are gone: they were 59% of the DB, unreadable by GLM,
 // and dishonestly inflated the "evidence retrieved" count.
+// The source registry — every per-politician fetcher, one entry each. Restructured
+// out of a bare 21-way Promise.all so the fan-out is bounded (mapLimit) and each
+// fetcher's outcome is RECORDED (fetch_runs), not silently swallowed. Order here
+// is preserved into the addEvidence() call below so dedup behaviour is unchanged.
+export const FETCHERS = [
+  { name: "myneta",               run: (p) => fetchMyNetaProfile(p) },      // FULL affidavit (cases, IPC sections, asset growth)
+  { name: "wikipedia",            run: (p) => fetchWikipedia(p) },          // biographical/career narrative
+  { name: "news",                 run: (p) => fetchNews(p) },               // GDELT headlines (English; 429-resilient)
+  { name: "news_intl",            run: (p) => fetchMultilingualNews(p) },   // English + Hindi + state-language news (Google News RSS)
+  { name: "press_releases",       run: (p) => fetchPressReleases(p) },      // ED/CBI listing + linked full releases (PDF-aware)
+  { name: "indian_kanoon",        run: (p) => fetchIndianKanoon(p) },       // court judgment excerpts (API key OR free web scrape)
+  { name: "icij",                 run: (p) => fetchICIJ(p) },               // ICIJ offshore leaks (free, no key)
+  { name: "sebi",                 run: (p) => fetchSEBIOrders(p) },         // SEBI enforcement orders (free, no key)
+  { name: "cag",                  run: (p) => fetchCAGReports(p) },         // CAG audit + report PDF (free, no key)
+  { name: "sansad",               run: (p) => fetchSansadMP(p) },           // FULL parliamentary record, MP/RS (sansad.in JSON API)
+  { name: "election_expenditure", run: (p) => fetchElectionExpenditure(p) },// sworn campaign-spend declaration (MyNeta, free)
+  { name: "party_funding",        run: (p) => fetchPartyFunding(p) },       // full party financials + donations (MyNeta, free)
+  { name: "mplads",               run: (p) => fetchMPLADS(p) },             // MP fund sanctioned/released/utilised (MoSPI API, MP-only)
+  { name: "cppp",                 run: (p) => fetchCPPPProcurement(p) },    // govt contracts award trail (local SQLite, env CPPP_DB_PATH)
+  { name: "mca_directors",        run: (p) => fetchMCADirectors(p) },       // MCA21 directorships (local SQLite)
+  { name: "factcheck",            run: (p) => fetchFactChecks(p) },         // fact-checks from Alt News/BOOM/Factly etc. (free)
+  { name: "wikidata",             run: (p) => fetchWikidata(p) },           // structured named relatives + positions (free) → graph
+  { name: "company_registry",     run: (p) => fetchCompanyRegistry(p) },    // MCA registry check of declared companies (status/CIN)
+  { name: "sec_edgar",            run: (p) => fetchSECEdgar(p) },           // US SEC EDGAR full-text filing search (free, no key)
+  { name: "pib_projects",         run: (p) => fetchPIBProjects(p) },        // PIB/ministry project announcements (free)
+  { name: "l1_datasets",          run: (p) => fetchL1Datasets(p) },         // level-1 dataset sources (registry-driven, local cache)
+  { name: "case_monitors",        run: (p) => fetchL1CaseMonitors(p) },     // P21 single-case monitors
+];
+
+// The registry's source names — the roster the health CLI checks for STALE
+// (zero-run) sources against.
+export const FETCHER_NAMES = FETCHERS.map((f) => f.name);
+
+// Bounded, observed executor. Runs each fetcher through mapLimit(concurrency),
+// records exactly one fetch_runs row per fetcher, and degrades a failure to []
+// WITHOUT breaking ingestion. Returns [{ name, ok, items, result }] in registry
+// order. Exported so tests can drive it with fake fetchers (no network).
+export async function runFetchers(fetchers, p, { limit = 6 } = {}) {
+  return await mapLimit(fetchers, limit, async (f) => {
+    const t0 = Date.now();
+    try {
+      const result = await f.run(p);
+      const items = Array.isArray(result) ? result.length : result == null ? 0 : 1;
+      recordFetchRun({ source: f.name, politician_id: p?.id ?? null, ok: 1, items, ms: Date.now() - t0 });
+      return { name: f.name, ok: true, items, result };
+    } catch (err) {
+      // A fetcher failure is degraded to [] so ingestion continues, but it is
+      // RECORDED (message only) so the source can't rot silently.
+      recordFetchRun({ source: f.name, politician_id: p?.id ?? null, ok: 0, items: 0, ms: Date.now() - t0, error: err?.message ?? String(err) });
+      return { name: f.name, ok: false, items: 0, result: [] };
+    }
+  });
+}
+
 export async function ingestFor(p) {
-  const [mynetaFull, wiki, news, newsIntl, press, kanoon, icij, sebi, cag,
-         sansad, expense, partyFin, mplads, cppp, mca, factcheck, wikidata, companyReg, secEdgar, pibProjects, l1] =
-    await Promise.all([
-      fetchMyNetaProfile(p),     // FULL affidavit (cases, IPC sections, asset growth)
-      fetchWikipedia(p),         // biographical/career narrative
-      fetchNews(p),              // GDELT headlines (English; 429-resilient)
-      fetchMultilingualNews(p),  // English + Hindi + state-language news (Google News RSS)
-      fetchPressReleases(p),     // ED/CBI listing + linked full releases (PDF-aware)
-      fetchIndianKanoon(p),      // court judgment excerpts (API key OR free web scrape)
-      fetchICIJ(p),              // ICIJ offshore leaks         (free, no key)
-      fetchSEBIOrders(p),        // SEBI enforcement orders     (free, no key)
-      fetchCAGReports(p),        // CAG audit + report PDF       (free, no key)
-      fetchSansadMP(p),          // FULL parliamentary record, MP/RS (sansad.in JSON API)
-      fetchElectionExpenditure(p), // sworn campaign-spend declaration (MyNeta, free)
-      fetchPartyFunding(p),      // full party financials + donations (MyNeta, free)
-      fetchMPLADS(p),            // MP fund sanctioned/released/utilised (MoSPI API, MP-only)
-      fetchCPPPProcurement(p),   // govt contracts award trail (local SQLite, env CPPP_DB_PATH)
-      fetchMCADirectors(p),      // MCA21 directorships (local SQLite, env MCA_DB_PATH or data/mca.db)
-      fetchFactChecks(p),        // fact-checks from Alt News/BOOM/Factly etc. (free)
-      fetchWikidata(p),          // structured named relatives + positions (free) → feeds the graph
-      fetchCompanyRegistry(p),   // MCA registry check of declared companies (status/CIN) → struck-off flag
-      fetchSECEdgar(p),          // US SEC EDGAR full-text filing search (free, no key) — rare but real hits
-      fetchPIBProjects(p),       // PIB/ministry project announcements (free) → PROJECT_FRONT_RUNNING timing
-      fetchL1Datasets(p),        // level-1 dataset sources (registry-driven, local cache)
-    ]);
+  const results = await runFetchers(FETCHERS, p, { limit: 6 });
+  const by = {};
+  for (const r of results) by[r.name] = r.result;
 
   // Upgrade headline news → full article body text (free, no key; PDF-aware).
-  const newsBodies = await enrichNewsBodies([...news, ...newsIntl], { limit: 14 });
-  const caseLeads = await fetchL1CaseMonitors(p); // P21 single-case monitors
+  // Enrichment of the news results, not a source of its own → not health-tracked.
+  const newsBodies = await enrichNewsBodies([...(by.news ?? []), ...(by.news_intl ?? [])], { limit: 14 });
 
+  // Same order (and same flatten) as the original bare Promise.all, so evidence
+  // dedup/merge behaviour is byte-for-byte identical.
   const added = addEvidence([
-    mynetaFull, wiki, news, newsIntl, newsBodies,
-    press, kanoon, icij, sebi, cag, sansad, expense, partyFin, mplads, cppp, mca, factcheck, wikidata, companyReg, secEdgar, pibProjects,
-    l1, caseLeads,
+    by.myneta, by.wikipedia, by.news, by.news_intl, newsBodies,
+    by.press_releases, by.indian_kanoon, by.icij, by.sebi, by.cag, by.sansad,
+    by.election_expenditure, by.party_funding, by.mplads, by.cppp, by.mca_directors,
+    by.factcheck, by.wikidata, by.company_registry, by.sec_edgar, by.pib_projects,
+    by.l1_datasets, by.case_monitors,
   ].flat());
   // Report honestly: how much was actually RETRIEVED (real content or a news
   // lead) versus added at all — so the counts mean something.
@@ -176,16 +212,70 @@ let l1XlsxWarned = false, l1ZipWarned = false;
 async function l1Xlsx() { try { return await import("xlsx"); } catch { if (!l1XlsxWarned) { console.warn("[l1] xlsx not installed — run: npm install xlsx"); l1XlsxWarned = true; } return null; } }
 async function l1Zip()  { try { return await import("fflate"); } catch { if (!l1ZipWarned) { console.warn("[l1] fflate not installed — run: npm install fflate"); l1ZipWarned = true; } return null; } }
 
-// Download one source into cache. cfg: { id, url, format, insecure?, table?, sheet?, csvInZip?, maxRows? }
+// v2: expand a cfg into its concrete URL list. Supports {page} ranges and
+// {val} iteration (years, district slugs, sub-report paths).
+function l1Urls(cfg) {
+  if (cfg.iterate) return cfg.iterate.map((v) => cfg.url.replaceAll("{val}", String(v)));
+  if (cfg.pages) { const out = []; for (let i = cfg.pages[0]; i <= cfg.pages[1]; i++) out.push(cfg.url.replaceAll("{page}", String(i))); return out; }
+  return [cfg.url];
+}
+// v2: extract anchor rows [text, absoluteHref] from HTML; linkRe (string regex)
+// keeps only matching hrefs (e.g. "\\.pdf$").
+function l1AnchorRows(html, baseUrl, linkRe) {
+  const rows = [];
+  for (const m of html.matchAll(/<a\s[^>]*href=["']([^"'#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    let href = m[1];
+    const text = htmlToText(m[2], 300);
+    try { href = new URL(href, baseUrl).href; } catch { continue; }
+    if (linkRe && !new RegExp(linkRe, "i").test(href)) continue;
+    if (text || linkRe) rows.push([text, href]);
+  }
+  return rows;
+}
+
+// Download one source into cache. v2: multi-URL (pages/iterate), html-list,
+// json-api. cfg: { id, url, format, insecure?, table?, sheet?, csvInZip?,
+//                  maxRows?, pages?, iterate?, linkRe?, rowsPath?, apiKeyEnv?, delayMs? }
 async function l1Refresh(cfg) {
   try {
     if (!cfg.format || !cfg.url) return { id: cfg.id, ok: false, why: "skipped/no url" };
-    if (cfg.format === "html-table") {
-      const html = cfg.insecure ? (await l1FetchInsecure(cfg.url))?.toString("utf8") ?? "" : await fetchText(cfg.url, { timeoutMs: 30000 });
-      if (!html) return { id: cfg.id, ok: false, why: "fetch failed" };
-      const tables = l1HtmlTables(html);
-      if (!tables.length) return { id: cfg.id, ok: false, why: "no <table> found" };
-      const rows = cfg.table != null ? tables[cfg.table] : tables.reduce((a, b) => (b.length > a.length ? b : a));
+    // Multi-page HTML formats accumulate rows across every expanded URL.
+    if (cfg.format === "html-table" || cfg.format === "html-list") {
+      const urls = l1Urls(cfg);
+      const rows = []; let emptyStreak = 0;
+      for (const u of urls) {
+        const html = cfg.insecure ? (await l1FetchInsecure(u))?.toString("utf8") ?? "" : await fetchText(u, { timeoutMs: cfg.timeoutMs ?? 30000 });
+        let pageRows = [];
+        if (html) {
+          if (cfg.format === "html-list") pageRows = l1AnchorRows(html, u, cfg.linkRe);
+          else {
+            const tables = l1HtmlTables(html);
+            if (tables.length) pageRows = cfg.table != null ? (tables[cfg.table] ?? []) : tables.reduce((a, b) => (b.length > a.length ? b : a));
+          }
+        }
+        if (!pageRows.length) { if (++emptyStreak >= 3) break; }
+        else { emptyStreak = 0; rows.push(...(cfg.iterate ? pageRows.map((r) => [String(cfg.iterate[urls.indexOf(u)]), ...r]) : pageRows)); }
+        if (urls.length > 1) await sleep(cfg.delayMs ?? 700); // politeness on multi-page
+        if (rows.length >= (cfg.maxRows ?? 20000)) break;
+      }
+      if (!rows.length) return { id: cfg.id, ok: false, why: "no rows found" };
+      l1Write(cfg.id, rows, { url: cfg.url });
+      return { id: cfg.id, ok: true, count: rows.length };
+    }
+    if (cfg.format === "json-api") {
+      let u = cfg.url;
+      if (cfg.apiKeyEnv) {
+        const k = process.env[cfg.apiKeyEnv];
+        if (!k) return { id: cfg.id, ok: false, why: `env ${cfg.apiKeyEnv} not set — skipped` };
+        u = u.replaceAll("{key}", encodeURIComponent(k));
+      }
+      const data = await fetchJson(u, { timeoutMs: cfg.timeoutMs ?? 30000 });
+      if (!data) return { id: cfg.id, ok: false, why: "fetch/parse failed" };
+      let arr = data;
+      for (const seg of (cfg.rowsPath ?? "").split(".").filter(Boolean)) arr = arr?.[seg];
+      if (!Array.isArray(arr) || !arr.length) return { id: cfg.id, ok: false, why: `rowsPath '${cfg.rowsPath}' empty` };
+      const rows = arr.slice(0, cfg.maxRows ?? 50000).map((o) =>
+        Array.isArray(o) ? o.map(String) : Object.values(o).map((v) => typeof v === "object" ? JSON.stringify(v) : String(v)));
       l1Write(cfg.id, rows, { url: cfg.url });
       return { id: cfg.id, ok: true, count: rows.length };
     }
@@ -297,6 +387,8 @@ export function fetchL1Datasets(p) {
 const L1_CASE_MONITORS = [
   { id: "neet-2026", title: "2026 NEET-UG controversy / CBI investigation",
     url: "https://en.wikipedia.org/wiki/2026_NEET_controversy" },
+  { id: "punjabi-univ-scholarship-scam", title: "Punjabi University UGC scholarship scam (Rs 14 cr, ED probe)",
+    url: "https://www.tribuneindia.com/news/punjab/ed-seeks-land-records-in-rs-14-crore-ugc-scholarship-scam-probe/amp" },
 ];
 export async function fetchL1CaseMonitors(p) {
   const out = [];
@@ -383,9 +475,8 @@ const L1_SOURCES = [
     url: "https://justicehub.in/dataset/f38b750b-399a-4bd3-80e8-d98b0091a3f3/resource/4feb9e0d-38a2-49c6-97f7-08d21c583e80/download/data.xlsx",
     match: "none",
     summary: "State-level justice-system indicator data (aggregate context)." },
-  { id: "ijr-2020", title: "India Justice Report 2020 ranks data", format: "csv",
-    url: "https://justicehub.in/dataset/3e5226d0-9bb8-4f5f-85ac-dbd59da05903/resource/627377dc-d208-44a3-a437-b2a461dc65d3/download/ranks-data-2020.zip",
-    match: "none", csvInZip: "rank",
+  { id: "ijr-2020", title: "India Justice Report 2020 ranks data", format: null, match: "none",
+    skipped: "Ranks Data ZIP contains only XLSX (xlsx-in-zip unsupported by the L1 csv engine); aggregate no-name data, emits no evidence — nothing lost.",
     summary: "IJR 2020 indicator-level data (aggregate context)." },
 
   // ---- Batch D — PDFs & remaining (3) ----
@@ -401,6 +492,159 @@ const L1_SOURCES = [
     url: "https://raw.githubusercontent.com/CivicDataLab/POCSO_case_law_analysis/master/pocso_judgements_analyser/date_wise_cases.csv",
     match: "none", summary: "Daily POCSO case counts (aggregate context)." },
 
+  // ==== Batch E — single static HTML tables/pages, R1 (8) ====
+  { id: "ppp-india", title: "PPP in India — infrastructure project database", format: "html-table",
+    url: "https://www.pppinindia.gov.in/all_infrastructure_projects", match: "name", tier: 5,
+    timeoutMs: 90000, maxRows: 20000,
+    summary: "~4,000 PPP projects: name, cost (Rs cr), sector, awarding authority, state, status.",
+    note: "3.8MB server-rendered page — the big timeout is deliberate." },
+  { id: "punjab-sand-mines", title: "Punjab Sand Portal — operational mining sites", format: "html-table",
+    url: "https://minesandgeology.punjab.gov.in/operational-minings/", match: "name", tier: 6,
+    note: "If 404, find the exact 'operational minings' path from the homepage nav HTML.",
+    summary: "Active sand/gravel mining sites by district with owner and status." },
+  { id: "acb-jk-fir", title: "ACB Jammu & Kashmir — FIR cases", format: "html-table",
+    url: "https://acb.jk.gov.in/fir-cases.htm", match: "name", tier: 6,
+    summary: "FIR listing: FIR no./date, allegation, accused name(s) and designation." },
+  { id: "punjab-vb-investigations", title: "Punjab Vigilance Bureau — range-wise FIR/VE counts", format: "html-table",
+    url: "https://vigilancebureau.punjab.gov.in/investigations.php", insecure: true, match: "none",
+    summary: "Range-wise counts of corruption cases under investigation (aggregate)." },
+  { id: "punjab-vb-press", title: "Punjab Vigilance Bureau — press releases", format: "html-list",
+    url: "https://vigilancebureau.punjab.gov.in/", insecure: true, match: "name", tier: 6,
+    summary: "Rotating press-release links naming arrested/charged officials." },
+  { id: "prs-16fc", title: "16th Finance Commission — PRS summary tables", format: "html-table",
+    url: "https://prsindia.org/policy/report-summaries/report-of-the-16th-finance-commission-for-2026-31",
+    match: "none", summary: "Tax devolution weightages and state-wise shares (secondary source, context)." },
+  { id: "fira-rejections", title: "FSSAI Food Import Rejection Alerts (FIRA)", format: "html-table",
+    url: "https://fira.fssai.gov.in/", match: "name", tier: 6,
+    note: "If the homepage has no table (JS shell), look for a results/listing path in the HTML; if none, skip (likely SPA).",
+    summary: "Rejected food imports: product, origin country, rejection reason, date." },
+  { id: "ireps-banned", title: "IREPS — banned/suspended firms", format: "html-table",
+    url: "", match: "name", tier: 6,
+    note: "Find the banned/suspended-firms listing link in https://www.ireps.gov.in/ homepage HTML (anchor text contains 'banned' or 'suspend'); hard-code it. If only reachable via POST/session, skip.",
+    summary: "Railways procurement banned-firm registry." },
+
+  // ==== Batch F — document/PDF listing pages, R2 (10) ====
+  { id: "sfio-investigations", title: "SFIO — investigations completed / convicted directors", format: "html-list",
+    url: "https://sfio.gov.in/en/investigations-completed/", linkRe: "\\.(pdf|htm)", match: "name", tier: 6,
+    note: "Exact path may differ — locate 'Investigations Completed', 'Directors Convicted', 'Proclaimed Offenders' links in sfio.gov.in nav; add one entry per section (ids sfio-convicted, sfio-offenders) reusing this shape.",
+    summary: "SFIO fraud investigation outcomes and convicted-director lists." },
+  { id: "fiu-publications", title: "FIU-IND annual reports", format: "html-list",
+    url: "https://fiuindia.gov.in/files/Publication/Publication.html", linkRe: "\\.pdf", match: "none",
+    summary: "17 FIU annual reports 2007-2025 (aggregate STR/CTR stats, named penalty actions in PDFs)." },
+  { id: "ncb-reports", title: "Narcotics Control Bureau — reports & judgments", format: "html-list",
+    url: "https://narcoticsindia.nic.in/", linkRe: "\\.pdf", match: "none",
+    summary: "State-wise seizure statistics and annual report PDFs." },
+  { id: "ap-lokayukta", title: "AP Lokayukta — reports & press releases", format: "html-list",
+    url: "https://lokayukta.ap.gov.in/", linkRe: "\\.pdf", match: "name", tier: 6,
+    summary: "Annual reports/press releases naming officials under investigation." },
+  { id: "ts-lokayukta", title: "Telangana Lokayukta — reports & circulars", format: "html-list",
+    url: "https://lokayukta.telangana.gov.in/", linkRe: "\\.pdf", match: "name", tier: 6,
+    summary: "Annual reports and case circulars." },
+  { id: "kerala-lokayukta", title: "Kerala Lok Ayukta — cause lists", format: "html-list",
+    url: "https://www.lokayuktakerala.gov.in/", linkRe: "\\.pdf", match: "name", tier: 6,
+    summary: "Cause lists by bench — named respondents and case numbers." },
+  { id: "kerala-vacb", title: "Kerala VACB — news/press releases", format: "html-list",
+    url: "https://vigilance.kerala.gov.in/", match: "name", tier: 6,
+    summary: "Conviction and case press releases (named officials)." },
+  { id: "uk-vigilance", title: "Uttarakhand Vigilance — news & statistics", format: "html-list",
+    url: "https://vigilance.uk.gov.in/", match: "name", tier: 6,
+    summary: "Trap-case news items and yearly statistics." },
+  { id: "dgcis-coastal", title: "DGCIS coastal cargo statistics", format: "html-list",
+    url: "https://www.dgciskol.gov.in/pub_coastal.aspx", linkRe: "\\.(pdf|xls)", match: "none",
+    summary: "Annual coastal/inland cargo aggregate publications." },
+  { id: "aishe-reports", title: "AISHE higher-education survey reports", format: "html-list",
+    url: "https://aishe.gov.in/", linkRe: "\\.(pdf|xls)", match: "none",
+    note: "If homepage is JS-shell, try the 'reports' path linked in raw HTML; else skip.",
+    summary: "AISHE final report downloads (aggregate education stats)." },
+
+  // ==== Batch G — paged / iterated listings, R3 (7) ====
+  { id: "nia-most-wanted", title: "NIA Most Wanted", format: "html-list",
+    url: "https://nia.gov.in/most-wanted/page/{page}", pages: [1, 12], match: "name", tier: 6,
+    note: "If /page/N 404s, check pagination href format on page 1 (could be ?page=N) and fix the template.",
+    summary: "~180 terror-case absconders: name, aliases, reward, case refs." },
+  { id: "delhi-budget-archive", title: "Delhi Finance Dept — budget notification archive", format: "html-list",
+    url: "https://finance.delhi.gov.in/finance/budget-notification?page={page}", pages: [0, 6],
+    linkRe: "\\.pdf", match: "none",
+    summary: "Delhi budget PDFs 2016-2022: demands for grants, revised estimates." },
+  { id: "dipam-receipts", title: "DIPAM disinvestment receipts (year-wise)", format: "html-table",
+    url: "https://dipam.gov.in/disinvestmentReceiptsDtls?year={val}",
+    iterate: ["2015-16","2016-17","2017-18","2018-19","2019-20","2020-21","2021-22","2022-23","2023-24","2024-25","2025-26","2026-27"],
+    match: "none",
+    note: "Confirm the year query-param name by inspecting the dropdown <select name=…> in page HTML; fix template accordingly.",
+    summary: "CPSE disinvestment transactions per FY: method, receipts, residual GoI stake." },
+  { id: "adr-electoral-bonds", title: "ADR/MyNeta electoral bonds reports", format: "html-table",
+    url: "https://www.myneta.info/electoral_bonds/index.php?action={val}",
+    iterate: ["donor_wise","party_wise","encashment"], match: "name", tier: 6,
+    note: "Open the index page once, copy the 7 sub-report hrefs, and set iterate to their actual query values (or switch to iterating full URLs with url:'{val}' and iterate:[full urls]).",
+    summary: "Donor→party electoral bond mappings with bond numbers and dates. Also matches parties via donor rows." },
+  { id: "hp-svacb-firs", title: "HP Vigilance & Anti-Corruption — district FIRs", format: "html-table",
+    url: "{val}",
+    iterate: [], match: "name", tier: 6,
+    note: "Collect the 13 district FIR sub-page URLs from https://hpsvacb.hp.gov.in/ nav HTML and put them in iterate (full URLs; the url template is just '{val}').",
+    summary: "District-wise FIR listings: case number, accused name, date." },
+  { id: "odisha-dmf-districts", title: "Odisha DMF district dashboards", format: "html-table",
+    url: "https://dmf.odisha.gov.in/district/{val}", insecure: true,
+    iterate: ["ANGUL","BALASORE","BARGARH","BHADRAK","BOLANGIR","BOUDH","CUTTACK","DEOGARH","DHENKANAL","GAJAPATI","GANJAM","JAGATSINGHPUR","JAJPUR","JHARSUGUDA","KALAHANDI","KANDHAMAL","KENDRAPARA","KEONJHAR","KHORDHA","KORAPUT","MALKANGIRI","MAYURBHANJ","NABARANGPUR","NAYAGARH","NUAPADA","PURI","RAYAGADA","SAMBALPUR","SONEPUR","SUNDARGARH"],
+    match: "none",
+    note: "Values are injected by JS on some pages; if tables come back empty for all districts, skip (needs browser automation — complexity 4 per catalog note).",
+    summary: "Per-district DMF fund collection/expenditure (aggregate)." },
+  { id: "gst-statistics", title: "GST portal statistics downloads", format: "html-list",
+    url: "https://www.gst.gov.in/download/gststatistics", linkRe: "\\.(xlsx|pdf)", match: "none",
+    summary: "Index of GST statistics XLSX files by year/category (listing cached; files fetched on demand)." },
+
+  // ==== Batch H — JSON APIs, R4 (3) — skip silently without DATA_GOV_API_KEY ====
+  { id: "fci-stock", title: "FCI daily food stock position (data.gov.in)", format: "json-api",
+    url: "https://api.data.gov.in/resource/RESOURCE-ID?api-key={key}&format=json&limit=5000",
+    apiKeyEnv: "DATA_GOV_API_KEY", rowsPath: "records", match: "none",
+    note: "Catalog: https://www.data.gov.in/catalog/region-wise-district-wise-commodity-wise-daily-food-stock-position-fci (403s to plain fetch — resolve the UUID in a browser once).",
+    summary: "Region/district/commodity-wise FCI foodgrain stocks (aggregate)." },
+  { id: "pmfby-claims", title: "PMFBY crop-insurance claims (data.gov.in)", format: "json-api",
+    url: "https://api.data.gov.in/resource/RESOURCE-ID?api-key={key}&format=json&limit=5000",
+    apiKeyEnv: "DATA_GOV_API_KEY", rowsPath: "records", match: "none",
+    note: "Catalog: https://www.data.gov.in/resource/stateut-wise-details-claims-paid-under-pradhan-mantri-fasal-bima-yojana-pmfby-and",
+    summary: "State/insurer-wise PMFBY claims vs premium (aggregate)." },
+  { id: "dilrmp-progress", title: "DILRMP land-records digitisation progress (data.gov.in)", format: "json-api",
+    url: "https://api.data.gov.in/resource/RESOURCE-ID?api-key={key}&format=json&limit=5000",
+    apiKeyEnv: "DATA_GOV_API_KEY", rowsPath: "records", match: "none",
+    note: "Catalog: https://www.data.gov.in/resource/state-wise-details-various-components-activities-digital-india-land-records-modernization",
+    summary: "State-wise land-record computerisation progress (aggregate)." },
+
+  // ==== Batch I — GitHub / CKAN CSVs, R6 (6) ====
+  { id: "hp-flood-tenders", title: "HP e-tender corpus (flood-data-ecosystem)", format: "csv",
+    url: "https://raw.githubusercontent.com/CivicDataLab/flood-data-ecosystem-Himachal-Pradesh/main/Sources/TENDERS/data/all_tenders_HP.csv",
+    match: "name", tier: 5, maxRows: 150000,
+    summary: "Every HP govt tender: value, awardee, department, flood-flag, geotag." },
+  { id: "odisha-flood-tenders", title: "Odisha tender corpus (flood-data-ecosystem)", format: "csv",
+    url: "", match: "name", tier: 5, maxRows: 150000,
+    note: "Repo CivicDataLab/flood-data-ecosystem-Odisha → find Sources/TENDERS CSV path via trees API; hard-code raw URL.",
+    summary: "Odisha govt tenders with awardee names (flood-tagged corpus)." },
+  { id: "bihar-flood-tenders", title: "Bihar tender corpus (flood-data-ecosystem)", format: "csv",
+    url: "", match: "name", tier: 5, maxRows: 150000,
+    note: "Repo CivicDataLab/flood-data-ecosystem-Bihar → same trees-API rule.",
+    summary: "Bihar govt tenders with awardee names (flood-tagged corpus)." },
+  { id: "ap-child-treasury", title: "AP child-budget-tagged treasury spend", format: "csv",
+    url: "https://raw.githubusercontent.com/CivicDataLab/child-budget-tracker/develop_0.1/data/processed_data/andhra_pradesh_child_treasury.csv",
+    match: "name", tier: 5, maxRows: 150000,
+    note: "Branch is develop_0.1 (NOT main).",
+    summary: "AP treasury expenditure tagged to child-welfare schemes (payee names)." },
+  { id: "daksh-mappings", title: "DAKSH judicial data mapping tables", format: "csv",
+    url: "", match: "none",
+    note: "CKAN slug on justicehub.in: dakshs-database-on-judicial-data → pick Databaseppln.csv resource (PLAN-L1 Batch C resolution rule).",
+    summary: "eCourts case-type/stage mapping metadata (context for judicial joins)." },
+  { id: "assam-risk-scores", title: "IDS-DRR Assam flood risk scores", format: "csv",
+    url: "https://raw.githubusercontent.com/CivicDataLab/IDS-DRR-Assam-Risk-Model/main/RiskScoreModel/data/risk_score_final_district.csv",
+    match: "none",
+    summary: "District flood-risk model outputs (cross-ref against relief spending)." },
+
+  // ==== Batch J — file downloads, R5 (2) ====
+  { id: "ijr-consumer-2026", title: "IJR Consumer Justice Report 2026", format: "pdf",
+    url: "", match: "none",
+    note: "Find the report PDF href on https://indiajusticereport.org/consumer-justice-report (regex href=\"[^\"]+\\.pdf\"); the interactive dashboard itself is SPA — do not attempt it.",
+    summary: "Consumer courts capacity assessment (aggregate context)." },
+  { id: "cga-monthly", title: "CGA union monthly accounts (index)", format: "html-list",
+    url: "https://cga.nic.in/MonthDashboardReport/Published/list.aspx", linkRe: "\\.(xlsm|xlsx)", match: "none",
+    summary: "Index of monthly union receipts/expenditure/deficit Excel files." },
+
   // ---- Mega-datasets (implemented in server/mega-ingest.js) + 2 true no-ops ----
   { id: "ddl-judicial", title: "DDL Judicial Data (81M cases)", format: null, match: "none",
     mega: true /* implemented in server/mega-ingest.js */ },
@@ -414,6 +658,40 @@ const L1_SOURCES = [
     skipped: "meta-index landing page, no data of its own; its datasets are integrated individually (Batch C)" },
   { id: "civicdatalab-childprotection-hub", title: "CivicDataLab child-protection project hub", format: null, match: "none",
     skipped: "landing page only, no data of its own; CALPRA/PCMA data covered by calpra-cases" },
+
+  // ---- L2 already-covered / rejected ledger (R8) — inert records for full catalogue coverage ----
+  // Covered by existing integrations or PLAN-L1:
+  { id: "kanoon-aicte", title: "Indian Kanoon AICTE regulations/case law", format: null, match: "none",
+    skipped: "query variant of the already-integrated Indian Kanoon fetcher (covers doctypes:judgments after the PLAN-L1 Step 5 edit)" },
+  { id: "ecourts-ddl-justicehub", title: "eCourts Judicial Dataset 2010-2018 (Justice Hub)", format: null, match: "none",
+    skipped: "same underlying data as mega ddl-judicial in server/mega-ingest.js" },
+  { id: "budgets-justice-explorer", title: "Budgets for Justice explorer app", format: null, match: "none",
+    skipped: "data layer covered by mega budgets-for-justice + L1 assam-budget-justice" },
+  { id: "pocso-repo-dup", title: "POCSO case-law repo + Data4Justice (duplicate entry)", format: null, match: "none",
+    skipped: "covered by L1 pocso-judgements and mega pocso-tracking-zip" },
+  { id: "khoj-dup", title: "KHOJ judges dataset (duplicate entry)", format: null, match: "none",
+    skipped: "covered by L1 khoj-judges" },
+  { id: "assam-procurement-dup", title: "Assam Public Procurement Explorer (duplicate entry)", format: null, match: "none",
+    skipped: "covered by mega assam-tenders-ocds" },
+  { id: "obi-explorer", title: "apoorv74/OBI-data-explorer", format: null, match: "none",
+    skipped: "community demo repo — the useful part is the CKAN API pattern, no data of its own" },
+  // Structurally out of scope for stateless fetchers:
+  { id: "tdsat-status", title: "TDSAT case status", format: null, match: "none",
+    skipped: "single-case lookup by case/diary number only, no bulk listing (pattern P22)" },
+  { id: "sec-kerala", title: "SEC Kerala local-body election data", format: null, match: "none",
+    skipped: "time-limited live Trend Portal per election window; needs scheduled election-time runs (pattern P6)" },
+  { id: "gfw-india", title: "Global Forest Watch India API", format: null, match: "none",
+    skipped: "non-government cross-check layer with no name-matchable rows; revisit if an environment-dossier layer is built" },
+  { id: "foscos-recall", title: "FSSAI FoSCoS food recalls", format: null, match: "none",
+    skipped: "POST-driven search on a 2026-launched portal, thin history; revisit in L3 (form-post pattern)" },
+  { id: "nba-programs", title: "NBA accredited programs", format: null, match: "none",
+    skipped: "fragmented per-discipline pages, no named individuals; low investigative value" },
+  { id: "assam-ocmms", title: "Assam OCMMS consent search", format: null, match: "none",
+    skipped: "POST search forms with per-query params (pattern P29) — belongs in the L3 form-post plan" },
+  { id: "wbocmms", title: "WB OCMMS consent search (both catalogue entries)", format: null, match: "none",
+    skipped: "same P29 form-post pattern; post-2023 data migrated to Silpa Sathi — belongs in L3 plan" },
+  { id: "mstc-coal-auctions", title: "MSTC WBMDTCL coal e-auction catalogs", format: null, match: "none",
+    skipped: "static pages with unpredictable numeric IDs; needs a link-crawler — deferred to L3" },
 ];
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop())) {

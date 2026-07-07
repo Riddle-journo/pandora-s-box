@@ -78,6 +78,12 @@ db.exec(`
   );
   -- Claim order: queued & due first, then highest priority, then oldest run_at.
   CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, priority DESC, run_at);
+
+  CREATE TABLE IF NOT EXISTS fetch_runs (
+    id TEXT PRIMARY KEY, source TEXT, politician_id TEXT, ok INTEGER,
+    items INTEGER, ms INTEGER, error TEXT, at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_fetch_runs_src ON fetch_runs(source, at);
 `);
 
 export const id = () => crypto.randomUUID();
@@ -471,6 +477,50 @@ export function listJobs({ status } = {}) {
     ? db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY priority DESC, run_at ASC").all(status)
     : db.prepare("SELECT * FROM jobs ORDER BY priority DESC, run_at ASC").all();
   return rows.map((r) => ({ ...r, payload: safeParse(r.payload) }));
+}
+
+// ---- Fetch-run health tracking ----
+// One row per fetcher per ingestFor() call. This is how the platform notices a
+// scraper has rotted: at 100+ sources, a source that silently returns [] forever
+// is invisible without a per-source runs/success/items ledger.
+export function recordFetchRun({ source, politician_id = null, ok, items = 0, ms = 0, error = null, at = Date.now() } = {}) {
+  const row = {
+    id: id(), source, politician_id: politician_id ?? null, ok: ok ? 1 : 0,
+    items: Number(items) || 0, ms: Number(ms) || 0,
+    error: error != null ? String(error).slice(0, 500) : null,
+    at: Math.round(Number(at) || Date.now()),
+  };
+  db.prepare(`INSERT INTO fetch_runs (id, source, politician_id, ok, items, ms, error, at)
+    VALUES (@id, @source, @politician_id, @ok, @items, @ms, @error, @at)`).run(row);
+  return row;
+}
+
+// Per-source aggregates over the last `days`. Returns one row per source that
+// ran in the window: { source, runs, ok_rate, total_items, last_success_at, last_error }.
+export function sourceHealth(days = 14) {
+  const since = Date.now() - days * 86400000;
+  const rows = db.prepare(`
+    SELECT source,
+      COUNT(*)                                AS runs,
+      SUM(ok)                                 AS oks,
+      SUM(items)                              AS total_items,
+      MAX(CASE WHEN ok = 1 THEN at END)       AS last_success_at
+    FROM fetch_runs WHERE at >= ? GROUP BY source ORDER BY source`).all(since);
+  const lastErrStmt = db.prepare(
+    "SELECT error FROM fetch_runs WHERE source = ? AND ok = 0 AND error IS NOT NULL AND at >= ? ORDER BY at DESC LIMIT 1");
+  return rows.map((r) => ({
+    source: r.source,
+    runs: r.runs,
+    ok_rate: r.runs ? r.oks / r.runs : 0,
+    total_items: r.total_items ?? 0,
+    last_success_at: r.last_success_at ?? null,
+    last_error: lastErrStmt.get(r.source, since)?.error ?? null,
+  }));
+}
+
+export function pruneFetchRuns(olderThanDays = 90) {
+  const cutoff = Date.now() - olderThanDays * 86400000;
+  return db.prepare("DELETE FROM fetch_runs WHERE at < ?").run(cutoff).changes;
 }
 
 // ---- Maintenance / reset helpers ----
