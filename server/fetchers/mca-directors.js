@@ -12,6 +12,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordAssertion } from "../entities.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB = path.join(__dirname, "..", "..", "data", "mca.db");
@@ -58,11 +59,33 @@ export async function fetchMCADirectors(p) {
   if (!candidates.length) return [];
 
   // Score name matches; require ≥0.6 coverage of politician's tokens
-  const matched = candidates
-    .map((c) => ({ c, score: nameScore(p.name, c.name) }))
+  const scored = candidates.map((c) => ({ c, score: nameScore(p.name, c.name) }));
+  const matched = scored
     .filter((x) => x.score >= 0.6)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5); // cap at top 5 DINs to avoid false positives
+
+  // Entity layer (additive — does NOT change what this fetcher returns): record
+  // each identity decision so it can be audited/undone. DIN is a strong id, so a
+  // confident match auto-accepts; the 0.45–0.6 gray zone (otherwise discarded) is
+  // recorded as a proposed token_score assertion for a human to review.
+  const DIR_URL = "https://www.mca.gov.in/mca/html/searchDir.html";
+  try {
+    for (const { c, score } of matched) {
+      recordAssertion({
+        subject_kind: "person", raw_name: c.name, source: "mca_directors",
+        source_ref: c.din != null ? String(c.din) : null, politician_id: p.id,
+        confidence: score, method: c.din ? "strong_id" : "token_score", evidence_url: DIR_URL,
+      });
+    }
+    for (const { c, score } of scored.filter((x) => x.score >= 0.45 && x.score < 0.6)) {
+      recordAssertion({
+        subject_kind: "person", raw_name: c.name, source: "mca_directors",
+        source_ref: c.din != null ? String(c.din) : null, politician_id: p.id,
+        confidence: score, method: "token_score", evidence_url: DIR_URL,
+      });
+    }
+  } catch { /* recording must never break ingestion */ }
 
   if (!matched.length) return [];
 

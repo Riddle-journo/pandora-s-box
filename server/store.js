@@ -84,7 +84,36 @@ db.exec(`
     items INTEGER, ms INTEGER, error TEXT, at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_fetch_runs_src ON fetch_runs(source, at);
+
+  -- Canonical entity layer. Fetchers keep fuzzy-matching names independently, but
+  -- now they also RECORD each identity decision as an assertion, so it can be
+  -- audited, improved, or undone. entities are the resolved canonical records.
+  CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY, kind TEXT, canonical_name TEXT, name_lc TEXT,
+    strong_ids TEXT, created_at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind, name_lc);
+
+  CREATE TABLE IF NOT EXISTS entity_aliases (
+    entity_id TEXT, alias TEXT, alias_lc TEXT, source TEXT,
+    UNIQUE (entity_id, alias_lc)
+  );
+  CREATE INDEX IF NOT EXISTS idx_entity_aliases_lc ON entity_aliases(alias_lc);
+
+  CREATE TABLE IF NOT EXISTS entity_assertions (
+    id TEXT PRIMARY KEY, subject_kind TEXT, raw_name TEXT, source TEXT,
+    source_ref TEXT, politician_id TEXT, entity_id TEXT, confidence REAL,
+    method TEXT, status TEXT, evidence_url TEXT, detector_version TEXT,
+    created_at TEXT, decided_at TEXT, data TEXT,
+    UNIQUE (source, source_ref, raw_name, politician_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_assertions_status ON entity_assertions(status);
+  CREATE INDEX IF NOT EXISTS idx_assertions_src    ON entity_assertions(source, raw_name);
 `);
+
+// Shared connection for the entity layer (server/entities.js) — one DB handle,
+// one schema init, honouring PANDOROS_DB_PATH exactly like every other table here.
+export { db };
 
 export const id = () => crypto.randomUUID();
 

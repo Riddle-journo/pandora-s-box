@@ -11,13 +11,14 @@
 // auto-published. `synthesizeHubs({leads})` is pure/testable; `runSynthesis()`
 // reads the store and upserts.
 import { listLeads, upsertLead } from "./store.js";
+import { normName } from "./entities.js";
 
 const MIN_DISTINCT_ACTORS = 3; // a hub needs ≥3 distinct politicians to be notable
 
 // Normalise a beneficiary label so "X Ethanol Ltd" and "X ETHANOL LTD." collapse.
-function beneficiaryKey(b) {
-  return String(b ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
-}
+// Uses the ONE canonical normalizer (entities.normName) so entity resolution and
+// hub-grouping agree on what counts as "the same" name.
+const beneficiaryKey = (b) => normName(b);
 
 // Group leads by beneficiary; any beneficiary spanning ≥N distinct actors is a hub.
 export function synthesizeHubs({ leads = [] } = {}) {

@@ -16,6 +16,20 @@
 //   SANSAD_DISABLE=1       skip this fetcher entirely
 import { fetchJson, fetchPdfText, mapLimit } from "./http.js";
 import { ministryToSector, textToSector } from "../data/sectors.js";
+import { recordAssertion } from "../entities.js";
+
+// Record the member match as a strong_id assertion (mpsno). Wrapped so a
+// recording failure can never bubble into fetchSansadMP's graceful catch and
+// suppress the parliamentary evidence.
+function assertMember(p, m, house) {
+  try {
+    recordAssertion({
+      subject_kind: "person", raw_name: m.name, source: "sansad_mp",
+      source_ref: String(m.id), politician_id: p.id, confidence: 0.95, method: "strong_id",
+      evidence_url: `https://sansad.in/${house}/members#${m.id}`,
+    });
+  } catch { /* additive only */ }
+}
 
 const LS = "https://sansad.in/api_ls";
 const RS = "https://sansad.in/api_rs";
@@ -294,10 +308,10 @@ export async function fetchSansadMP(p) {
 
   try {
     const lsm = matchMember(p, await lsDirectory());
-    if (lsm) return await scrapeLS(p, lsm);
+    if (lsm) { assertMember(p, lsm, "ls"); return await scrapeLS(p, lsm); }
 
     const rsm = matchMember(p, await rsDirectory());
-    if (rsm) return await scrapeRS(p, rsm);
+    if (rsm) { assertMember(p, rsm, "rs"); return await scrapeRS(p, rsm); }
   } catch { /* graceful: API hiccup → no parliamentary evidence this run */ }
 
   return [];

@@ -9,6 +9,7 @@
 
 import { parseRupees } from "../util/numbers.js";
 import { textToSector } from "../data/sectors.js";
+import { recordAssertion } from "../entities.js";
 
 const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountability research)" };
 
@@ -179,6 +180,17 @@ export async function fetchMyNetaProfile(p) {
   if (pan) lines.push(`INCOME-TAX RETURN HISTORY: ${pan.replace(/^Relation Type PAN Given.*?ITR\s*/i, "")}.`);
 
   if (!lines.length) return [];
+
+  // Entity layer (additive — return value unchanged): the myneta_url is a strong
+  // binding to this politician's ECI record, so record it as an auto-accepted
+  // strong_id assertion. Wrapped so it can never break ingestion.
+  try {
+    recordAssertion({
+      subject_kind: "person", raw_name: p.name, source: "myneta",
+      source_ref: p.myneta_url, politician_id: p.id, confidence: 0.9,
+      method: "strong_id", evidence_url: p.myneta_url,
+    });
+  } catch { /* additive only */ }
 
   // Structured numbers for the deterministic computed-flags layer (analyzer.js).
   // These are parsed ONCE, in code, so downstream arithmetic never relies on the
