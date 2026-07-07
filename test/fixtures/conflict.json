@@ -1,0 +1,55 @@
+{
+  "_note": "Hand-written to match the input shape conflict.js gather() expects: a parliament_ls evidence row carrying numbers.power (question_sectors + ministries), and an eci_affidavit row carrying numbers.election_year/interests/properties. The overlap politician holds a family company in the infrastructure sector while the office's parliamentary attention (questions + a Commerce & Industry ministry, which sectors.js maps to 'infrastructure') concentrates there — the REGULATORY_SELF_DEALING shape. The clean politician's interest sits in an unrelated sector so no overlap lead is emitted.",
+  "overlap": {
+    "politician": { "id": "pol_overlap", "name": "Test Minister", "party": "TestIndependent" },
+    "evidence": [
+      {
+        "source_type": "parliament_ls",
+        "url": "https://sansad.example/member/overlap",
+        "numbers": {
+          "power": {
+            "question_sectors": { "infrastructure": 10 },
+            "ministries": ["Ministry of Commerce and Industry"]
+          }
+        }
+      },
+      {
+        "source_type": "eci_affidavit",
+        "url": "https://eci.example/affidavit/overlap-2019",
+        "numbers": {
+          "election_year": 2019,
+          "interests": [
+            { "sector": "infrastructure", "owner": "spouse", "name": "Test Infratech Pvt Ltd" }
+          ],
+          "properties": []
+        }
+      }
+    ]
+  },
+  "clean": {
+    "politician": { "id": "pol_clean", "name": "Clean Member", "party": "TestIndependent" },
+    "evidence": [
+      {
+        "source_type": "parliament_ls",
+        "url": "https://sansad.example/member/clean",
+        "numbers": {
+          "power": {
+            "question_sectors": { "infrastructure": 10 },
+            "ministries": ["Ministry of Commerce and Industry"]
+          }
+        }
+      },
+      {
+        "source_type": "eci_affidavit",
+        "url": "https://eci.example/affidavit/clean-2019",
+        "numbers": {
+          "election_year": 2019,
+          "interests": [
+            { "sector": "pharma", "owner": "spouse", "name": "Test Pharma Pvt Ltd" }
+          ],
+          "properties": []
+        }
+      }
+    ]
+  }
+}

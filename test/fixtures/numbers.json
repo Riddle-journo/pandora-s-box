@@ -1,0 +1,30 @@
+{
+  "rupees": [
+    { "in": "₹3.45 Cr", "out": 34500000 },
+    { "in": "₹3.45Cr", "out": 34500000 },
+    { "in": "Rs 45 Lac", "out": 4500000 },
+    { "in": "5 Crs", "out": 50000000 },
+    { "in": "Rs 15,23,45,000", "out": 152345000 },
+    { "in": "34.5 lakh", "out": 3450000 },
+    { "in": "2 crore", "out": 20000000 },
+    { "in": "75 thousand", "out": 75000 },
+    { "in": 1000, "out": 1000 },
+    { "in": null, "out": null },
+    { "in": "", "out": null },
+    { "in": "no number here", "out": null }
+  ],
+  "percent": [
+    { "in": "34.3%", "out": 34.3 },
+    { "in": "34.3", "out": 34.3 },
+    { "in": 0.5, "out": 50 },
+    { "in": 50, "out": 50 },
+    { "in": null, "out": null }
+  ],
+  "year": [
+    { "in": "2024", "out": 2024 },
+    { "in": "FY 2022-23", "out": 2022 },
+    { "in": "elected in 2019 term", "out": 2019 },
+    { "in": "no year", "out": null },
+    { "in": null, "out": null }
+  ]
+}

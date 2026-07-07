@@ -12,6 +12,9 @@ import { textToSector, ministryToSector } from "./data/sectors.js";
 import { fundingForParty } from "./data/electoral-bonds.js";
 import { buildRelations } from "./graph.js";
 
+// Detector identity — bump when any threshold/weight/vector changes.
+export const DETECTOR_VERSION = "conflict-v1";
+
 const INFRA_SECTORS = ["transport", "realestate", "infrastructure", "mining"];
 const OWNER_MULT = { self: 3, dependent: 2, spouse: 1, huf: 1 };
 const sev = (s) => (s >= 20 ? "SIGNIFICANT" : s >= 8 ? "NOTABLE" : "UNDER_REVIEW");
@@ -56,7 +59,7 @@ function sameDistrict(a, b) {
 export function detectConflicts(politician, evidence, roster, scandals) {
   const g = gather(evidence);
   const leads = [];
-  const mk = (o) => leads.push({ actor_id: politician.id, actor_name: politician.name, evidence_urls: [], ...o });
+  const mk = (o) => leads.push({ actor_id: politician.id, actor_name: politician.name, evidence_urls: [], detector_version: DETECTOR_VERSION, ...o });
 
   // Power sectors: sectors the office covers = questioned sectors + ministerial
   // portfolios (ministers ANSWER rather than ask, so questions alone miss them).

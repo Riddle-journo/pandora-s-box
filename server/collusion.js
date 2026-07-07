@@ -15,6 +15,9 @@
 // `runCollusion()` gathers the same inputs from the store and upserts the leads.
 import { upsertLead, listPoliticians, listEvidence } from "./store.js";
 
+// Detector identity — bump when any threshold/weight/vector changes.
+export const DETECTOR_VERSION = "collusion-v1";
+
 const sev = (s) => (s >= 20 ? "SIGNIFICANT" : s >= 8 ? "NOTABLE" : "UNDER_REVIEW");
 
 // Address words too generic to prove a shared location — dropped before matching.
@@ -120,6 +123,7 @@ export function detectCollusion({ companies = [], tenders = [] } = {}) {
     const signal_score = 6 + (cl.members.length - 2) * 4; // bigger cluster = stronger
     leads.push({
       vector: "SHARED_CONTROL_CLUSTER", actor_id: null, actor_name: null,
+      detector_version: DETECTOR_VERSION,
       instrument: "shared registered office address",
       beneficiary: cl.id, beneficiary_kind: "company_cluster",
       cluster: cl, signal_score, severity: sev(signal_score),
@@ -144,6 +148,7 @@ export function detectCollusion({ companies = [], tenders = [] } = {}) {
       const signal_score = 14 + (keys.size - 2) * 6;
       leads.push({
         vector: "COLLUSIVE_BIDDING",
+        detector_version: DETECTOR_VERSION,
         actor_id: t.actor_id ?? null, actor_name: t.actor_name ?? null,
         instrument: `tender ${t.tender_id ?? "?"}${t.authority ? ` (${t.authority})` : ""}`,
         beneficiary: cid2, beneficiary_kind: "company_cluster",

@@ -1,0 +1,26 @@
+{
+  "_note": "Alpha and Beta share PIN 110001 and the distinctive address token SUNRISE (ENCLAVE/RAJPATH also shared; BUILDING is generic filler and dropped by the STOP list). They should cluster. Gamma sits in a different PIN and must stay separate.",
+  "companies": [
+    {
+      "name": "Alpha Constructions Pvt Ltd",
+      "cin": "CIN001ALPHA",
+      "pincode": "110001",
+      "registered_address": "12 Sunrise Enclave, Rajpath",
+      "source_url": "https://mca.example/alpha"
+    },
+    {
+      "name": "Beta Infratech Pvt Ltd",
+      "cin": "CIN002BETA",
+      "pincode": "110001",
+      "registered_address": "Sunrise Enclave Building, Rajpath",
+      "source_url": "https://mca.example/beta"
+    },
+    {
+      "name": "Gamma Traders Pvt Ltd",
+      "cin": "CIN003GAMMA",
+      "pincode": "560001",
+      "registered_address": "9 Lotus Towers, MG Road",
+      "source_url": "https://mca.example/gamma"
+    }
+  ]
+}
