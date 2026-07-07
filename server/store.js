@@ -69,6 +69,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_lead_actor  ON investigation_leads(actor_id);
 
   CREATE TABLE IF NOT EXISTS meta ( key TEXT PRIMARY KEY, value TEXT );
+
+  CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY, type TEXT, payload TEXT, status TEXT DEFAULT 'queued',
+    priority INTEGER DEFAULT 0, run_at INTEGER, attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3, last_error TEXT,
+    created_at TEXT, started_at TEXT, finished_at TEXT
+  );
+  -- Claim order: queued & due first, then highest priority, then oldest run_at.
+  CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, priority DESC, run_at);
 `);
 
 export const id = () => crypto.randomUUID();
@@ -380,7 +389,95 @@ export function setMeta(key, value) {
   return value;
 }
 
+// ---- Jobs (minimal SQLite-backed job queue) ----
+// Sequential, single-process worker consumes these. No new deps: claim/complete
+// /fail are plain synchronous better-sqlite3 statements; timing lives in worker.js.
+const safeParse = (s) => { try { return JSON.parse(s); } catch { return {}; } };
+
+// Enqueue a job. Dedup: skip if an IDENTICAL type+payload job is already queued
+// or running (so a re-run of the scheduler/fan-out never piles up duplicates).
+export function enqueueJob({ type, payload = {}, runAt = Date.now(), priority = 0, maxAttempts = 3 } = {}) {
+  const payloadJson = JSON.stringify(payload ?? {});
+  const dupe = db.prepare(
+    "SELECT id FROM jobs WHERE type = ? AND payload = ? AND status IN ('queued','running') LIMIT 1"
+  ).get(type, payloadJson);
+  if (dupe) return { id: dupe.id, deduped: true };
+  const row = {
+    id: id(), type, payload: payloadJson, status: "queued",
+    priority: Number(priority) || 0, run_at: Math.round(Number(runAt) || Date.now()),
+    attempts: 0, max_attempts: Number(maxAttempts) || 3, last_error: null,
+    created_at: new Date().toISOString(), started_at: null, finished_at: null,
+  };
+  db.prepare(`INSERT INTO jobs
+    (id, type, payload, status, priority, run_at, attempts, max_attempts, last_error, created_at, started_at, finished_at)
+    VALUES (@id,@type,@payload,@status,@priority,@run_at,@attempts,@max_attempts,@last_error,@created_at,@started_at,@finished_at)`).run(row);
+  return { id: row.id, deduped: false };
+}
+
+// Atomically flip the single best-eligible queued job to 'running' and return it.
+// One UPDATE ... WHERE id = (SELECT ...) RETURNING is atomic in SQLite, so two
+// sequential claims can never hand back the same row.
+const claimStmt = db.prepare(`
+  UPDATE jobs SET status = 'running', started_at = @ts, attempts = attempts + 1
+  WHERE id = (
+    SELECT id FROM jobs WHERE status = 'queued' AND run_at <= @now
+    ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1
+  )
+  RETURNING *`);
+export function claimNextJob(now = Date.now()) {
+  const row = claimStmt.get({ ts: new Date().toISOString(), now });
+  return row ? { ...row, payload: safeParse(row.payload) } : null;
+}
+
+// Non-mutating look at the next claimable job (worker uses it to gate on rate
+// budget before claiming). Same ordering as claimNextJob.
+const peekStmt = db.prepare(
+  "SELECT * FROM jobs WHERE status = 'queued' AND run_at <= ? ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1");
+export function peekNextJob(now = Date.now()) {
+  const row = peekStmt.get(now);
+  return row ? { ...row, payload: safeParse(row.payload) } : null;
+}
+
+export function completeJob(id) {
+  db.prepare("UPDATE jobs SET status = 'done', finished_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+  return { id, status: "done" };
+}
+
+// Fail a job: requeue with exponential backoff, or dead-letter once its attempts
+// have reached max_attempts. attempts is incremented at CLAIM time, so here it
+// already reflects the number of tries made.
+export function failJob(id, err) {
+  const job = db.prepare("SELECT attempts, max_attempts FROM jobs WHERE id = ?").get(id);
+  if (!job) return null;
+  const msg = String(err?.stack ?? err?.message ?? err ?? "").slice(0, 4000);
+  if (job.attempts >= job.max_attempts) {
+    db.prepare("UPDATE jobs SET status = 'dead', last_error = ?, finished_at = ? WHERE id = ?")
+      .run(msg, new Date().toISOString(), id);
+    return { id, status: "dead", attempts: job.attempts };
+  }
+  const runAt = Date.now() + 60_000 * 2 ** job.attempts;
+  db.prepare("UPDATE jobs SET status = 'queued', last_error = ?, run_at = ?, started_at = NULL WHERE id = ?")
+    .run(msg, runAt, id);
+  return { id, status: "queued", attempts: job.attempts, run_at: runAt };
+}
+
+export function getJob(idOrNull) {
+  const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(idOrNull);
+  return row ? { ...row, payload: safeParse(row.payload) } : null;
+}
+
+export function listJobs({ status } = {}) {
+  const rows = status
+    ? db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY priority DESC, run_at ASC").all(status)
+    : db.prepare("SELECT * FROM jobs ORDER BY priority DESC, run_at ASC").all();
+  return rows.map((r) => ({ ...r, payload: safeParse(r.payload) }));
+}
+
 // ---- Maintenance / reset helpers ----
+export function deleteAllJobs() {
+  return db.prepare("DELETE FROM jobs").run().changes;
+}
+
 export function deleteAllReports() {
   return db.prepare("DELETE FROM reports").run().changes;
 }

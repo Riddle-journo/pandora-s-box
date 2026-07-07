@@ -9,6 +9,8 @@
     "seed": "node server/seed.js",
     "generate": "node server/report-generator.js",
     "ingest": "node server/ingest.js",
+    "worker": "node server/worker.js",
+    "worker:once": "node server/worker.js --once",
     "test": "node --test test/*.test.js"
   },
   "engines": {
