@@ -1,0 +1,1073 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-07-07T22:00:00+05:30",
+  "patterns": [
+    {
+      "pattern_id": "P1",
+      "pattern_name": "Static bulk file/table download (no auth, no JS)",
+      "description": "Government or PSU pages exposing directly downloadable files (XLSX/PDF) or a simple server-rendered HTML table with no pagination barriers, no session/CAPTCHA, and no JS rendering. Lowest-complexity acquisition: direct HTTP GET plus HTML/table parsing.",
+      "typical_website_characteristics": "Single static page or direct file link; small dataset; infrequent updates; no rate limiting observed",
+      "common_technologies": "requests/httpx + BeautifulSoup or pandas.read_html; openpyxl for XLSX",
+      "typical_data_formats": "XLSX, PDF, static HTML table",
+      "common_obstacles": "Dataset may be thin per-source (value comes from aggregating many similarly-structured sites); occasional URL/path drift between site redesigns",
+      "general_acquisition_strategy": "Direct HTTP fetch of the file or page, parse table/structured content, schedule periodic re-pull to detect changes; for PSU blacklist-style sites, build one config-per-site scraper using a shared table-extraction template since structure varies across agencies.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "RBI List of Registered NBFCs (including HFCs and ARCs)",
+        "REC (Rural Electrification Corp) List of Banned Firms",
+        "Ministry of Panchayati Raj — Status of Panchayat Elections in PRIs"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P2",
+      "pattern_name": "Paginated HTML table + linked PDF document scrape (no auth)",
+      "description": "Multi-page HTML listing (tens to hundreds of pages) where each row links to a PDF (order, announcement, judgment) that must be separately downloaded and text-extracted/OCR'd for the substantive content not present in the table itself.",
+      "typical_website_characteristics": "No CAPTCHA/login; pagination via URL params or POST; PDFs vary in size/format and sometimes are scanned images",
+      "common_technologies": "requests + BeautifulSoup for pagination; pdfplumber/PyMuPDF for text PDFs; Tesseract OCR for scanned PDFs",
+      "typical_data_formats": "HTML tables, PDF (text or scanned)",
+      "common_obstacles": "No bulk export/API; large page counts require crawl-state/resume handling; substantive findings often buried in PDF prose requiring extraction beyond table metadata; occasional stale/thin sections requiring redirecting to richer subsections of the same domain",
+      "general_acquisition_strategy": "Iterate pagination to collect row metadata and PDF links, queue PDF downloads, run text-extraction (OCR fallback), and join back to row metadata by case/order ID.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "IBBI Public Announcements of CIRP",
+        "IBBI Disciplinary Orders (Insolvency Professionals & Agencies)",
+        "Directorate of Supplies & Disposals Haryana - Debarred/Blacklisted Firms",
+        "SFIO Investigation & Prosecution Records"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P3",
+      "pattern_name": "ASP.NET/NIC session-based government portal search (form/viewstate, no CAPTCHA)",
+      "description": "Government portals (often NIC-hosted) requiring POST submission with session cookies and/or ASP.NET __VIEWSTATE hidden tokens to run a search, without CAPTCHA gating, sometimes needing per-bench/per-state/per-organisation iteration.",
+      "typical_website_characteristics": "Requires maintaining session/cookies across request chain; results paginated; some sites use encrypted/signed URL tokens for drill-down; multi-instance structure (many benches/states/organisations) needing iteration for full coverage",
+      "common_technologies": "requests.Session with cookie/viewstate handling, or lightweight headless browser (Playwright) if pure HTTP replication proves brittle",
+      "typical_data_formats": "Server-rendered HTML result tables, linked PDF orders/tender documents",
+      "common_obstacles": "Session/token expiry requiring re-auth mid-crawl; signed navigation parameters (e.g. sp= tokens) that may expire; deep drill-down needed for award/contractor-level detail; site-declared data-quality caveats for free-text search; no documented bulk API",
+      "general_acquisition_strategy": "Reverse-engineer the POST form (capture viewstate/session tokens via an initial GET), replay searches per bench/state/org, paginate results, and follow drill-down links for full detail, respecting rate limits.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Indian Patent Advanced Search System (InPASS)",
+        "NCLT Order Date-wise / Case-wise Search",
+        "NHAI Tenders and Contract Awards (via Central eProcurement)",
+        "Defence e-Procurement Portal (DEFPROC)",
+        "Indian Railways e-Procurement System (IREPS)",
+        "Maharashtra eProcurement (MahaTenders)",
+        "TDSAT (Telecom Disputes Settlement & Appellate Tribunal) Case Status"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P4",
+      "pattern_name": "CAPTCHA-gated multi-step form scraping (tribunal/court case search)",
+      "description": "Court and tribunal portals requiring per-query CAPTCHA solving before a case-search form can be submitted, then parsing result HTML and following into per-case PDF orders/judgments. Common across the eCourts/tribunal ecosystem.",
+      "typical_website_characteristics": "CAPTCHA on every search submission; per-bench/per-court iteration (dozens of benches nationally); judgments/orders delivered as PDF requiring text extraction/OCR; some sites add WAF/bot-detection beyond CAPTCHA",
+      "common_technologies": "Playwright/Puppeteer headless browser, 2Captcha or similar CAPTCHA-solving service, pdfplumber/OCR for judgment text, session/cookie persistence",
+      "typical_data_formats": "HTML result tables/detail pages, PDF judgments and orders",
+      "common_obstacles": "CAPTCHA blocks all automated bulk querying without a solving step; per-bench/per-court structural variance multiplies engineering effort; WAF/bot-detection (e.g. Supreme Court site returning 403 to plain fetch) may require realistic browser fingerprints; rate-limiting/IP blocking risk at scale; need seed dictionaries of party names/case types to drive queries",
+      "general_acquisition_strategy": "Use headless browser automation with an integrated CAPTCHA-solving service to submit searches (iterating over benches and query dictionaries), parse result tables, follow into per-case detail/order pages, and batch-download+OCR PDFs; add rate-limiting/backoff to avoid IP bans.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "eCourts Case Status Services (District Courts)",
+        "eCourts High Court Services (hcservices)",
+        "Supreme Court of India - Case Status & Judgments",
+        "NCLT (National Company Law Tribunal) Case Details & Cause Lists",
+        "NCLAT e-Filing Portal (Case Status, Judgments, Daily Orders)",
+        "National Green Tribunal (NGT) Case Status & e-Filing",
+        "Securities Appellate Tribunal (SAT) Case Status",
+        "Income Tax Appellate Tribunal (ITAT) Case Status & Orders"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P5",
+      "pattern_name": "JS-SPA hidden-API discovery via browser automation",
+      "description": "Portals rendered entirely client-side (React/Angular-style SPA) where static HTTP fetch returns no usable content; requires a real browser session to render the app and inspect network traffic to find the underlying JSON/REST or AJAX endpoints actually serving the data.",
+      "typical_website_characteristics": "No content in raw HTML/static fetch; data loaded via XHR/fetch calls after page load; often dropdown/filter-driven UI requiring interaction sequences to trigger requests",
+      "common_technologies": "Playwright/Puppeteer with network-request interception (devtools protocol) to capture XHR/fetch calls, then direct requests to the discovered JSON endpoints for bulk pulls",
+      "typical_data_formats": "JSON API responses (once discovered)",
+      "common_obstacles": "No documented public API despite open-data mandates; endpoint discovery requires live browser inspection (not possible via static WebFetch tools); UI interaction sequences (dropdown selects) needed to trigger each data request; full coverage may require iterating many filter combinations (e.g. per constituency/district)",
+      "general_acquisition_strategy": "Load the SPA in a headless browser, intercept network requests while exercising the UI's filters/navigation, identify the stable JSON/REST endpoints, then replicate those calls directly via HTTP for efficient bulk extraction, bypassing the browser for subsequent runs where possible.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "Central Administrative Tribunal (CAT) Case Status",
+        "e-Jagriti / CONFONET (Consumer Disputes Redressal - NCDRC network)",
+        "National Judicial Data Grid (NJDG) - District & Taluka Courts",
+        "CEO Punjab Election Reporting Portal — Candidate Dashboard"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P6",
+      "pattern_name": "PDF archive scrape with tabular/text extraction, cross-referenced to existing structured dataset",
+      "description": "Sources exposing an archive/listing of PDFs (often behind a JS-rendered index page) containing tabular or narrative data (financial disclosures, election results, donor reports) that must be parsed and then joined against an existing structured dataset already held by the project (e.g. MyNeta candidate data) for cross-referencing/anomaly detection.",
+      "typical_website_characteristics": "Archive/listing page sometimes JS-rendered (blocking plain fetch) while actual files are static PDFs; PDF layout varies by publisher/year making table extraction non-uniform; downstream value depends on entity-matching against an existing dataset already in the project",
+      "common_technologies": "Browser automation or direct file-archive endpoint discovery to bypass JS index; layout-aware PDF table extractors (camelot/pdfplumber), OCR fallback; fuzzy-matching (e.g. name/PAN reconciliation) against existing project datasets",
+      "typical_data_formats": "PDF (tabular financial/electoral data, sometimes scanned), underlying file-archive endpoints",
+      "common_obstacles": "Index/listing UI often JS-rendered requiring endpoint discovery or browser automation even though target files are static; inconsistent PDF formatting across issuing bodies/years defeats generic table parsers; some data structurally invisible (e.g. below-disclosure-threshold donations); TLS/cert issues on some state sites; time-limited 'live' portals only available during election windows requiring scheduled runs",
+      "general_acquisition_strategy": "Discover the underlying file archive/API behind the JS index (or use browser automation as fallback), bulk-download PDFs, run layout-aware extraction with OCR fallback, then fuzzy-match extracted entities against the project's existing structured dataset(s) to surface anomalies.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Contribution Reports of Political Parties (ECI)",
+        "State Election Commission Maharashtra (SECM) — Local Body Election Data",
+        "State Election Commission Kerala (SEC Kerala) — Local Body Election Data",
+        "State Election Commission Punjab (SEC Punjab) — Local Body Election Data",
+        "Form 20 — Final Constituency/Booth-wise Result Sheets (ECI)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P7",
+      "pattern_name": "Paid/registration-gated lookup (manual/targeted use only)",
+      "description": "Portal requiring account registration and/or a per-query fee, making bulk automated scraping impractical or against terms; best used as a manual verification tool for specific high-value leads rather than a bulk acquisition source.",
+      "typical_website_characteristics": "Login-gated; per-search monetary cost; low query volume feasible",
+      "common_technologies": "Manual browser session or semi-automated form-fill with stored credentials",
+      "typical_data_formats": "HTML lookup result / certificate PDF",
+      "common_obstacles": "Cost scales linearly with queries preventing bulk use; credentials/account management required; possible ToS restrictions on automation",
+      "general_acquisition_strategy": "Treat as a manual/semi-automated verification step triggered selectively for specific entities already flagged by other sources, rather than a bulk crawl target.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "CERSAI Public Search"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P8",
+      "pattern_name": "Aggregate-only public dashboard requiring RTI escalation for granular data",
+      "description": "Public-facing portal exposes only rolled-up statistics/press-release-level data; the granular record-level data needed for investigative use is withheld and must be obtained via a formal Right to Information (RTI) request, an inherently manual, non-automatable step.",
+      "typical_website_characteristics": "Periodic aggregate stat releases (bulletins/press releases); no record-level public export",
+      "common_technologies": "Simple scrape/monitor of PIB and ECI bulletin pages; manual RTI filing workflow",
+      "typical_data_formats": "PDF/HTML press bulletins",
+      "common_obstacles": "Granular data structurally unavailable without RTI; RTI responses are slow, manual, and non-deterministic in format",
+      "general_acquisition_strategy": "Automate monitoring/scraping of the aggregate bulletins for trend leads, and pair with a manual RTI-filing workflow to escalate for constituency/record-level detail when a lead warrants it.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "cVIGIL Portal (ECI) — Real-time Election Violation Reporting"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P9",
+      "pattern_name": "Existing integration query-variant reuse",
+      "description": "A newly identified need that is fully served by parameterizing an already-built integration/scraper with a new query rather than building new acquisition infrastructure.",
+      "typical_website_characteristics": "No new engineering surface; differs only in query parameters passed to existing code",
+      "common_technologies": "Reuse of existing scraper/client code",
+      "typical_data_formats": "Same as parent integration (typically HTML/JSON search results)",
+      "common_obstacles": "None beyond what already applies to the base integration",
+      "general_acquisition_strategy": "Add the new query string/filter to the existing integration's call sites; no new scraper needed.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "Indian Kanoon NGT judgments listing (supplementary cross-check)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P10",
+      "pattern_name": "JS SPA with hidden REST/JSON API",
+      "description": "Government portal renders via client-side JavaScript with no server-side HTML content. The actual data lives behind XHR/fetch calls to a REST or JSON API that must be discovered via browser DevTools network capture (or headless browser automation), then called directly to retrieve structured records — often bypassing the need to render the UI at all once the endpoint and params are mapped.",
+      "typical_website_characteristics": "Angular/React/Vue SPA shell; empty or minimal HTML on plain fetch; data populated post-load via AJAX calls to a JSON API on a separate path/subdomain; sometimes DOM elements with IDs that are later filled from JS-fetched JSON (indicating a discoverable endpoint even without full browser automation).",
+      "common_technologies": "Chrome DevTools network tab, Playwright/Puppeteer for capture and later scripted calls, requests/httpx once endpoint is mapped",
+      "typical_data_formats": "JSON via XHR/fetch, occasionally paginated with query params (state, district, date range, proposal ID, etc.)",
+      "common_obstacles": "Endpoint/params not documented and must be reverse-engineered; may require auth headers, tokens, or session cookies picked up from the browser session; some portals gate the endpoint behind a registered API key on a separate catalog (e.g., data.gov.in) rather than the dashboard itself; site may be newly relaunched and still changing structure.",
+      "general_acquisition_strategy": "Load the target page in a real or headless browser, open DevTools/network capture, interact with search/filter UI to trigger the real data XHR calls, inspect request/response shape and required params, then replicate those calls directly via a script (requests/httpx) for bulk/automated retrieval — falling back to full Playwright-driven UI automation only if the API requires session state that can't be replicated statelessly.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "PARIVESH 2.0 - Environment, Forest, Wildlife & CRZ Clearance Portal",
+        "CPCB Real-Time Air Quality / Central Control Room (CAAQMS network)",
+        "CPCB OCEMS - Online Continuous Emission & Effluent Monitoring System",
+        "NHAI Data Lake 2.0/3.0 GIS Dashboard (PMS)",
+        "CEA Distribution Policy & Monitoring - UPADHI portal",
+        "Odisha DMF (District Mineral Foundation) Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P11",
+      "pattern_name": "Legacy stateful portal requiring browser automation (ASP.NET/JSP/Struts postback, CAPTCHA, or bot-detection)",
+      "description": "Older government portals built on server-side postback frameworks (ASP.NET WebForms __VIEWSTATE, Java Struts jsessionid, legacy JSP) or protected by CAPTCHA/bot-detection (Cloudflare, JS interstitials). No stateless HTTP scraping is possible; the only reliable path is full headless-browser automation (Playwright/Selenium) that maintains session/form state across multi-step navigation to reach and page through search results or document listings.",
+      "typical_website_characteristics": "Server-rendered forms with hidden ViewState/EventValidation tokens or jsessionid-bearing URLs; multi-step drill-down navigation (state > district > taluka > village) required before reaching data; sometimes fronted by Cloudflare/bot-detection returning 403 on plain fetch, or a CAPTCHA field on the search form; old jQuery/legacy UI libraries signal fragile infrastructure.",
+      "common_technologies": "Playwright/Selenium with persistent browser context/cookies, form-submission automation, PDF parsing for downloaded documents",
+      "typical_data_formats": "Server-rendered HTML tables/cards per search result, occasionally downloadable PDF certificates or reports per record",
+      "common_obstacles": "CAPTCHA presence blocks full automation (solving prohibited); ViewState/session tokens must be extracted and replayed per request; drill-down structure means no free-text/bulk search — a seed list of target districts/villages/survey numbers is needed; invalid TLS certs on some instances; unclear whether the NIC-hosted instance still holds current data vs. having been superseded by a state-specific portal.",
+      "general_acquisition_strategy": "Drive the site with a headless browser to preserve session/postback state across steps; script the drill-down or search-form submission with known seed values (district/survey number/etc.); scrape resulting HTML tables and follow through to any linked PDF documents for download and parsing; treat CAPTCHA-gated forms as a hard blocker to flag rather than bypass.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "e-Green Watch (CAMPA Compensatory Afforestation Fund Monitoring)",
+        "Chhattisgarh Khanij Online",
+        "Online Consent Management & Monitoring System (OCMMS)",
+        "IGRS Telangana (Registration & Stamps, EC Search)",
+        "IGRS Uttar Pradesh (Stamp and Registration Department)",
+        "AnyROR Gujarat (Any Records of Rights / e-Dhara)",
+        "Rajasthan RERA Project Search",
+        "MSTC Coal Block Auction Portal",
+        "MSTC Critical Mineral Block Auction Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P12",
+      "pattern_name": "PDF-only report archive requiring extraction pipeline",
+      "description": "Government body publishes its substantive data (financial tables, investigation findings, compensation records, performance reports) only as periodic or per-case PDF documents rather than through any structured database or API. Acquisition requires enumerating/crawling the document index, bulk-downloading PDFs, and running text/table extraction (and OCR for scanned/typewritten documents) to produce structured data.",
+      "typical_website_characteristics": "Document index/listing page (sometimes paginated) linking to individual or multi-year PDF reports; tables often span multiple pages with repeating headers; older documents may be scanned images rather than text-layer PDFs; naming conventions inconsistent, complicating categorization.",
+      "common_technologies": "curl/requests for bulk download (sometimes needing relaxed TLS/cert handling), pdfplumber/tabula/camelot for table extraction, OCR (Tesseract or LLM-vision) for scanned documents, predictable URL/path patterns for multi-year enumeration",
+      "typical_data_formats": "PDF (text-layer tables, narrative reports, or scanned images requiring OCR)",
+      "common_obstacles": "No CSV/API/bulk export exists; multi-page tables with repeated headers complicate parsing; scanned/typewritten pre-digital documents need OCR with possible resolution issues; inconsistent file naming prevents simple categorization and may require full-text search or manual/LLM classification; TLS certificate chain issues on some legacy hosts trip strict fetchers.",
+      "general_acquisition_strategy": "Crawl/paginate the document listing to build a complete index of report URLs (using predictable path patterns across years where possible), bulk-download all PDFs, then run text-layer extraction or OCR plus table-structure parsing to normalize into structured records; stitch multi-year/multi-report data into a longitudinal dataset since no single consolidated file exists.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "National Green Tribunal (NGT) - Judgments/Orders and Compliance Reports",
+        "MoSPI PAIMANA (Project Monitoring)",
+        "Aircraft Accident Investigation Bureau (AAIB) India",
+        "PFC Report on Performance of Power Utilities (Annual Integrated Rating)",
+        "DDA Land Acquisition Awards & Scanned Land Ledgers",
+        "Ministry of Ports, Shipping & Waterways - Basic Port Statistics"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P13",
+      "pattern_name": "Public REST/JSON API requiring registration key (data.gov.in / official open-data catalogs)",
+      "description": "A government-run open-data catalog (chiefly api.data.gov.in / data.gov.in) exposes a documented, versioned REST/JSON API for bulk or filtered retrieval, but unauthenticated requests are rejected ('Authorization field missing' / 403) — a free registered API key is the realistic acquisition path rather than scraping any dashboard front-end.",
+      "typical_website_characteristics": "Documented resource catalog with dataset IDs, JSON responses, pagination/filter query params; distinct from the JS dashboard that may front the same underlying data.",
+      "common_technologies": "requests/httpx with API key in query string or Authorization header",
+      "typical_data_formats": "JSON (sometimes CSV/XML alternates) via versioned REST endpoints",
+      "common_obstacles": "Requires user registration and a personal/organizational API key before any request succeeds; rate limits and per-key quotas may apply; dataset availability/freshness on the catalog can lag or diverge from the live dashboard.",
+      "general_acquisition_strategy": "Register for a free data.gov.in API key, identify the correct resource/dataset ID for the target data, and call the documented REST endpoint directly with the key rather than attempting to scrape or reverse-engineer the associated JS dashboard.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "PARIVESH 2.0 - Environment, Forest, Wildlife & CRZ Clearance Portal",
+        "CPCB Real-Time Air Quality / Central Control Room (CAAQMS network)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P14",
+      "pattern_name": "Server-rendered paginated HTML registry (large table/DataTables scrape)",
+      "description": "Portal serves the full or near-full dataset as server-rendered HTML (often via DataTables or plain paginated tables) without requiring JS execution to see the underlying rows, though pagination/sorting may be client-side. Straightforward HTTP GET plus HTML table parsing is sufficient, with volume (many pages or one very large payload) being the main scaling concern.",
+      "typical_website_characteristics": "Consistent card/table layout per record; either paginated across thousands of pages or delivered as one very large single-page HTML payload with an embedded DataTable; per-record detail pages may carry additional fields (complaint history, concessionaire names) not present in the listing view.",
+      "common_technologies": "requests/BeautifulSoup or lxml for HTML table parsing, simple pagination loops with rate-limiting",
+      "typical_data_formats": "Server-rendered HTML tables/cards, occasionally linked PDFs for deeper detail",
+      "common_obstacles": "High page/record volume requires careful rate-limiting and resumability; no bulk export/API means every field must be scraped from HTML; some investigatively valuable fields (e.g., concessionaire/SPV names) may only appear on per-record detail pages requiring a second crawl pass; large single-page payloads (multi-MB) need efficient parsing; terms of use should be checked before large-scale scraping.",
+      "general_acquisition_strategy": "Directly HTTP GET the listing pages (paginated or single large page), parse the embedded HTML table/DataTable with a standard HTML parser, and follow per-record detail-page links where richer fields are needed — no browser automation required since content is server-rendered.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "MahaRERA (Maharashtra Real Estate Regulatory Authority) Project Search",
+        "PPP in India (DEA) - PPP Project Database (all_infrastructure_projects)",
+        "Punjab Mineral Sale Management and Monitoring System (Sand Portal)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P15",
+      "pattern_name": "Gated dashboard with public aggregates only, granular data behind login",
+      "description": "Portal's landing pages and dashboards expose only aggregate/summary statistics publicly; record-level or transactional detail is confirmed or strongly suspected to sit behind a login-gated subsystem, membership portal, or Digital Signature Certificate requirement, making the source low-value or requiring credentials to unlock its real investigative content.",
+      "typical_website_characteristics": "Public-facing dashboard or landing page shows only national/state-level totals or informational content; links or references point to a separate authenticated subdomain/system (consumer portal, DSC-gated auction system, MeriPehchaan SSO) where the granular data actually lives; sometimes the deeper portal URL isn't even discoverable from the public page.",
+      "common_technologies": "Browser automation to confirm dashboard structure; credential/SSO handling would be needed for the gated layer (out of scope without legitimate access)",
+      "typical_data_formats": "Aggregate dashboard stats (HTML/JS-rendered) publicly; structured record-level data presumed JSON/DB behind login",
+      "common_obstacles": "No visible public API or bulk export; unclear whether any public read-only view exists beyond aggregates without deeper reconnaissance; authentication requirement (login, DSC, SSO) is a hard wall for the highest-value data; may duplicate data already available from another already-integrated source with less friction.",
+      "general_acquisition_strategy": "Treat the public dashboard as low-value aggregate-only; before investing engineering effort, do a reconnaissance pass (browser automation) to confirm whether any public read-only detail view exists; if the valuable data is confirmed login-gated, deprioritize unless legitimate credentialed access is available, and prefer any redundant already-accessible source instead.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "Maharashtra Pollution Control Board Online CEMS (MPCB)",
+        "National Power Portal (NPP) India",
+        "CEA DRIPS Portal (Disaster Resilient Infrastructure for Power Sector)",
+        "DoT Gati Shakti Sanchar Portal - Right of Way (RoW) Permissions",
+        "MSTC Critical Mineral Block Auction Portal"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P16",
+      "pattern_name": "Government Excel/PDF Report Portal (static download + parse)",
+      "description": "Government publishes periodic statistical/financial reports as downloadable Excel or PDF files on a relatively static (non-JS) page. Acquisition is a direct HTTP(S) download (sometimes requiring a browser User-Agent or -k for TLS cert issues) followed by offline parsing with pandas/openpyxl for Excel or pdftotext/pdfplumber for PDF. No login or heavy JS rendering needed for the files themselves, though locating the correct per-year/per-statement URLs often requires crawling an index/archive page first.",
+      "typical_website_characteristics": "Static or lightly dynamic government page with links to downloadable Excel/PDF files, organized by year/statement/category; index page must be crawled to enumerate file URLs since there is rarely a single stable API endpoint.",
+      "common_technologies": "curl/requests with browser User-Agent, pandas, openpyxl, pdfplumber/pdftotext, BeautifulSoup for index-page link enumeration",
+      "typical_data_formats": "xlsx, xlsm, csv, pdf (text-based, occasionally scanned)",
+      "common_obstacles": "Default fetch tools blocked by bot-protection (403) requiring browser UA spoofing; TLS certificate verification failures requiring -k or proper CA bundle; files fragmented per year/statement/category requiring a crawler to assemble a unified longitudinal dataset; older years may lack machine-readable formats (PDF only); large file sizes requiring robust PDF table extraction rather than simple text scraping.",
+      "general_acquisition_strategy": "Crawl the index/archive page(s) to enumerate all per-year/per-category file URLs, download each file directly via HTTP with appropriate headers (and TLS workarounds if needed), then parse with the relevant library (pandas/openpyxl for Excel, pdfplumber/pdftotext for PDF) into a unified structured dataset.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "RBI State Finances: A Study of Budgets",
+        "CGA Union Government Monthly Accounts Dashboard",
+        "India Budget - Expenditure Profile & Demands for Grants (allsbe.pdf)",
+        "GST Portal Statistics Download",
+        "Public Enterprises Survey (PE Survey Reports)",
+        "16th Finance Commission Report Data (PRS India Summary)",
+        "AISHE (All India Survey on Higher Education) Data Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P17",
+      "pattern_name": "State HTML Table with Year/Category Selector (dropdown-driven scrape)",
+      "description": "A government or regulatory site renders a data table in plain HTML but requires selecting a year/category/state from a dropdown (simple GET or POST per selection) to view results. No heavy JS rendering or authentication is needed; a scraper iterates the selector values and parses each resulting HTML table.",
+      "typical_website_characteristics": "Static HTML tables behind a dropdown/filter/tab selector; straightforward pagination; no bulk CSV/API export typically available.",
+      "common_technologies": "requests + BeautifulSoup, simple GET/POST parameter iteration",
+      "typical_data_formats": "HTML tables",
+      "common_obstacles": "No bulk export endpoint, requiring iteration over every selector value (year/state/category/tab); metadata on the page itself can be thin, limiting investigative depth without cross-referencing external registries.",
+      "general_acquisition_strategy": "Enumerate all dropdown/filter/tab values, issue one GET/POST request per value, and parse the resulting HTML table(s) into structured rows.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "DIPAM Disinvestment Receipts",
+        "UGC List of Fake/Blacklisted Universities and Defaulter HEIs",
+        "FSSAI Food Import Rejection Alert (FIRA) Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P18",
+      "pattern_name": "JS-Rendered SPA / Dashboard Requiring Browser Automation or Hidden-API Discovery",
+      "description": "The data lives behind a client-side-rendered single-page application or Tableau/BI-style dashboard where static fetch tools return only an empty shell or page title. Acquisition requires headless browser automation (Playwright/Selenium) to render the page and either scrape the rendered DOM or, preferably, intercept the underlying XHR/JSON API or Tableau vizql endpoint the frontend calls for direct structured access.",
+      "typical_website_characteristics": "Modern JS framework frontend or embedded BI dashboard (Tableau Public); WebFetch/static tools return empty body or title-only; actual data delivered via internal REST/GraphQL or vizql session-based API calls.",
+      "common_technologies": "Playwright/Selenium headless browser, network tab / HAR inspection to reverse-engineer API calls, Tableau Public vizql data endpoints",
+      "typical_data_formats": "JSON via internal API once discovered; otherwise rendered HTML/DOM",
+      "common_obstacles": "No browser automation tool available in some sessions, blocking confirmation of actual fields/record counts; sites may silently rename/redirect URLs; some sub-portals require session/token handling once the API is found; aggregate dashboards may not expose the specific granular investigative angle sought (e.g., per-institution deficiency history) and may require a separate PDF-based sub-investigation.",
+      "general_acquisition_strategy": "Use headless browser automation to render the SPA/dashboard, capture network requests to identify the underlying JSON API or vizql/session-based data endpoint, then call that endpoint directly (with any required session/token handling) for structured bulk extraction; fall back to DOM scraping of rendered content if no API is discoverable.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "AICTE Institutions Approval Dashboard (facilities.aicte-india.org)",
+        "Vidya Samiksha Kendra (VSK) State Dashboards",
+        "Ayushman Bharat Digital Mission (ABDM) National Health Providers Registry (NHPR)",
+        "Central Foodgrains Procurement Portal (CFPP)",
+        "Maharashtra Food, Civil Supplies and Consumer Protection Dept - PDS Portal (Tableau dashboards)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P19",
+      "pattern_name": "ASP.NET WebForms Postback Scraper (VIEWSTATE + form simulation)",
+      "description": "Legacy Indian government portals built on ASP.NET WebForms use __VIEWSTATE/__EVENTVALIDATION postback mechanics for filter selectors (state/commodity/date), defeating simple GET-based scraping. Requires either full headless browser automation or reverse-engineering the POST request including hidden VIEWSTATE tokens.",
+      "typical_website_characteristics": "ASP.NET WebForms UI with dropdown-driven postback forms; JS-heavy rendering that returns empty body/title on static fetch.",
+      "common_technologies": "Playwright/Selenium, or requests session replicating VIEWSTATE/EVENTVALIDATION POST fields (existing open-source scrapers demonstrate the pattern)",
+      "typical_data_formats": "HTML tables rendered post-form-submission",
+      "common_obstacles": "VIEWSTATE/postback mechanics block simple GET scraping; JS-heavy rendering defeats static WebFetch; session handling and rate-limiting workarounds needed.",
+      "general_acquisition_strategy": "Either drive the form via headless browser automation (fill selectors, submit, scrape resulting table) or capture and replicate the raw POST request with correct VIEWSTATE/EVENTVALIDATION hidden fields per selector combination, referencing known open-source scrapers for the exact postback pattern.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Agmarknet 2.0 (Directorate of Marketing and Inspection)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P20",
+      "pattern_name": "data.gov.in OGD Platform API (API-key + REST JSON/CSV)",
+      "description": "Datasets hosted on the centralized Open Government Data (OGD) platform data.gov.in expose a registered REST API (JSON/CSV/XML) once a free API key is obtained via signup, rather than requiring bespoke per-site scraping. Direct catalog-page fetches without a browser session are often blocked (403).",
+      "typical_website_characteristics": "Structured tabular government dataset registered on the OGD catalog with a resource ID; supports JSON/CSV/XML export via API once authenticated with an API key.",
+      "common_technologies": "requests with API key query param, data.gov.in resource API pattern",
+      "typical_data_formats": "JSON, CSV, XML via REST API",
+      "common_obstacles": "Catalog HTML pages return 403 to non-browser fetches; must locate the correct resource ID and use the dedicated API endpoint rather than scraping the catalog UI; original source page (e.g., pmfby.gov.in) is sometimes a red herring and the real structured dataset is one hop away on data.gov.in.",
+      "general_acquisition_strategy": "Register for a data.gov.in API key, identify the correct resource ID for the target dataset, and pull data via the documented REST API (JSON/CSV) rather than scraping the HTML catalog page directly.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "FCI Region/District/Commodity-wise Daily Food Stock Position",
+        "PMFBY National Crop Insurance Portal (claims dataset via data.gov.in)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P21",
+      "pattern_name": "News-Article / Single-Case Monitoring with Cross-Reference to Integrated Sources",
+      "description": "The 'source' is not a structured dataset or portal at all, but a single news story or Wikipedia entry describing an ongoing scandal/investigation. There is no bulk acquisition pipeline to build; the realistic approach is periodic manual/automated article monitoring combined with cross-referencing entities/case IDs against already-integrated structured sources (ED press releases, CBI press releases, Indian Kanoon, CPPP tenders).",
+      "typical_website_characteristics": "Single or few news articles / a Wikipedia page describing a specific scandal or ongoing legal case; no queryable API or bulk export; value depends on linking named entities to other already-integrated structured sources.",
+      "common_technologies": "Periodic WebFetch/monitoring of article URLs, entity extraction, cross-reference joins against existing integrated databases (ED, CBI, Indian Kanoon)",
+      "typical_data_formats": "Unstructured prose (news articles, Wikipedia); entities extracted manually or via NLP",
+      "common_obstacles": "Not a structured/queryable dataset — no distinct scraping pipeline to build; real investigative depth depends on future court filings or RTI responses not yet public; claims in single articles need independent corroboration before use.",
+      "general_acquisition_strategy": "Set up lightweight periodic monitoring of the specific article/case page, extract named entities (people, org names, case/tender IDs), and join them against already-integrated structured pipelines (ED/CBI press releases, Indian Kanoon case law, CPPP tenders) rather than building a new dedicated scraper.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "CBSE OSM (On-Screen Marking) 2026 Results Scandal — vendor Coempt Edu Teck",
+        "2026 NEET-UG Controversy / CBI investigation",
+        "Punjabi University Patiala UGC Scholarship Scam (Rs 14-crore) — ED probe"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P22",
+      "pattern_name": "Record-by-Record Lookup Portal with No Bulk Export (login/OTP-gated or ID-based)",
+      "description": "Public-facing government verification/status-check tools that only support single-record lookups (by license number, registration number, OTP-verified mobile, etc.) with no bulk export, statistics API, or list endpoint discovered. Building an aggregate dataset would require either brute-forcing ID ranges (high effort, uncertain payoff) or is fundamentally blocked by an OTP/credential gate tied to an individual's private contact info.",
+      "typical_website_characteristics": "Single-record verification/search tool intended for individual self-service use, not bulk data access; no /statistics or /export endpoint; dashboard counters may show zero, suggesting the aggregation layer itself may be unpopulated.",
+      "common_technologies": "N/A for bulk — would require ID-range enumeration scraping if attempted at all",
+      "typical_data_formats": "Single-record HTML result per query",
+      "common_obstacles": "No bulk export/API discovered (404 on likely statistics endpoints); some gated entirely by OTP sent to a private mobile number, making automated bulk access infeasible; record-by-record scraping across ID ranges is high-effort for uncertain data completeness/payoff.",
+      "general_acquisition_strategy": "Generally not worth building a dedicated pipeline; if pursued, would require enumerating ID/license-number ranges and issuing individual lookup requests per record, but this is high-effort/low-confidence and should be deprioritized unless a hidden bulk endpoint is later found.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "ONDLS - Online National Drug Licensing System (State Drugs Control)",
+        "PM-KISAN Beneficiary Status / Beneficiary List Portal"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P23",
+      "pattern_name": "static-html-table-scrape-with-cert-bypass",
+      "description": "Government portals serving plain static HTML tables/pages over a broken or misconfigured TLS certificate chain, requiring cert verification to be disabled (e.g. curl -k) but otherwise scrapable with simple HTTP GET + HTML parsing, no JS rendering or session handling needed.",
+      "typical_website_characteristics": "State vigilance/mining/anti-corruption portals with aggregate or semi-structured HTML tables; content is server-rendered plain HTML, no authentication.",
+      "common_technologies": "curl/requests with SSL verification disabled or pinned cert, BeautifulSoup/HTML parser",
+      "typical_data_formats": "HTML tables, static pages",
+      "common_obstacles": "Broken/incomplete TLS certificate chains; data often aggregate-only rather than case-level detail; some sites unreachable from sandboxed networks (connection refused) requiring proxy/alternate network.",
+      "general_acquisition_strategy": "Direct HTTP GET with cert verification bypassed or pinned, parse static HTML tables/lists, schedule periodic re-crawl to track trends over time.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "Punjab Vigilance Bureau - Investigations (Range-wise FIRs/VEs)",
+        "Punjab Vigilance Bureau (main portal)",
+        "Odisha District Mineral Foundation (DMF) Portal",
+        "West Bengal Directorate of Mines and Minerals (DMM)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P24",
+      "pattern_name": "static-html-multipage-crawl-plus-pdf",
+      "description": "Simple static government sites with predictable multi-page or multi-district URL structures and downloadable PDFs (reports, circulars, notifications), scrapable via plain HTTP GET without JS rendering; content depth requires PDF text extraction/OCR for full case or notification detail.",
+      "typical_website_characteristics": "Predictable index/menu-driven page structure (per-district, per-year, per-category) with linked PDFs or embedded HTML tables; no authentication or JS rendering required.",
+      "common_technologies": "requests/curl + HTML parser, pdfplumber/PyPDF2 for text extraction, OCR (Tesseract) for scanned PDFs",
+      "typical_data_formats": "HTML tables/lists, linked PDF documents",
+      "common_obstacles": "Content depth/format not always verified until per-page inspection; some PDFs are scanned images needing OCR; data often aggregate/statistical rather than individually identifying named officials; pagination handling for larger archives.",
+      "general_acquisition_strategy": "Crawl predictable page hierarchy (district/year/category), download and parse linked PDFs or HTML tables, run on recurring schedule to catch new postings.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "HP State Vigilance & Anti Corruption Bureau",
+        "Uttarakhand Vigilance Establishment",
+        "Anti Corruption Bureau, Jammu & Kashmir - FIR Cases",
+        "Delhi Finance Department - Budget Notification Archive",
+        "Tamil Nadu Lokayukta - Case Status Statistics",
+        "Institution of Lokayukta for Andhra Pradesh",
+        "Institution of Lokayukta of Telangana",
+        "Kerala Lok Ayukta",
+        "Kerala Vigilance and Anti-Corruption Bureau (VACB)",
+        "Karnataka State Excise Department - Licences",
+        "RAJKAJ Integrated e-Office - Circulars & Orders"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P25",
+      "pattern_name": "aspnet-postback-form-scraper",
+      "description": "ASP.NET WebForms-based government portals using __doPostBack/viewstate-driven pagination and category filters, requiring headless browser automation (Selenium/Playwright) or stateful POST simulation with viewstate token capture rather than simple GET requests; often paired with PDF/OCR extraction for document content.",
+      "typical_website_characteristics": "Classic ASP.NET WebForms UI with server-side postback events for pagination/filtering; simple HTTP fetch returns unusable shell content.",
+      "common_technologies": "headless browser (Playwright/Selenium) or requests with viewstate/session token replication, PDF text extraction/OCR",
+      "typical_data_formats": "HTML with viewstate-driven tables, linked PDF documents",
+      "common_obstacles": "JS/viewstate handling required, simple HTTP fetch fails; session/cookie management; deep record detail may require login; document quality (scanned PDFs) varies.",
+      "general_acquisition_strategy": "Use headless browser automation to execute postback events and paginate; alternatively replicate viewstate/session tokens via stateful HTTP requests; download and OCR/parse resulting PDFs.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Rajasthan GAD - Orders & Circulars",
+        "Maharashtra Pollution Control Board (MPCB) Consent Management",
+        "GIDC (Gujarat Industrial Development Corporation) Estate/Allotment Portal",
+        "Rajasthan State Information Commission (RIC) - RTI Appeal/Complaint Decisions",
+        "Odisha eProcurement Portal (tendersodisha.gov.in)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P26",
+      "pattern_name": "form-post-enumeration-lookup",
+      "description": "Government case/complaint status trackers that only expose single-record lookup by reference number/ID (no bulk listing or search-by-name), requiring either brute-force enumeration of ID space (number x year x division) or being effectively inaccessible for systematic bulk extraction without a known reference number.",
+      "typical_website_characteristics": "Small legacy PHP/ASPX forms designed for individual citizen self-lookup, not bulk export; no name-based or bulk search available.",
+      "common_technologies": "form POST automation, ID enumeration scripts, session/CSRF token handling",
+      "typical_data_formats": "HTML status pages per query",
+      "common_obstacles": "High request volume for brute-force enumeration risks rate-limiting/CAPTCHA; no bulk listing endpoint; OTP/mobile verification may gate access entirely, making some sites practically infeasible for bulk collection.",
+      "general_acquisition_strategy": "Where ID space is small/sequential, enumerate systematically via POST/GET requests and parse per-record status pages; where OTP/reference-number-only access is enforced with no enumeration path, treat as low-yield/infeasible for bulk acquisition.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Karnataka Lokayukta - Complaint Case Status Tracker",
+        "West Bengal Human Rights Commission (WBHRC) Complaint Status Portal"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P27",
+      "pattern_name": "cascading-dropdown-land-record-lookup",
+      "description": "State land record / GIS portals requiring multi-step cascading dropdown navigation (district -> tehsil/taluka -> village -> survey/khasra number) to retrieve parcel-level records, necessitating browser automation and potentially CAPTCHA handling; no state-wide name-based search.",
+      "typical_website_characteristics": "Hierarchical dropdown-driven query forms feeding jamabandi/parcel/case data; large record volume (millions of parcels) behind per-locality queries only.",
+      "common_technologies": "Playwright/Selenium for cascading dropdown interaction, CAPTCHA solving (where required), per-locality iteration scripts",
+      "typical_data_formats": "HTML record pages, downloadable PDFs of land records",
+      "common_obstacles": "No bulk/name-based search across the state; CAPTCHA on document retrieval; large-scale scraping likely rate-limited; requires pre-known locality/plot identifiers to target specific individuals.",
+      "general_acquisition_strategy": "Automate cascading dropdown selection per district/tehsil/village to enumerate and scrape parcel records; combine with other datasets (e.g. GIS layers, court case data) to identify targets before querying.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "Gujarat AnyROR / E-Dhara Land Records",
+        "Chhattisgarh Bhuiyan Land Records",
+        "Assam ILRMS / Dharitree Land Records Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P28",
+      "pattern_name": "nic-eprocurement-portal-scraper",
+      "description": "State e-Procurement portals built on the shared NIC eProcurement (nicgep) platform or similar (CHIPS/CHEPS), exposing tender listings, corrigenda, and results via paginated/POST-based search with session/CSRF handling; bidder-level award detail typically requires login. Reusable scraper pattern across many states.",
+      "typical_website_characteristics": "Standardized government e-tendering platform (NIC nicgep family or similar SPA/JS-heavy variant) used across multiple states, with tender search, corrigendum feeds, and results pages.",
+      "common_technologies": "requests with session/CSRF token handling, headless browser for JS-rendered SPA variants, PDF parsing for tender documents",
+      "typical_data_formats": "HTML tender listings, downloadable tender/award PDFs, in some cases hidden JSON API",
+      "common_obstacles": "Detailed bidder/award data often requires login; rotating CSRF tokens per session; some variants (KPPP) are full SPAs needing API reverse-engineering instead of HTML scraping; historical depth varies.",
+      "general_acquisition_strategy": "Scrape paginated tender listing/search/results pages with session and CSRF token handling; download and parse linked PDFs; for SPA variants, reverse-engineer the underlying JSON API via browser network inspection; track winning bidders across tenders for pattern analysis.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "MP e-Procurement Portal (MPTenders)",
+        "Chhattisgarh eProcurement Portal (CHIPS/CHEPS)",
+        "Odisha eProcurement Portal (tendersodisha.gov.in)",
+        "Karnataka Public Procurement Portal (KPPP)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P29",
+      "pattern_name": "regulatory-consent-search-portal-scraper",
+      "description": "State pollution control board / regulatory consent management portals exposing paginated or POST-based search forms (by industry name, district, date range) for granted/rejected/pending applications; results are relatively structured HTML, occasionally behind ASP.NET viewstate or with backend endpoint instability/migration.",
+      "typical_website_characteristics": "Regulatory search forms for environmental consents/clearances by industry/company name, feeding structured result tables; sometimes migrated to newer sub-portals leaving old ones stale.",
+      "common_technologies": "requests with POST form submission, pagination handling, PDF/OCR for linked closure/consent order documents",
+      "typical_data_formats": "HTML search result tables, linked PDFs/Google Drive documents for orders",
+      "common_obstacles": "Search requires specific query parameters rather than full bulk listing; possible CAPTCHA on repeated queries; portal migrations (e.g. to newer domains) can leave old endpoints incomplete/stale, requiring discovery of the current live endpoint.",
+      "general_acquisition_strategy": "Submit POST-based search queries across industry/date/district parameter combinations to enumerate consent records, paginate results, and download/parse linked order PDFs.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "Assam Online Consent Management & Monitoring System (OCMMS) - Pollution Control Board",
+        "West Bengal Online Consent Management & Monitoring System (WBOCMMS) - WBPCB",
+        "Karnataka State Pollution Control Board (KSPCB) - Consent Management",
+        "Gujarat Pollution Control Board (GPCB)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P30",
+      "pattern_name": "cag-state-audit-report-pdf-miner",
+      "description": "CAG (Comptroller and Auditor General) state Accountant-General portals sharing an identical template across all states, listing audit reports (including local-body/scheme-specific performance audits) as paginated HTML with linked PDFs; requires full-text PDF mining since specific findings are buried within larger report bodies rather than exposed as structured metadata.",
+      "typical_website_characteristics": "Uniform cag.gov.in AG-state template reused nationally; report listings filterable by category (Local Bodies/PRI/ULB); reports are lengthy sector-wide PDFs.",
+      "common_technologies": "requests + HTML parsing for listing/pagination, PDF text extraction/OCR, full-text search/keyword mining across reports",
+      "typical_data_formats": "HTML listing pages, PDF audit reports",
+      "common_obstacles": "Scheme-specific or local-body-specific findings are not separately indexed and require full-text mining of large PDF reports; identical site structure across states means reusability but also duplicate-pattern risk.",
+      "general_acquisition_strategy": "Scrape paginated report listing with category filter, download PDFs, run full-text extraction and keyword/entity mining to surface scheme-specific or local-body-specific findings; reuse the same scraper across all CAG state AG portals.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "CAG Local Body Audit Reports - Odisha (AG-Odisha, PAG Audit-II)",
+        "CAG Audit Reports - Bihar (Accountant General Bihar)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P31",
+      "pattern_name": "cascading-dropdown-transparency-lookup",
+      "description": "Citizen-facing state transparency/scheme-beneficiary portals with cascading dropdown lookups (district -> block -> panchayat -> ward/beneficiary) and no bulk API, built for individual self-service queries rather than bulk export; requires per-locality automated crawl similar to land-record portals but for welfare-scheme beneficiary data.",
+      "typical_website_characteristics": "Government transparency initiative exposing scheme-level and beneficiary-level data via nested dropdown navigation with no documented API.",
+      "common_technologies": "headless browser automation for cascading dropdown selection, per-locality iteration",
+      "typical_data_formats": "HTML result pages per locality/scheme query",
+      "common_obstacles": "No bulk API; heavy multi-step automation needed to cover all localities; potential rate-limiting since portal is built for individual citizen lookup, not bulk export; some links use encoded/obfuscated query strings suggesting session-based access.",
+      "general_acquisition_strategy": "Automate cascading dropdown navigation per district/block/panchayat/ward to enumerate beneficiary/scheme records at scale, similar to land-record cascading lookup pattern.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Jan Soochna Portal (Rajasthan) - Scheme & Beneficiary Data"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P32",
+      "pattern_name": "login-gated-dashboard-with-open-upload-directory",
+      "description": "State GIS/monitoring dashboards (forest, environment) that gate core interactive/report-generation functionality behind login, but incidentally expose a directory of uploaded PDF reports/documents without authentication; acquisition splits into direct scraping of the open document directory plus RTI requests for the gated interactive data.",
+      "typical_website_characteristics": "Government GIS decision-support or monitoring system with login wall for core functionality, but static file directories (e.g. /uploads/) indexed and reachable without credentials.",
+      "common_technologies": "directory/path enumeration, PDF download and parsing, RTI request process as fallback for gated data",
+      "typical_data_formats": "PDF reports in open directories; gated dashboards for patrolling/fire/plantation/clearance-overlap data",
+      "common_obstacles": "Core functionality (AOI queries, dashboards) requires login and is not scrapable directly; unclear whether any public-facing query tool exists; systematic access to gated data requires either credentials or a formal RTI request.",
+      "general_acquisition_strategy": "Enumerate and scrape openly accessible upload/document directories for incidentally public PDFs; file RTI requests to obtain gated dashboard-generated reports for specific queries.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Odisha Forest Land Information Decision Support System (FLI-DSS)",
+        "Odisha Forestry GIS / OFMS (Forest Management System)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P33",
+      "pattern_name": "js-rendered-spa-hidden-rest-api-discovery",
+      "description": "Modern government portals rebuilt as JavaScript-rendered single-page applications (React/Angular) backed by a protected internal REST API; plain HTTP fetch returns no usable content, requiring either browser automation to render the SPA or reverse-engineering the hidden JSON API endpoints (often needing session/token auth), which if solved yields structured JSON directly instead of HTML scraping.",
+      "typical_website_characteristics": "Newer-generation government portals migrated from classic server-rendered ASPX to client-side SPA frameworks, with underlying REST/JSON API calls visible only via browser network inspection.",
+      "common_technologies": "browser network tab inspection / headless browser to capture XHR calls, API endpoint and auth/token reverse-engineering, direct JSON API querying once endpoints are known",
+      "typical_data_formats": "JSON API responses (once discovered), no usable static HTML",
+      "common_obstacles": "Exact endpoint paths and auth/session token mechanism often undocumented and return 401/404 until correctly reverse-engineered; frontend JS-rendered so simple WebFetch yields empty content; may require credentialed session establishment.",
+      "general_acquisition_strategy": "Use browser automation/network inspection to discover hidden REST API endpoints and required auth tokens/session cookies; once mapped, query the JSON API directly for structured data instead of scraping rendered HTML.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "PARIVESH (MoEFCC Environment/Forest/Wildlife/CRZ Clearance Portal) - Parivesh 2.0 REST API track",
+        "Karnataka Public Procurement Portal (KPPP)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P34",
+      "pattern_name": "DSpace/OAI-PMH institutional repository harvester",
+      "description": "Government/parliamentary digital repositories built on DSpace (or similar OAI-PMH-compliant platforms) exposing bibliographic metadata via search UI and often an OAI-PMH or REST endpoint, with actual content (often scanned/OCR'd documents) attached as PDF bitstreams per item.",
+      "typical_website_characteristics": "JSPUI/DSpace search interface, item-level pages with metadata + attached PDF bitstreams, possible OAI-PMH feed for bulk metadata harvest, large historical/scanned corpora mixed with born-digital records",
+      "common_technologies": "DSpace, JSPUI, OAI-PMH, REST API (DSpace 7+), PDF/OCR extraction (Tesseract), sometimes self-signed/misconfigured TLS certs",
+      "typical_data_formats": "",
+      "common_obstacles": "Poor OCR quality on older/bilingual scanned records; pagination/session handling on advanced search; incremental crawl needed for large historical corpora; occasional TLS cert issues requiring relaxed verification",
+      "general_acquisition_strategy": "Prefer OAI-PMH or REST endpoint for bulk metadata enumeration if available; fall back to paginated search-form scraping; download attached PDF bitstreams per item and run OCR/text extraction for scanned content; checkpoint/crawl incrementally given corpus size.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Tamil Nadu Legislative Assembly Digital Repository",
+        "eParlib Parliamentary Committee Reports Digital Library"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P35",
+      "pattern_name": "Multi-tenant state government portal network (per-instance adapters)",
+      "description": "A central hub/index that fans out to many structurally-similar but independently deployed state or district government subdomains/portals, each requiring its own scraper adapter due to template/backend variance.",
+      "typical_website_characteristics": "Hub page linking to N per-state/per-district subdomains; each instance may run different software versions, UI templates, or access controls; inconsistent data completeness/availability across instances",
+      "common_technologies": "Varies per state; often ASP.NET or PHP based state e-governance stacks; no unified API",
+      "typical_data_formats": "",
+      "common_obstacles": "Per-instance scraper logic multiplies engineering effort; some instances require login; some instances may lack bulk export entirely (record-level-only lookups); data completeness varies widely across states, undermining aggregate comparability",
+      "general_acquisition_strategy": "Crawl the hub to enumerate all subdomains/instances; build a generic adapter framework with per-instance override hooks; triage instances by whether they expose bulk listing vs. single-record lookup only, and prioritize accordingly.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "National eVidhan Application (NeVA) - State Assembly Portal Network",
+        "DILRMP State RoR Web (Record of Rights portal directory)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P36",
+      "pattern_name": "Static/unindexed PDF directory crawl + regional-language OCR",
+      "description": "Government sites that publish official records (question replies, seizure reports, annual reports) purely as PDFs in a directory or listing page, with no search API, often in a regional language requiring non-English OCR.",
+      "typical_website_characteristics": "Directory/listing pages organized by session, year, or category linking directly to PDF files; no structured search or API; tables embedded in PDFs requiring extraction; formatting inconsistent across years/decades",
+      "common_technologies": "PDF table extraction (pdfplumber, camelot), OCR (Tesseract with Devanagari/Tamil/etc. language packs), simple HTTP directory crawling",
+      "typical_data_formats": "",
+      "common_obstacles": "No structured search/API - pure directory enumeration; regional-language OCR accuracy risk; inconsistent PDF table formats across years/decades; large multi-decade volume makes systematic extraction effortful; unclear historical depth",
+      "general_acquisition_strategy": "Enumerate PDF links via directory/listing page crawl (per session/year/category); bulk download PDFs; apply PDF table extraction library, falling back to language-specific OCR for scanned/image-only pages; normalize schema across years despite format drift.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Bihar Vidhan Sabha Online Question Reply Management System",
+        "FIU-IND Publications (Annual Reports & Brochures)",
+        "Narcotics Control Bureau official site (seizure stats, annual reports, judgments)",
+        "NCRB Prison Statistics India (annual reports)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P37",
+      "pattern_name": "WAF/anti-bot protected government portal requiring browser automation bypass",
+      "description": "Government portals (notably eci.gov.in subdomains) that return 403/block direct HTTP fetches due to WAF or bot-detection, requiring headless browser automation with realistic fingerprinting (or residential proxy service) to access and then download/parse PDFs or scraped listings.",
+      "typical_website_characteristics": "Direct curl/WebFetch attempts return 403; site otherwise structured as categorized listing pages linking to per-entity/per-year PDFs; PDFs often scanned forms needing OCR",
+      "common_technologies": "Headless browser automation (Playwright/Puppeteer) with stealth/fingerprint spoofing, residential proxies, PDF OCR/form extraction",
+      "typical_data_formats": "",
+      "common_obstacles": "Cloudflare/WAF JS-challenge blocking all direct fetch tools tested; per-entity/per-year enumeration needed for full coverage; PDFs are scanned forms requiring OCR since not natively machine-readable; downstream aggregators (ADR/MyNeta) exist but primary-source access still needed for independent verification",
+      "general_acquisition_strategy": "Use stealth headless browser automation (or a managed scraping/proxy service) to pass the WAF challenge and load listing pages; enumerate per-entity/per-year PDF links; bulk-download and OCR/parse PDFs for structured data.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "ECI Contribution Reports (Political Party Donations)",
+        "ECI Electoral Trust Contribution Reports",
+        "ECI Candidate Affidavit Portal"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P38",
+      "pattern_name": "MyNeta/ADR aggregator HTML scrape (index + per-profile, some backed by scanned source docs)",
+      "description": "The ADR/MyNeta family of election-transparency sites expose mostly plain paginated HTML tables/index pages (no login, no heavy anti-bot), sometimes linking to per-candidate/per-member profile pages backed by scanned register images requiring OCR for the deepest data.",
+      "typical_website_characteristics": "Paginated plain HTML tables/index pages; per-candidate/per-member profile pages; underlying primary documents sometimes scanned images/PDFs; no bulk CSV/API",
+      "common_technologies": "Basic HTML scraping (requests/BeautifulSoup or similar), OCR for underlying scanned register forms where present",
+      "typical_data_formats": "",
+      "common_obstacles": "No bulk API/CSV export requiring full pagination crawl; deepest structured data (e.g., directorships, shareholdings) sometimes only in scanned images per profile needing OCR; report-specific sub-pages need individual verification of live data/pagination depth",
+      "general_acquisition_strategy": "Paginate through index/listing HTML tables to enumerate entities; scrape per-entity profile pages for structured summary fields; where deeper source documents are scanned images/PDFs, download and OCR them for additional structured fields.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "MyNeta Declaration of Interest by Rajya Sabha Members",
+        "ADR Electoral Bonds Data Repository"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P39",
+      "pattern_name": "Captcha-gated government query/search portal (per-record lookup automation)",
+      "description": "State/central government portals (police FIR search, court case status, vehicle registry) that require solving or bypassing a captcha on every query and only support single-record or narrow-filter lookups rather than bulk export, needing browser automation iterated over a large parameter space (district x station x year, CNR numbers, plate numbers, etc.).",
+      "typical_website_characteristics": "Mandatory captcha or anti-automation token on every search; no bulk export or documented API; per-record or narrow-filter queries only; large enumeration space needed for meaningful coverage (districts x stations x years, or known-ID lookups)",
+      "common_technologies": "Browser automation (Selenium/Playwright), captcha-solving services or manual/semi-automated workflows, session/cookie handling, hidden AJAX/API endpoint discovery via devtools",
+      "typical_data_formats": "",
+      "common_obstacles": "Captcha blocks simple scripted POST; large parameter space makes full coverage expensive; unclear if results include full narrative/document text vs. metadata only; possible rate-limiting/anti-scraping tokens; some systems undergoing platform migration/deprecation",
+      "general_acquisition_strategy": "Use browser automation with captcha-solving (service or semi-manual) to iterate systematically over the query parameter space (jurisdiction x time window, or seed IDs cross-referenced from other sources); scrape/parse resulting listing and detail pages; treat as targeted/investigative lookup rather than full bulk acquisition given the search-only interface.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "Karnataka State Police FIR Search Portal",
+        "eCourts Case Status / Case Order Search",
+        "National Judicial Data Grid (NJDG) / eCourts",
+        "VAHAN / Sarathi National Register",
+        "Bhoomi (Karnataka Land Records)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P40",
+      "pattern_name": "Government form-POST search-and-scrape (no captcha, session-based enumeration)",
+      "description": "Government portals exposing a server-rendered search form (POST-based, ASPX or similar) without captcha protection, allowing scripted iteration across dropdown/date-range parameters to enumerate and scrape result listings, sometimes leading to downloadable PDFs.",
+      "typical_website_characteristics": "ASPX/legacy form-POST search interface; dropdown/date-range filters requiring enumeration to cover full corpus; results in HTML tables or linked PDFs; no bulk export or API",
+      "common_technologies": "Scripted HTTP POST with session/viewstate handling, HTML table parsing, PDF text extraction for linked documents",
+      "typical_data_formats": "",
+      "common_obstacles": "No bulk listing/API - must enumerate filter combinations; potential session/state tokens (ASP.NET ViewState) complicating scripted POST; possible undocumented rate limits; PDF extraction needed per result for full detail",
+      "general_acquisition_strategy": "Reverse-engineer the POST form parameters (including any ViewState/session tokens) and script iteration across all filter/date-range combinations to enumerate results; parse HTML result tables and download/extract linked PDFs for detail data.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Maharashtra Police Published FIRs",
+        "Appellate Tribunal (SAFEMA/PMLA/NDPS/FEMA) Orders Database"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P41",
+      "pattern_name": "Simple static/paginated HTML list scrape",
+      "description": "Low-complexity government or NGO pages presenting a small-to-moderate, mostly static paginated list with structured fields directly in HTML, no auth, no anti-bot measures, and no captcha.",
+      "typical_website_characteristics": "Small number of pages (single digits to dozens); structured fields readable directly from HTML; low anti-scraping friction; may serve as a meta-index linking out to other primary sources",
+      "common_technologies": "Basic HTTP scraping (requests/BeautifulSoup), simple pagination loop",
+      "typical_data_formats": "",
+      "common_obstacles": "As a meta-index, real investigative value may only be realized after following through to linked resources, several of which may be PDF-only or dashboard-only with no bulk export; periodic re-scrape needed as lists update",
+      "general_acquisition_strategy": "Paginate through the static HTML list directly, parsing structured fields per entry; where entries are links to other resources, follow through and apply the appropriate pattern (PDF download, DSpace harvest, etc.) for each linked source.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "NIA Most Wanted",
+        "Judicial Data Collaborative / Data Project Explorer"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P42",
+      "pattern_name": "Open bulk-download dataset / CKAN-style open data catalog",
+      "description": "Sources that already provide direct, unauthenticated bulk file downloads (CSV/XLSX/Dropbox links) or expose a standard open-data catalog API (e.g., CKAN action API) for dataset discovery and direct file retrieval, requiring no scraping of rendered content.",
+      "typical_website_characteristics": "Direct file download links (CSV/XLSX/Dropbox) or CKAN API (/api/3/action/package_search) listing datasets with resource URLs; open license; no login/captcha",
+      "common_technologies": "CKAN API, direct HTTP file download, basic file-format parsing (CSV/XLSX)",
+      "typical_data_formats": "",
+      "common_obstacles": "Data may be stale/not current; some fields gated behind email/researcher approval; crowdsourced coverage is uneven, many entries are PDF reports rather than raw data or one-off outputs rather than continuously updated feeds; large files need storage/processing pipeline",
+      "general_acquisition_strategy": "Query the catalog API (or fetch the known bulk-download link) to enumerate available datasets/resources, then directly download and parse each file; verify update cadence and license terms before treating as an ongoing feed.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "DDL Judicial Data Portal (Development Data Lab)",
+        "Justice Hub (CivicDataLab)",
+        "Justice Hub Dataset Repository (CivicDataLab / Agami India)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P43",
+      "pattern_name": "JS-rendered SPA / hidden-API dashboard scraping",
+      "description": "Modern government or NGO dashboards built as JavaScript single-page applications (Angular/React) where data is fetched via backend XHR/API calls not exposed in static HTML, requiring browser automation to render the page and/or reverse-engineer the underlying JSON API via network inspection.",
+      "typical_website_characteristics": "Angular/React SPA frontend; search/filter-only UI with no visible bulk export; underlying data delivered via undocumented JSON/XHR endpoints feeding maps, tables, or charts",
+      "common_technologies": "Headless browser automation (Playwright/Puppeteer) for rendering and devtools-network interception, direct API calls once endpoint schema is reverse-engineered",
+      "typical_data_formats": "",
+      "common_obstacles": "Plain HTTP fetch/scrape fails against SPA architecture; no documented public API; exact endpoints require manual discovery via browser network inspection before automation can be built; some content may be member/premium-gated",
+      "general_acquisition_strategy": "Load the page in a headless browser with network interception enabled to discover the backend JSON/XHR API endpoints and their parameters; once identified, call the API directly for structured bulk extraction; fall back to scraping rendered DOM tables only if no usable API is found.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "PARIVESH 2.0 (Environment/Forest/Wildlife/CRZ Clearance Portal)",
+        "Land Conflict Watch",
+        "India Justice Report - Consumer Justice Report 2026 + Consumer Courts Dashboard (ccdash)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P44",
+      "pattern_name": "Static HTML table/page scrape",
+      "description": "Single, simply-structured government/institutional page (an HTML table or listing) that is server-rendered and can be pulled with a plain HTTP GET plus HTML parsing (BeautifulSoup/cheerio), no JS execution needed. Often paired with cross-referencing against a secondary authoritative source to verify or contextualize the data.",
+      "typical_website_characteristics": "Server-rendered static HTML, no login, no pagination or minimal pagination, low update frequency",
+      "common_technologies": "requests/BeautifulSoup, cheerio, simple cron scraper",
+      "typical_data_formats": "HTML tables, inline text",
+      "common_obstacles": "Infrequent updates leaving data stale; no machine-readable export; vague/ambiguous content requiring manual follow-up verification against other sources",
+      "general_acquisition_strategy": "Direct HTTP fetch + HTML parse of the table/page; schedule periodic re-scrapes; cross-reference key claims against a second authoritative source (court records, other portals) rather than trusting the page at face value.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "Ministry of Panchayati Raj — Status of Panchayat Elections in PRIs",
+        "RAJKAJ Integrated e-Office - Circulars & Orders"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P45",
+      "pattern_name": "Static PDF/document archive scrape",
+      "description": "Government sites that host their real content as linked PDF (or Excel) documents behind a static HTML index/listing page. Acquisition is a two-step crawl: parse the index page for document links, then bulk-download and text-extract (pdfplumber/camelot/OCR) the PDFs.",
+      "typical_website_characteristics": "Index/listing page links out to many PDFs/XLS files; documents are the real payload; site often has outdated/fragile architecture (legacy browser notices, ASP.NET postbacks, no directory listing)",
+      "common_technologies": "requests + BeautifulSoup for link discovery, pdfplumber/camelot/Tesseract OCR for extraction, search-engine discovery for undiscoverable filenames",
+      "typical_data_formats": "PDF, Excel/XLS, occasionally raw files on GitHub mirrors",
+      "common_obstacles": "No bulk export/API or directory index (must discover filenames via search or notice pages); ASP.NET __VIEWSTATE pagination for historical archives; SSL cert issues; low signal-to-noise (routine admin content); documents only aggregate-level, granular data behind paywall/login",
+      "general_acquisition_strategy": "Crawl the index page(s) for document links (handling pagination/postback state as needed), bulk-download PDFs/Excel, then run table/text extraction or OCR; treat as point-in-time snapshots requiring periodic re-crawl.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "DGCIS — Statistics of Inland Coasting Trade / Foreign & Coastal Cargo Movement",
+        "WBMDTCL (West Bengal Mineral Development & Trading Corporation Ltd)",
+        "WB Industries Department - WBMDTCL Mining RFP/EOI Documents",
+        "GAD Rajasthan - Orders & Circulars Archive",
+        "CivicDataLab Himachal Pradesh Health Procurement OCDS Dataset (GitHub)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P46",
+      "pattern_name": "JS-rendered SPA / dashboard requiring headless browser automation",
+      "description": "Client-rendered single-page applications (Angular/React) where raw HTTP fetch only returns an app shell; real data loads via async XHR/REST calls triggered by cascading dropdowns, search forms, or hash routes. Requires either full headless-browser automation (Playwright/Puppeteer) to drive the UI, or reverse-engineering the underlying JSON API calls from network traffic.",
+      "typical_website_characteristics": "Dynamic dropdowns/search forms driving async-loaded results; per-record document/detail pages requiring multi-step navigation; sometimes captcha-gated or rate-limited",
+      "common_technologies": "Playwright/Puppeteer headless browser, network-tab reverse engineering to hit backend endpoints directly, OCR for downloaded PDFs",
+      "typical_data_formats": "JSON via internal REST/XHR endpoints, or rendered HTML/PDF per record after navigation",
+      "common_obstacles": "Multi-step navigation (cascading dropdowns, election→constituency→candidate); captchas and rate-limiting; guest/public tier capped in scope or time range vs. paid/authorized tier; uncertain incremental value over other already-scraped sources; fragile hidden API endpoints",
+      "general_acquisition_strategy": "Use a headless browser to drive the SPA end-to-end, or capture network requests to identify and call the underlying JSON API directly; handle pagination/dropdown enumeration programmatically; fall back to per-record scraping when no bulk/listing endpoint exists.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "CEO Punjab Election Reporting Portal — Candidate Dashboard",
+        "VAHAN NTR (parivahan services next-gen vehicle registry successor portal)",
+        "DGCIS Foreign Trade Data Dissemination Portal (FTDDP) - Guest Mode",
+        "RTI Rajasthan - Second Appeal Status Search",
+        "Zombie Tracker (CivicDataLab + Internet Freedom Foundation) — Section 66A IT Act case tracker",
+        "WBOCMMS - West Bengal Online Consent Management & Monitoring System"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P47",
+      "pattern_name": "Direct bulk file download (CKAN/GitHub/Dropbox static datasets)",
+      "description": "Pre-packaged, already-scraped datasets published as static files (CSV/XLSX/ZIP) on open-data portals (CKAN-style like Justice Hub, data.gov.in), GitHub repos, or Dropbox links, requiring no scraping — just direct HTTPS download and light parsing/filtering.",
+      "typical_website_characteristics": "No authentication; clean, documented, often CC-licensed; static point-in-time snapshot rather than a live feed",
+      "common_technologies": "Simple HTTPS GET, optional CKAN API (api/3/action/package_show) for resource enumeration",
+      "typical_data_formats": "CSV, XLSX, ZIP, JSON",
+      "common_obstacles": "Data staleness (extraction stopped at a fixed date, no ongoing pipeline); companion PDF reports may be image-only requiring OCR; need to filter/derive subsets (e.g., PCMA rows) from a shared parent dataset; catalog may mix real CSVs with report-only PDF pages requiring per-entry inspection",
+      "general_acquisition_strategy": "Direct download via HTTPS (optionally through a CKAN API for resource discovery); verify freshness/update cadence; OCR any accompanying non-text PDFs if narrative content is needed; filter/derive specialized subsets from shared source files when a dedicated dataset isn't offered.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "Justice Hub - Analysis of CALPRA Cases (2015-2023)",
+        "Justice Hub - CALPRA Case Analysis Dataset (2015-2023)",
+        "CivicDataLab / HAQ - Data4Justice POCSO Case Tracking Dataset",
+        "Open Contracting India — Himachal Pradesh Health Procurement (OCDS) GitHub dataset",
+        "CivicDataLab - Analysing Implementation of Child Protection Laws in India (project hub, incl. PCMA dataset)",
+        "DILRMP State-wise Land Records Computerization Dataset (via data.gov.in OGD mirror)"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P48",
+      "pattern_name": "Multi-portal / federated crawl across heterogeneous state systems",
+      "description": "A central directory or hub links out to dozens of independently-built state/district-level portals, each with its own tech stack, auth, and captcha requirements, making bulk extraction a large multi-system engineering effort rather than a single scrape.",
+      "typical_website_characteristics": "Central index/directory page fans out into many independently operated sub-portals; connections may be actively reset for automated/unauthenticated clients; each sub-portal has its own captcha/auth/format",
+      "common_technologies": "Headless browser with session/retry handling, per-state custom scrapers, captcha-solving where unavoidable",
+      "typical_data_formats": "Heterogeneous — HTML, PDF, OCDS JSON, per-state formats",
+      "common_obstacles": "Server actively resets automated connections; each downstream portal requires separate reverse-engineering; captchas per sub-portal; some components/states marked 'coming soon' or unreachable, limiting current coverage to a subset",
+      "general_acquisition_strategy": "Treat as a phased, per-state/per-portal engineering effort: first get the directory/hub loading reliably (real browser/session), then build and maintain separate scrapers per downstream portal, prioritizing the states/components already live.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "DILRMP State RoR Web (Record-of-Rights State Portal Directory)",
+        "Open Contracting India — Assam Public Procurement Explorer (CivicDataLab)",
+        "IDS-DRR (Intelligent Data Solution for Disaster Risk Reduction) — CivicDataLab + Open Contracting Partnership"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P49",
+      "pattern_name": "No public bulk access — requires RTI/email/authenticated request",
+      "description": "Sources where no scraping or API route yields the underlying data; the only path to structured/bulk data is a manual, out-of-band request (RTI filing, direct email to the data custodian, or authenticated applicant login) rather than any programmatic acquisition.",
+      "typical_website_characteristics": "No public dashboard, no company/case-searchable registry, no bulk export found; published reports hint at underlying data that isn't directly linked",
+      "common_technologies": "N/A — process/legal request rather than software",
+      "typical_data_formats": "N/A publicly; internal registers/files gated behind email or RTI response",
+      "common_obstacles": "No machine-readable export or public API discovered even after re-crawling; must rely on the custodian's discretion and response time; email/RTI response format and completeness uncertain in advance",
+      "general_acquisition_strategy": "File an RTI request or send a direct data-access email to the custodian (e.g., info@devdatalab.org) explaining investigative purpose; treat any programmatic scrape as a fallback only if a hidden data route is later discovered.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Silpasathi Portal (West Bengal Single Window Industrial Clearance)",
+        "eCourts Judicial Dataset (2010-2018) — Justice Hub / DevDataLab",
+        "Development Data Lab (devdatalab.org) Judicial Data Portal"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P50",
+      "pattern_name": "Interactive data-explorer/dashboard app (client-side charts, no confirmed export)",
+      "description": "Purpose-built analytics/explorer web apps (often React/charting-library based) that let users interactively browse aggregated figures, but where a direct CSV/API export has not yet been confirmed — requiring UI interaction or API-call inspection to extract underlying data.",
+      "typical_website_characteristics": "Interactive dashboard/explorer emphasized over static downloads; PDFs and dashboards coexist; underlying data granularity often unconfirmed until inspected",
+      "common_technologies": "Browser automation to click into explorer UI and capture underlying data/XHR calls; PDF download for report-level figures",
+      "typical_data_formats": "PDF reports plus a linked interactive web dashboard (JSON-backed)",
+      "common_obstacles": "No direct CSV/API confirmed from the page alone; must reverse-engineer the dashboard's data calls; region-specific press material in regional languages; Dropbox/bulk-download links must be located per individual dashboard",
+      "general_acquisition_strategy": "Download available PDF reports directly for headline figures; use browser automation to interact with the explorer UI and capture its backend JSON/XHR calls or locate an embedded Dropbox/download link for full granularity.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "Budgets for Justice (CivicDataLab) — Union & Assam law-and-justice budget explorer",
+        "Consumer Justice Report 2026 (India Justice Report / Tata Trusts)",
+        "DAKSH's Database on Judicial Data / DAKSH High Court Data Portal"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P51",
+      "pattern_name": "Rejected/low-value source (dead end or duplicative)",
+      "description": "Sources investigated and explicitly rejected — either because no live/reachable data endpoint exists, or because the source duplicates an already-validated source with worse provenance/authoritativeness.",
+      "typical_website_characteristics": "Either unreachable/undeployed live platform, or a private mirror/aggregator of unclear authority duplicating an official source",
+      "common_technologies": "N/A",
+      "typical_data_formats": "N/A",
+      "common_obstacles": "No live data endpoint found; or content lower-signal/less authoritative than an already-validated official source",
+      "general_acquisition_strategy": "Do not invest further engineering effort; periodically recheck for a live deployment, and prefer the already-validated official/primary source instead.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "RAJ ORDERS (rajorders.com)",
+        "CivicDataLab / Open Contracting Partnership Assam Public Procurement Explorer (oci-assam-frontend)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P52",
+      "pattern_name": "Static bulk file download from code-hosting / CKAN portals (GitHub raw, Dropbox, CKAN resource URLs)",
+      "description": "Datasets already collected and published as static CSV/XLSX/ZIP/PDF files on GitHub repos (raw.githubusercontent.com or GitHub API contents), Dropbox shared folders, or CKAN-style open-data catalogs (Justice Hub/justicehub.in, Open Budgets India). No scraping, authentication, or rendering needed — a direct HTTP GET (or git clone) retrieves the file. This is the most common and lowest-effort pattern across the CivicDataLab ecosystem, DAKSH, Development Data Lab, and Justice Hub-hosted datasets.",
+      "typical_website_characteristics": "Files are pre-scraped/pre-aggregated snapshots hosted on stable third-party infrastructure (GitHub, Dropbox, CKAN); no login, captcha, or JS rendering required; often accompanied by a codebook/data dictionary and sometimes a reusable scraper script (Python/R) showing how the original data was collected.",
+      "common_technologies": "HTTP GET, git clone, GitHub API (contents/trees), CKAN API, Dropbox share links, pandas/R for ETL",
+      "typical_data_formats": "CSV, XLSX, ZIP, JSON, PDF",
+      "common_obstacles": "Data is often a static one-time snapshot (not live/current) with a fixed end date; state/geographic coverage frequently partial (single state or district) rather than national; large file sizes need real ETL tooling; Dropbox/CKAN links can rotate or 404; format inconsistency (PDF-only, OCR artifacts) requires per-dataset triage; repos often unmaintained so freshness must be verified.",
+      "general_acquisition_strategy": "Enumerate the repo/catalog (GitHub API tree, CKAN package_search, or Dropbox folder listing), then bulk-download each resource via direct HTTP GET with no auth; parse structured files directly and OCR/PDF-extract unstructured ones; use any included codebook to normalize schema across years/states.",
+      "engineering_complexity": 1,
+      "representative_sources": [
+        "Budgets for Justice (JusticeHub / CivicDataLab)",
+        "Justice Hub (CivicDataLab) - Full Dataset Catalog",
+        "CALPRA Case Dataset",
+        "DAKSH's Database on Judicial Data",
+        "CivicDataLab POCSO_case_law_analysis",
+        "CivicDataLab district_treasury_analysis",
+        "CivicDataLab child-budget-tracker",
+        "apoorv74/OBI-data-explorer",
+        "CivicDataLab flood-data-ecosystem-Himachal-Pradesh",
+        "CivicDataLab IDS-DRR-Assam-Risk-Model",
+        "Development Data Lab eCourts Judicial Data Portal",
+        "know-your-high-court-judges (KHOJ) dataset",
+        "Assam State Budget Line-Item Datasets",
+        "India Justice Report 2022 / 2020 dataset",
+        "Disclosure of Electoral Bonds dataset",
+        "DAKSH High Court Data Portal (Dropbox CSVs)",
+        "CivicDataLab Assam Tenders Data",
+        "CivicDataLab flood-data-ecosystem-UP",
+        "CivicDataLab flood-data-ecosystem-Odisha",
+        "CivicDataLab flood-data-ecosystem-Bihar",
+        "CivicDataLab POCSO Case Law Analysis + Data4Justice"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P53",
+      "pattern_name": "NIC/state government legacy web-stack scraping (JSP/Java, ASP.NET WebForms, GePNIC) with session/viewstate/captcha handling",
+      "description": "A large class of Indian state and central government portals (eProcurement/GePNIC, OCMMS consent management, RTI appeal trackers, treasury/finance dashboards) run on shared legacy platforms (NIC JSP/Java or ASP.NET WebForms) that require session cookies, __VIEWSTATE postback state, dropdown-driven form submission, and often CAPTCHA solving to retrieve tabular data. A reusable scraper architecture (headless browser or requests session mimicking postbacks) generalizes across many near-identical state instances of the same platform family.",
+      "typical_website_characteristics": "Old Java (JSP/Grails/GSP) or ASP.NET WebForms stack; AJAX-loaded detail views or postback-driven dropdown cascades (state→district→department); numeric/enumerable record IDs; no bulk export or public API; same underlying platform (e.g. NIC GePNIC, OCMMS) reused near-identically across many states, so one scraper design ports with minor changes.",
+      "common_technologies": "Playwright/Puppeteer or requests+BeautifulSoup with manual viewstate/session replication, CAPTCHA solving (manual/OCR/3rd-party), form POST automation",
+      "typical_data_formats": "Server-rendered HTML tables, AJAX JSON fragments",
+      "common_obstacles": "CAPTCHA gates on search or detail pages; TLS certificate mismatches typical of NIC-hosted subdomains; only one search filter usable per query forcing many sequential requests; AJAX-loaded content invisible to plain HTTP fetch; ID enumeration may be rate-limited; industry/sector not filterable, requiring post-hoc name matching; per-state instances vary in reliability (some flaky or login-gated).",
+      "general_acquisition_strategy": "Use a headless browser (or replicate the POST/viewstate sequence via requests) to authenticate/establish session, iterate filter dropdowns or ID ranges, solve CAPTCHAs where present, and scrape the rendered result tables or intercepted AJAX responses; build one shared scraper per platform family (GePNIC, OCMMS, ASP.NET postback) and parameterize per state instance.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "West Bengal Online Consent Management & Monitoring System (WBOCMMS / SPCB)",
+        "OCMMS National Aggregator",
+        "West Bengal e-Procurement System (NIC GePNIC)",
+        "West Bengal eProcurement System (State-wide)",
+        "HP Tenders e-Procurement Portal",
+        "Rajasthan State Information Commission (RIC) Second Appeal Decisions",
+        "Koshvani — Gateway to Finance Activities, Uttar Pradesh",
+        "Assam State Pollution Control Board OCMMS"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P54",
+      "pattern_name": "Angular/React SPA reverse-engineering — network interception or hidden REST API extraction",
+      "description": "Modern single-page-application government/PSU portals (Angular or React) render data client-side via XHR calls to a backend REST or dashboard JSON API. Two engineering routes apply: (a) drive the SPA with a real browser and intercept the XHR/network traffic to capture the JSON payload, or (b) statically reverse-engineer the minified JS bundle to find the exact endpoint paths/params and call the API directly without a browser, which is more efficient once found.",
+      "typical_website_characteristics": "Client-rendered SPA (Angular/React/JSF) with a session-based or token-based REST backend feeding charts/tables; no data present in raw HTML; endpoint paths and params are often undocumented and must be discovered either via live network interception or by decompiling the webpack/minified JS bundle.",
+      "common_technologies": "Playwright/Puppeteer with network interception (page.on('response')), browser devtools network tab, static JS bundle analysis (webpack chunk inspection) to recover route names/payload shape",
+      "typical_data_formats": "JSON via XHR/fetch, occasionally CSV export triggered client-side",
+      "common_obstacles": "SPA blocks any direct API access without a rendered session; guessed endpoint paths frequently 404, requiring deeper bundle analysis or a live-sniffed session; policy limits on data depth (e.g. no transaction-level trade data ever released); anti-bot/403 on fallback API mirrors (e.g. data.gov.in); dashboards may expose only aggregate/chart data with no raw tabular export; multiple verticals/regions may each need separate reverse-engineering since implementations are inconsistent.",
+      "general_acquisition_strategy": "Load the target page in a headless browser, trigger the relevant UI actions (filters, guest login, search), capture the resulting XHR/fetch calls via network interception, then either keep using the browser-driven flow for ongoing collection or promote the discovered endpoint to a direct authenticated/unauthenticated REST call for lighter-weight repeated access.",
+      "engineering_complexity": 4,
+      "representative_sources": [
+        "DGCIS Foreign Trade Data Dissemination Portal (FTDDP)",
+        "MSTC Multi-Vertical E-Auctions",
+        "Rajasthan RTI Second Appeal / Aging-Pendency Report API",
+        "Trade Intelligence and Analytics (TIA) Portal",
+        "National Judicial Data Grid (NJDG) — District & High Court pendency data",
+        "NJDG High Court Data Grid",
+        "DILRMP State-Level CLR Dashboard",
+        "JALDI (Vidhi Centre for Legal Policy) Constitution Bench hidden API"
+      ],
+      "confidence": "high",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P55",
+      "pattern_name": "Large-scale cloud-hosted bulk datasets (AWS S3 / Athena) requiring targeted querying before retrieval",
+      "description": "Very large government or judicial datasets published as bulk cloud storage (S3 buckets with Parquet metadata, queryable via Athena) rather than a web portal. Acquisition is trivial at the infrastructure level (no auth needed, public bucket) but requires targeted metadata querying to avoid pulling the entire multi-terabyte corpus, plus downstream OCR/NLP processing since primary content is often scanned PDFs.",
+      "typical_website_characteristics": "Public S3 bucket (no-sign-request) containing Parquet-indexed metadata alongside raw PDF/document files at massive scale (terabytes, millions of documents); Athena or similar SQL-over-Parquet layer available for filtering before bulk retrieval.",
+      "common_technologies": "AWS CLI (s3 sync/cp --no-sign-request), AWS Athena SQL, OCR/NLP pipeline for entity extraction from PDFs",
+      "typical_data_formats": "Parquet (metadata), scanned/native PDF (documents)",
+      "common_obstacles": "Corpus size makes naive full download impractical, requiring precise Athena filtering by court/date/case-type; documents are scanned images in many cases, needing OCR before any entity-level cross-referencing is possible.",
+      "general_acquisition_strategy": "Query the Parquet metadata index via Athena/SQL to identify the target subset (court, date range, case type), then bulk-copy only the matching files from S3; run OCR/NLP extraction on retrieved PDFs to produce structured entity data.",
+      "engineering_complexity": 3,
+      "representative_sources": [
+        "Indian High Court Judgments (AWS Open Data / eCourts corpus)"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "pattern_id": "P56",
+      "pattern_name": "Static PDF/HTML gov portal scraping with TLS/certificate workarounds",
+      "description": "Simple static or lightly-dynamic government portals whose primary obstacle is not authentication or JS-rendering but broken/misconfigured TLS certificates (self-signed, incomplete chain, wrong subdomain) that break standard fetch tools, plus the need to enumerate and parse linked PDF/HTML documents (directory listings, static report pages) rather than call a structured API.",
+      "typical_website_characteristics": "Static or near-static HTML directory/listing pages linking to PDFs or fixed-pattern report pages (predictable or crawlable filename patterns); no API, no login; failures are almost entirely TLS-related (cert chain, subdomain mismatch) rather than access-control.",
+      "common_technologies": "curl -k / requests with verify=False or a correct CA bundle, pypdf/pdfplumber for text/table extraction, simple link-crawling for directory enumeration",
+      "typical_data_formats": "PDF, static HTML tables",
+      "common_obstacles": "TLS certificate errors (self-signed, incomplete chain, bare-domain-only) blocking standard fetchers, requiring an insecure/tolerant HTTP client; no index or API for discovering documents, so link crawling or Google-dorking is needed; some key fields (e.g. final winning bid, buyer identity) may live on a separate uncrawled page.",
+      "general_acquisition_strategy": "Use an HTTP client configured to bypass/ignore the broken TLS verification (or supply the correct bare-domain endpoint), crawl static listing/directory pages to enumerate document links, download PDFs/HTML, and extract text/tables programmatically.",
+      "engineering_complexity": 2,
+      "representative_sources": [
+        "WB Industries Department Portal - Mining RFP/EOI Documents",
+        "Directorate of Mines & Minerals West Bengal — Mineral Prospects Brochure (PDF)",
+        "MSTC WBMDTCL Coal E-Auction Records"
+      ],
+      "confidence": "medium",
+      "last_updated": "2026-07-07T22:00:00+05:30"
+    }
+  ]
+}

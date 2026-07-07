@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pandoro's Box — Know your representative. With receipts.</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ============ PERSISTENT APP NAV ============ -->
+  <header id="appnav">
+    <div class="wrap appnav-in">
+      <a href="#/" class="appnav-logo">Pandoro's <span>Box</span></a>
+      <button class="appnav-search" id="global-search-btn" aria-label="Search everything">
+        <span>🔍</span><span class="gs-label">Search</span><kbd class="gs-kbd">Ctrl K</kbd>
+      </button>
+      <button class="appnav-theme" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+      <button class="appnav-toggle" id="appnav-toggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
+      <nav class="appnav-links" id="appnav-links">
+        <a href="#/browse"     data-nav="browse">Representatives</a>
+        <a href="#/govwatch"   data-nav="govwatch">Government Watch</a>
+        <a href="#/scorecards" data-nav="scorecards">Scorecards</a>
+        <a href="#/funding"    data-nav="funding">Follow the Money</a>
+        <a href="#/issues"     data-nav="issues">Where India Stands</a>
+        <a href="#/tips"       data-nav="tips" class="appnav-tip">Submit a Tip</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ============ GLOBAL SEARCH (command palette) ============ -->
+  <div id="cmdk" class="cmdk-overlay" hidden>
+    <div class="cmdk-panel" role="dialog" aria-modal="true" aria-label="Search everything">
+      <input id="cmdk-input" type="search" placeholder="Search representatives, scandals, issues…" autocomplete="off" role="combobox" aria-controls="cmdk-results" aria-expanded="true" />
+      <div id="cmdk-results" class="cmdk-results" role="listbox"></div>
+      <div class="cmdk-foot"><kbd>↑↓</kbd> navigate <kbd>↵</kbd> open <kbd>esc</kbd> close</div>
+    </div>
+  </div>
+
+  <!-- ============ HOME / LANDING ============ -->
+  <section id="home-view">
+    <header class="hero hero-landing">
+      <div class="wrap">
+        <h1>Pandoro's <span>Box</span></h1>
+        <p class="tag">Open it. <em>See what's inside.</em></p>
+        <p class="sub">Investigative dossiers on every elected representative in India — and the governments they run — built <strong>only from public records</strong>. Court affidavits, audits, judgments, parliamentary data. Every claim cited. No spin, no party line.</p>
+        <form class="landing-search" id="landing-search">
+          <input id="search" type="search" placeholder="🔍  Search any politician by name, constituency, or party…" autocomplete="off" />
+          <div class="ac-box" id="landing-ac" hidden></div>
+        </form>
+        <div class="landing-stats" id="landing-stats"></div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <h2 class="section-title">Where do you want to look?</h2>
+      <div class="nav-grid">
+        <a href="#/browse" class="nav-card nc-reps"><span class="nc-icon">🧑‍⚖️</span><span class="nc-count" data-count="reps"></span><span class="nc-title">Representatives</span><span class="nc-desc">Search MPs, MLAs &amp; MLCs — full cited dossiers &amp; scorecards.</span></a>
+        <a href="#/leaderboard" class="nav-card nc-board"><span class="nc-icon">🏆</span><span class="nc-title">Leaderboards</span><span class="nc-desc">Who's most charged, richest, fastest-growing, least accountable.</span></a>
+        <a href="#/govwatch" class="nav-card nc-gov"><span class="nc-icon">🏛️</span><span class="nc-count" data-count="scandals"></span><span class="nc-title">Government Watch</span><span class="nc-desc">Scandals &amp; failures, traced to the minister responsible.</span></a>
+        <a href="#/conflicts" class="nav-card nc-conflicts"><span class="nc-icon">🔎</span><span class="nc-title">Conflicts of Interest</span><span class="nc-desc">Office-vs-private-interest leads — AI-tested, human-approved.</span></a>
+        <a href="#/issues" class="nav-card nc-issues"><span class="nc-icon">🧭</span><span class="nc-count" data-count="issues"></span><span class="nc-title">Where India Stands</span><span class="nc-desc">Poverty, press freedom, climate, health — India vs the world.</span></a>
+        <a href="#/scorecards" class="nav-card nc-score"><span class="nc-icon">📊</span><span class="nc-title">Scorecards</span><span class="nc-desc">Accountability by party, government, ministry &amp; sector.</span></a>
+        <a href="#/funding" class="nav-card nc-money"><span class="nc-icon">💰</span><span class="nc-title">Follow the Money</span><span class="nc-desc">Electoral-bond funding by party &amp; industry.</span></a>
+        <a href="#/compare" class="nav-card nc-compare"><span class="nc-icon">⚖️</span><span class="nc-title">Compare</span><span class="nc-desc">Two representatives, side by side, on every metric.</span></a>
+        <a href="#/tips" class="nav-card nc-tips"><span class="nc-icon">🕵️</span><span class="nc-title">Submit a Tip</span><span class="nc-desc">Anonymous leads — proof-of-work, no identifying data stored.</span></a>
+      </div>
+
+      <section id="saved-rail" class="home-rail" hidden>
+        <h2 class="section-title">⭐ Saved dossiers</h2>
+        <div class="rail-cards" id="saved-cards"></div>
+      </section>
+
+      <section id="recent-rail" class="home-rail" hidden>
+        <h2 class="section-title">🕘 Continue where you left off</h2>
+        <div class="rail-cards" id="recent-cards"></div>
+      </section>
+
+      <h2 class="section-title">Latest from the investigation</h2>
+      <div class="feed-grid" id="feed-grid"></div>
+
+      <h2 class="section-title">Spotlight</h2>
+      <div class="spotlight-grid" id="spotlight-grid">
+        <p class="muted small">Loading highlights…</p>
+      </div>
+
+      <footer class="site-foot">
+        <span class="muted small">Built only from public records · aggregation + citation, never accusation · politically neutral by design</span>
+      </footer>
+    </main>
+  </section>
+
+  <!-- ============ BROWSE REPRESENTATIVES ============ -->
+  <section id="browse-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← Home</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Representatives</h2>
+      <div class="filters">
+        <div class="ac-wrap"><input id="browse-search" type="search" placeholder="Search name, constituency, party…" autocomplete="off" /><div class="ac-box" id="browse-ac" hidden></div></div>
+        <select id="f-state"><option value="">All states</option></select>
+        <select id="f-party"><option value="">All parties</option></select>
+        <select id="f-office"><option value="">All offices</option></select>
+        <select id="f-sort" title="Sort representatives">
+          <option value="relevance">Sort: Most consequential</option>
+          <option value="grade">Sort: Grade (worst first)</option>
+          <option value="name">Sort: Name (A–Z)</option>
+          <option value="state">Group by state</option>
+        </select>
+        <button id="f-clear" class="ghost" type="button">Clear</button>
+        <a href="#/compare" class="compare-link" id="compare-cta">⚖ Compare two</a>
+      </div>
+      <div class="quick-chips" id="quick-chips">
+        <button class="qchip" data-chip="dossier" type="button">Has dossier</button>
+        <button class="qchip" data-chip="concern" type="button">Serious concerns (D–F)</button>
+        <button class="qchip" data-chip="strong" type="button">Strong record (A–B)</button>
+        <button class="qchip" data-chip="noreport" type="button">No report yet</button>
+      </div>
+      <div id="directory"></div>
+      <div class="load-more-wrap" id="load-more-wrap" hidden><button id="load-more" class="load-more" type="button">Load more</button></div>
+      <p id="no-results" class="muted center" hidden>No representatives match those filters yet.</p>
+    </main>
+  </section>
+
+  <!-- ============ LEADERBOARD ============ -->
+  <section id="leaderboard-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">🏆 Leaderboards</h2>
+      <p class="muted small">Representatives ranked on the documented record. Only reps with a generated report appear; every figure traces to their dossier. Rankings describe the public record — they are not accusations.</p>
+      <div class="lb-tabs" id="lb-tabs"></div>
+      <div id="lb-body"></div>
+    </main>
+  </section>
+
+  <!-- ============ ISSUES (Where India Stands) ============ -->
+  <section id="issues-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">🧭 Where India Stands</h2>
+      <p class="muted small">On the issues that matter: what the issue means for India, where India stands today and versus the world, and what successive parties &amp; governments have actually done — judged on the record, neutrally.</p>
+      <div class="issue-grid" id="issue-grid"></div>
+    </main>
+  </section>
+
+  <section id="issue-detail-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap"><a href="#/issues" class="back">← All issues</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
+    </header>
+    <main class="wrap" id="issue-detail-body"></main>
+  </section>
+
+  <!-- ============ SUBMIT A TIP ============ -->
+  <section id="tips-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">🕵️ Submit an Anonymous Tip</h2>
+      <p class="muted small">Know something the records don't show yet? Send a lead. We store <strong>no IP, no device, no precise timestamp</strong> — only the week. Tips are human-reviewed and only influence a report once corroborated by verifiable records. A small anti-spam puzzle runs in your browser.</p>
+      <div class="card tip-card">
+        <div class="tip-rep-pick">
+          <label>Which representative is this about?</label>
+          <input type="search" id="tip-rep-search" placeholder="Search a representative…" autocomplete="off" />
+          <div class="cmp-results" id="tip-rep-results" hidden></div>
+          <p class="small" id="tip-rep-chosen"></p>
+        </div>
+        <form id="tip-page-form" hidden>
+          <label>Category</label>
+          <select id="tip-page-category"></select>
+          <label>Your lead</label>
+          <textarea id="tip-page-text" rows="5" placeholder="Describe the lead and, ideally, where it can be verified (a document, a record, a date)…" maxlength="2000"></textarea>
+          <input type="text" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+          <button type="submit" id="tip-page-submit">Submit lead</button>
+          <p class="small" id="tip-page-status"></p>
+        </form>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ COMPARE VIEW ============ -->
+  <section id="compare-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="compare-title">Head-to-head comparison</h2>
+      <p class="muted small">Pick any two representatives to compare their records side by side — scores, signal flags, criminal cases, declared wealth, legislative activity, and detected patterns. Every figure traces back to the same cited public records used in their full reports.</p>
+      <div class="compare-pickers">
+        <div class="cmp-picker">
+          <label>Representative A</label>
+          <input type="search" id="cmp-search-a" placeholder="Search name…" autocomplete="off" />
+          <div class="cmp-results" id="cmp-results-a" hidden></div>
+        </div>
+        <div class="cmp-vs">vs</div>
+        <div class="cmp-picker">
+          <label>Representative B</label>
+          <input type="search" id="cmp-search-b" placeholder="Search name…" autocomplete="off" />
+          <div class="cmp-results" id="cmp-results-b" hidden></div>
+        </div>
+      </div>
+      <div id="compare-result"></div>
+    </main>
+  </section>
+
+  <!-- ============ GOVERNMENT WATCH (scandals) ============ -->
+  <section id="govwatch-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Government Watch</h2>
+      <p class="muted small">Documented governance failures — scams, accidents, policy failures — each traced to the <strong>minister and ministry responsible</strong>, what action followed, how India handled similar failures before, and how other countries handled comparable ones (with each country's press-freedom standing). Accountability is graded on the public record, not opinion.</p>
+      <div class="gw-filters">
+        <div class="ac-wrap"><input id="gw-search" type="search" placeholder="Search scandals…" autocomplete="off" /><div class="ac-box" id="gw-ac" hidden></div></div>
+        <select id="gw-level"><option value="">All levels</option><option value="union">Union government</option><option value="state">State governments</option></select>
+        <select id="gw-state"><option value="">All states</option></select>
+        <select id="gw-party"><option value="">All parties</option></select>
+        <select id="gw-sector"><option value="">All sectors</option></select>
+      </div>
+      <p class="muted small" id="gw-count"></p>
+      <div id="gw-list"></div>
+      <div id="gw-empty" class="empty-state" hidden>
+        <div class="empty-icon">🏛️</div>
+        <p class="empty-title">Government Watch is being compiled</p>
+        <p class="muted">Documented governance failures will appear here as our analyses are published. In the meantime, explore the representatives behind them.</p>
+        <a href="#/browse" class="empty-cta">Browse representatives →</a>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ POSSIBLE CONFLICTS OF INTEREST ============ -->
+  <section id="conflicts-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Possible Conflicts of Interest</h2>
+      <p class="muted small">Overlaps between public office and private interest, surfaced by a code detector, tested by <strong>two independent AI passes</strong> (an investigator, then a skeptical "defence" referee), and <strong>approved by a human editor</strong> before appearing here. <strong>Each is a LEAD, not a proven finding</strong> — the evidence for and against is shown so you can judge for yourself, and every claim links to its source. Nothing appears here automatically.</p>
+      <p class="muted small" id="conflicts-count"></p>
+      <div id="conflicts-list"></div>
+      <p id="conflicts-empty" class="muted center" hidden>No conflict-of-interest leads have been published yet. Leads are only shown after two AI reviews and explicit human approval.</p>
+    </main>
+  </section>
+
+  <!-- ============ SCANDAL DETAIL ============ -->
+  <section id="scandal-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/govwatch" class="back">← Government Watch</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap" id="scandal-body"></main>
+  </section>
+
+  <!-- ============ ACCOUNTABILITY SCORECARDS ============ -->
+  <section id="scorecards-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Accountability Scorecards</h2>
+      <p class="muted small">How documented governance failures were answered — rolled up by <strong>party</strong>, <strong>government term</strong>, <strong>ministry</strong> and <strong>sector</strong>. The <em>accountability rate</em> is the share of failures on that watch that saw real consequences (resignation, prosecution, remedy = full; inquiry-only = partial; nothing = none). <strong>Every party and government is scored by the identical formula on the same balanced corpus — judge the conduct, not the colours.</strong></p>
+      <div class="sc-tabs">
+        <button class="sc-tab active" data-sc="byParty">By Party</button>
+        <button class="sc-tab" data-sc="byGovernment">By Government</button>
+        <button class="sc-tab" data-sc="byMinistry">By Ministry</button>
+        <button class="sc-tab" data-sc="bySector">By Sector</button>
+      </div>
+      <div id="scorecards-body"></div>
+      <div id="scorecards-empty" class="empty-state" hidden>
+        <div class="empty-icon">📊</div>
+        <p class="empty-title">Scorecards are being compiled</p>
+        <p class="muted">Accountability rates roll up from documented cases in Government Watch. They'll appear here as those analyses are published.</p>
+        <a href="#/govwatch" class="empty-cta">See Government Watch →</a>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ FOLLOW THE MONEY ============ -->
+  <section id="funding-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Follow the Money</h2>
+      <p class="muted small">Who funded which party, and from which industry — from the Electoral Bonds data the State Bank of India disclosed on Supreme Court / ECI order (Apr 2019 – Jan 2024). India discloses political funding at the <strong>party</strong> level, so each representative inherits their party's funding profile. <strong>Every party's disclosed funding is shown — figures are the public record, not a framing.</strong></p>
+      <div class="sc-tabs">
+        <button class="fund-tab active" data-fund="party">By Party</button>
+        <button class="fund-tab" data-fund="sector">By Industry / Sector</button>
+        <button class="fund-tab" data-fund="donor">Top Donors</button>
+      </div>
+      <div id="funding-overview-body"></div>
+    </main>
+  </section>
+
+  <!-- ============ ADMIN — SCANDAL REVIEW QUEUE ============ -->
+  <section id="admin-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Admin — Review Queue</h2>
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-admin-tab="scandals" type="button">Scandal Proposals</button>
+        <button class="admin-tab" data-admin-tab="leads" type="button">Investigation Leads</button>
+      </div>
+      <div class="admin-auth">
+        <input type="password" id="admin-token" placeholder="Admin token (x-admin-token)" autocomplete="off" />
+        <button id="admin-load" class="primary" type="button">Load queue</button>
+        <span id="admin-status" class="muted small"></span>
+      </div>
+
+      <div id="admin-panel-scandals" class="admin-panel">
+        <p class="muted small">Auto-discovered scandal proposals awaiting your decision. <strong>Nothing here is public until you approve it</strong> — this human gate is what keeps the corpus neutral and accurate. Approving runs the full accountability analysis and publishes it to Government Watch. Rejecting discards it. Newly-surfaced economic scandals shown here have already cleared the ₹5 cr loss threshold; well-known named scandals and non-economic failures are exempt from it.</p>
+        <div id="admin-list"></div>
+        <p id="admin-empty" class="muted center" hidden>No proposals awaiting review. Run a report batch or <code>npm run ingest</code> to discover new ones.</p>
+      </div>
+
+      <div id="admin-panel-leads" class="admin-panel" hidden>
+        <p class="muted small">Conflict-of-interest LEADS a code detector flagged and two independent AI passes (an investigator, then a skeptical "defence" referee) could not dismiss as coincidence. <strong>Nothing here is public until you approve it.</strong> These are the most serious, least-proven claims on the site — read the evidence for/against carefully before publishing.</p>
+        <div id="lead-list"></div>
+        <p id="lead-empty" class="muted center" hidden>No investigation leads awaiting review. Run <code>report-generator.js</code> to detect and investigate new ones.</p>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ REPORT VIEW ============ -->
+  <section id="report-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← All representatives</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+
+    <main class="wrap">
+
+      <!-- Profile header -->
+      <div class="card report-head">
+        <div class="rh-left">
+          <div class="grade-ring" id="grade-ring">
+            <div class="grade" id="grade">–</div>
+          </div>
+        </div>
+        <div class="report-meta">
+          <h2 id="rep-name"></h2>
+          <p id="rep-sub" class="muted"></p>
+          <p id="score" class="score-line"></p>
+          <a href="#" id="how-scored" class="how-scored" hidden>How is this score calculated?</a>
+          <p id="headline" class="headline"></p>
+          <p id="generated" class="muted small"></p>
+          <div id="evidence-summary" class="evidence-summary" hidden></div>
+          <div class="report-actions">
+            <button id="bookmark-btn" class="bookmark-btn" type="button" hidden>☆ Save</button>
+            <a id="compare-with-btn" class="compare-with-btn" hidden>⚖ Compare with another representative</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Jump-to section nav (auto-built from visible sections) -->
+      <nav id="report-toc" class="report-toc" hidden aria-label="Sections of this dossier"></nav>
+
+      <!-- Signal badges — record-status view (colours decided by the backend) -->
+      <div class="signal-badges" id="signal-badges" hidden></div>
+
+      <!-- Affidavit snapshot (verified ECI facts — shown even before an AI report) -->
+      <div class="snapshot" id="affidavit-snapshot" hidden></div>
+
+      <!-- Executive summary -->
+      <div class="exec-card card" id="exec-card" hidden>
+        <p id="exec-summary" class="exec-text"></p>
+      </div>
+
+      <!-- Verified findings — computed in code, not AI judgment -->
+      <section class="record-section" id="verified-section" hidden>
+        <div class="section-head"><h3>✓ Verified Findings <span class="vf-sub">computed directly from the records, not AI opinion</span></h3></div>
+        <div id="verified-body"></div>
+      </section>
+
+      <!-- Relationship graph -->
+      <section class="record-section" id="relations-section" hidden>
+        <div class="section-head"><h3>🕸 Relationship Network</h3><span class="source-label">Source: Wikidata + cross-referenced roster</span></div>
+        <div id="relations-body"></div>
+      </section>
+
+      <!-- No report placeholder -->
+      <p id="no-report-msg" class="summary" hidden>No report has been generated for this representative yet.</p>
+
+      <!-- ===== Institutional record sections (NayaNeeta layout) ===== -->
+      <section class="record-section" id="criminal-section" hidden>
+        <div class="section-head"><h3>Criminal &amp; Legal Record</h3><span class="source-label">Source: Election Commission affidavit, court records</span></div>
+        <div id="criminal-body"></div>
+      </section>
+
+      <section class="record-section" id="financial-section" hidden>
+        <div class="section-head"><h3>Assets &amp; Financial Declarations</h3><span class="source-label">Source: Election Commission affidavit (candidate self-declaration)</span></div>
+        <div id="financial-body"></div>
+      </section>
+
+      <section class="record-section" id="legislative-section" hidden>
+        <div class="section-head"><h3>Parliamentary / Assembly Record</h3><span class="source-label">Source: Digital Sansad, PRS Legislative Research</span></div>
+        <div id="legislative-body"></div>
+      </section>
+
+      <!-- Where they stand (VoteSmart-style issue positions) -->
+      <section class="record-section" id="positions-section" hidden>
+        <div class="section-head"><h3>Where They Stand</h3><span class="source-label">Source: debates, questions, votes, manifestos &amp; quoted statements</span></div>
+        <div id="positions-body"></div>
+      </section>
+
+      <section class="record-section" id="business-section" hidden>
+        <div class="section-head"><h3>Declared Business Interests &amp; Company Affiliations</h3><span class="source-label">Source: EC affidavit, MCA21 Ministry of Corporate Affairs</span></div>
+        <div id="business-body"></div>
+      </section>
+
+      <!-- Revolving door — office ↔ industry overlap -->
+      <section class="record-section" id="revolving-section" hidden>
+        <div class="section-head"><h3>Revolving Door — Office &amp; Industry</h3><span class="source-label">Source: EC affidavit, MCA21 directorships</span></div>
+        <div id="revolving-body"></div>
+      </section>
+
+      <!-- Follow the money — the party's electoral-bond funding profile -->
+      <section class="record-section" id="funding-section" hidden>
+        <div class="section-head"><h3>Follow the Money — Party Funding</h3><span class="source-label">Source: Electoral Bonds disclosed by SBI on ECI/Supreme Court order</span></div>
+        <div id="funding-body"></div>
+      </section>
+
+      <section class="record-section" id="claims-section" hidden>
+        <div class="section-head"><h3>Public Statements &amp; Verification</h3><span class="source-label">Source: Parliamentary debates, press releases, verified news archives</span></div>
+        <div id="claims-body"></div>
+      </section>
+
+      <section class="record-section" id="party-history-section" hidden>
+        <div class="section-head"><h3>Party History</h3><span class="source-label">Source: Election Commission records</span></div>
+        <div id="party-history-body"></div>
+      </section>
+
+      <!-- Failures on their watch — scandals linked to this person as minister -->
+      <section class="record-section" id="ministerial-section" hidden>
+        <div class="section-head"><h3>Accountability On Their Watch</h3><span class="source-label">Source: Government Watch — documented failures during their ministerial tenure</span></div>
+        <div id="ministerial-body"></div>
+      </section>
+
+      <!-- Pattern Analysis — the cross-referenced investigative layer -->
+      <section class="pattern-section" id="pattern-section" hidden>
+        <div class="section-head">
+          <h3>Pattern Analysis</h3>
+        </div>
+        <p class="section-sub">Cross-referencing public records to identify patterns not visible in any single source. <strong>No allegation of wrongdoing is made.</strong> Each pattern cites its specific sources — the citizen is invited to review them directly.</p>
+        <div id="pattern-cards"></div>
+      </section>
+
+      <!-- Possible Conflicts of Interest — published investigation leads (L1→L2→L3, admin-approved) -->
+      <section class="record-section" id="conflicts-section" hidden>
+        <div class="section-head"><h3>Possible Conflicts of Interest</h3><span class="source-label">Source: code detector + two independent AI reviews, human-approved</span></div>
+        <p class="section-sub">Overlaps between public office and private interest that a detector flagged and two independent AI passes (an investigator, then a skeptical "defence" referee) could not dismiss as coincidence — then a human editor approved for display. <strong>Each is a LEAD, not a proven finding.</strong> The evidence for and against is shown so you can judge for yourself; every claim links to its source.</p>
+        <div id="conflicts-body"></div>
+      </section>
+
+      <!-- Career timeline -->
+      <details class="card" id="timeline-box" open hidden>
+        <summary><strong>Career Timeline</strong></summary>
+        <div class="timeline" id="career-timeline"></div>
+      </details>
+
+      <!-- AI investigation categories -->
+      <section id="categories-section" hidden>
+        <h3>Investigation</h3>
+        <p class="muted small">The AI read all evidence and organised it into the categories below. Every claim is cited — click any [n] link to check the source yourself.</p>
+        <div id="categories"></div>
+      </section>
+
+      <!-- Red flags + positive highlights -->
+      <div class="flags-row" id="flags-row" hidden>
+        <div class="flags-col">
+          <h3>Red Flags</h3>
+          <div id="red-flags"></div>
+        </div>
+        <div class="flags-col">
+          <h3>Positive Record</h3>
+          <div id="highlights"></div>
+        </div>
+      </div>
+
+      <!-- Accountability scorecard (collapsible) -->
+      <details class="card" id="scorecard-box" hidden>
+        <summary><strong>Accountability Scorecard</strong> <span class="muted small">— 5 standardised parameters for cross-politician comparison</span></summary>
+        <div id="params"></div>
+        <div id="calc-display" class="calc-wrap"></div>
+      </details>
+
+      <!-- Methodology -->
+      <details class="card methodology" id="methodology" hidden>
+        <summary>🔍 How is this score generated? <span class="muted">(full transparency)</span></summary>
+        <div id="methodology-body"></div>
+      </details>
+
+      <!-- Data gaps -->
+      <details class="card" id="gaps-box" hidden>
+        <summary>What we couldn't verify (data gaps)</summary>
+        <ul id="gaps"></ul>
+      </details>
+
+      <!-- Related dossiers (same party / same state) -->
+      <section id="related-dossiers" hidden>
+        <h3>Related dossiers</h3>
+        <div class="rail-cards" id="related-cards"></div>
+      </section>
+
+      <!-- Evidence trail -->
+      <div id="evidence-head-row" class="evidence-head-row" hidden>
+        <h3 id="evidence-heading">Evidence Trail</h3>
+        <div class="evidence-tools">
+          <button id="export-csv" class="ev-tool" type="button">⤓ CSV</button>
+          <button id="export-bib" class="ev-tool" type="button">⤓ BibTeX</button>
+          <button id="cite-link" class="ev-tool" type="button">🔗 Cite this page</button>
+        </div>
+      </div>
+      <p class="muted small" id="evidence-legend" hidden>Items marked <span class="badge adm">official record</span> are admissible public documents (ECI affidavits, CAG reports, court orders, fund audits). Items marked <span class="badge lead">news lead</span> are pointers — useful, but not proof on their own.</p>
+      <ul id="evidence" class="evidence"></ul>
+
+      <!-- Data Transparency Footer (legal protection layer — always shown) -->
+      <div class="transparency-footer" id="transparency-footer" hidden></div>
+
+      <!-- Tip section -->
+      <section id="tip-section" class="card tip-card">
+        <h3>Report something — anonymously</h3>
+        <p class="muted small">
+          We store <strong>no</strong> name, IP address, or exact time — only the week your tip arrived.
+          Your browser solves a small puzzle before submitting to stop bot floods.
+          Tips are reviewed by humans and only influence a report once corroborated by verifiable records.
+          Don't include your own name or contact details.
+        </p>
+        <form id="tip-form">
+          <input type="text" name="website" class="hp" tabindex="-1" autocomplete="off" />
+          <label>Category <select id="tip-category"></select></label>
+          <label>What happened? (what, when, where — no names of private individuals)
+            <textarea id="tip-text" minlength="30" maxlength="2000" required rows="5"></textarea>
+          </label>
+          <button type="submit" id="tip-submit">Submit anonymously</button>
+          <p id="tip-status" class="small"></p>
+        </form>
+      </section>
+
+    </main>
+  </section>
+
+  <footer class="wrap muted small">
+    <p>Pandoro's Box aggregates and cites public records. AI-generated dossiers and scores are summaries of cited evidence, updated weekly — they are analytical opinions based on the cited sources, not assertions of guilt. Pending court cases are charges, not convictions. Every claim links to its source — check them. See a mistake? The sources are right there.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
