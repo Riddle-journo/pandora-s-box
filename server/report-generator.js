@@ -26,6 +26,7 @@ import { buildRelations } from "./graph.js";
 import { detectConflicts } from "./conflict.js";
 import { upsertLead, listLeads } from "./store.js";
 import { mapLimit } from "./fetchers/http.js";
+import { citationsFor, selectSources } from "./citations.js";
 
 const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
 const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
@@ -127,19 +128,8 @@ export function computeOverall(parameters) {
 }
 
 // ── Citation integrity helper ──────────────────────────────────────────
-// Scan [n] markers in text and return the matching registry items as
-// {n,title,url,admissible}. Guarantees every UI citation resolves correctly.
-function citationsFor(text, registry) {
-  const seen = new Set();
-  const out = [];
-  for (const m of String(text ?? "").matchAll(/\[(\d+)\]/g)) {
-    const n = Number(m[1]);
-    if (seen.has(n)) continue;
-    const src = registry.find((r) => r.n === n);
-    if (src) { out.push({ n, title: src.title, url: src.url, admissible: src.admissible }); seen.add(n); }
-  }
-  return out;
-}
+// citationsFor() now lives in ./citations.js and is shared with the story
+// engine; imported above. Behaviour is byte-identical to the original here.
 
 // ── Prior-context digest ───────────────────────────────────────────────
 // Condense a previously-generated report into a compact, citable digest. This
@@ -552,20 +542,8 @@ export function validateAndRepair(raw, politician, registry) {
   return parsed;
 }
 
-// Real-content items first (full affidavit, biography, then news leads), so the
-// model's budget goes to substance. Content-less "pointer" links (generic
-// "search portal X" URLs GLM can't read) are EXCLUDED entirely — they only
-// bloated the prompt and tempted citing unread sources. News/fact-check leads
-// are kept: their headline is readable content.
-function selectSources(evidence, limit) {
-  const rank = (e) =>
-    e.content && e.source_type === "eci_affidavit" ? 0 :  // richest: full affidavit
-    e.content ? 1 :                                         // other real document text
-    2;                                                      // news / fact-check leads
-  const usable = evidence.filter((e) =>
-    e.content || e.source_type === "news" || e.source_type === "fact_check" || e.source_type === "prior_dossier");
-  return usable.sort((a, b) => rank(a) - rank(b)).slice(0, limit);
-}
+// selectSources() now lives in ./citations.js and is shared with the story
+// engine; imported above. Behaviour is byte-identical to the original here.
 
 // ── Tone pass (Stage 2) ────────────────────────────────────────────────
 // Re-voice ONLY the reader-facing prose so its WEIGHT matches the record's

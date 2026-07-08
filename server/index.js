@@ -14,7 +14,9 @@ import {
   latestReport, reportHistory, addTip, listTips, reviewTip,
   listScandals, getScandal, listProposals, deleteScandal,
   listLeads, getLead, listLeadProposals, deleteLead, upsertLead,
+  listStories, getStory, upsertStory,
 } from "./store.js";
+import { canTransition, STORY_STATUSES } from "./story-generator.js";
 import { issueChallenge, verifyPow, rateLimitTip, sanitizeTip, TIP_CATEGORIES } from "./safeguards.js";
 import { PARAMETERS, SCORING, DOSSIER_CATEGORIES } from "./report-generator.js";
 
@@ -177,6 +179,14 @@ app.get("/api/issues/:slug", async (req, res) => {
   const i = getIssue(req.params.slug);
   if (!i) return res.status(404).json({ error: "not generated yet" });
   res.json(i);
+});
+
+// ---- Stories: incident-centric narrative articles (published only) ----
+app.get("/api/stories", (_req, res) => res.json(listStories({ status: "published" })));
+app.get("/api/stories/:slug", (req, res) => {
+  const s = getStory(req.params.slug);
+  if (!s || s.status !== "published") return res.status(404).json({ error: "not found" });
+  res.json(s);
 });
 
 // ---- Leaderboard: rank reps by various metrics (task #19) ----
@@ -369,6 +379,24 @@ app.post("/api/admin/investigation-leads/:id/reject", requireAdmin, (req, res) =
   if (!lead || lead.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
   deleteLead(req.params.id);
   res.json({ ok: true, rejected: req.params.id });
+});
+
+// ---- Admin: incident-centric story drafts (human publish gate) ----
+// Stories are generated as status:'draft' and advance draft → proposed →
+// published | rejected. They are invisible to /api/stories until published.
+app.get("/api/admin/stories", requireAdmin, (req, res) => {
+  res.json(listStories({ status: req.query.status ?? "draft" }));
+});
+
+app.post("/api/admin/stories/:id/status", requireAdmin, (req, res) => {
+  const to = req.body?.status;
+  if (!STORY_STATUSES.includes(to)) return res.status(400).json({ error: "bad status" });
+  const story = getStory(req.params.id);
+  if (!story) return res.status(404).json({ error: "not found" });
+  if (!canTransition(story.status, to))
+    return res.status(409).json({ error: `illegal transition ${story.status} → ${to}` });
+  const updated = upsertStory({ ...story, status: to });
+  res.json({ ok: true, id: updated.id, slug: updated.slug, status: updated.status });
 });
 
 const PORT = process.env.PORT || 3000;

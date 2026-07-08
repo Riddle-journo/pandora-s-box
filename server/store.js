@@ -68,6 +68,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_lead_status ON investigation_leads(status);
   CREATE INDEX IF NOT EXISTS idx_lead_actor  ON investigation_leads(actor_id);
 
+  CREATE TABLE IF NOT EXISTS stories (
+    id TEXT PRIMARY KEY, slug TEXT UNIQUE, status TEXT, headline TEXT,
+    generated_at INTEGER, lead_ids TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_stories_status ON stories(status);
+
   CREATE TABLE IF NOT EXISTS meta ( key TEXT PRIMARY KEY, value TEXT );
 
   CREATE TABLE IF NOT EXISTS jobs (
@@ -434,6 +440,39 @@ export function upsertIssue(s) {
   if (!row.id) row.id = id();
   insIssue.run({ id: row.id, slug: row.slug ?? null, title: row.title ?? "", generated_at: row.generated_at ?? "", data: JSON.stringify(row) });
   return row;
+}
+
+// ---- Stories (incident-centric narrative articles built from verified leads) ----
+// A story is generated as status:'draft' and advances draft → proposed →
+// published (or rejected) through the admin gate — never public until published.
+const insStory = db.prepare(`INSERT OR REPLACE INTO stories
+  (id, slug, status, headline, generated_at, lead_ids, data)
+  VALUES (@id, @slug, @status, @headline, @generated_at, @lead_ids, @data)`);
+
+export function upsertStory(s) {
+  const existing = s.slug ? J(db.prepare("SELECT data FROM stories WHERE slug = ?").get(s.slug)) : null;
+  const row = existing ? { ...existing, ...s } : { id: id(), ...s };
+  if (!row.id) row.id = id();
+  if (row.status == null) row.status = "draft";
+  insStory.run({
+    id: row.id, slug: row.slug ?? null, status: row.status,
+    headline: row.headline ?? null,
+    generated_at: Number(row.generated_at) || null,
+    lead_ids: JSON.stringify(row.lead_ids ?? []),
+    data: JSON.stringify(row),
+  });
+  return row;
+}
+
+export function getStory(idOrSlug) {
+  return J(db.prepare("SELECT data FROM stories WHERE id = ? OR slug = ? LIMIT 1").get(idOrSlug, idOrSlug));
+}
+
+export function listStories({ status } = {}) {
+  const rows = status
+    ? db.prepare("SELECT data FROM stories WHERE status = ? ORDER BY generated_at DESC").all(status)
+    : db.prepare("SELECT data FROM stories ORDER BY generated_at DESC").all();
+  return rows.map(J);
 }
 
 // ---- Global meta (cursors like last_discovery_at) ----
