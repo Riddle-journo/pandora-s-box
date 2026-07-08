@@ -11,6 +11,8 @@
 import { textToSector, ministryToSector } from "./data/sectors.js";
 import { fundingForParty } from "./data/electoral-bonds.js";
 import { buildRelations } from "./graph.js";
+import { findEntityByStrongId } from "./entities.js";
+import { relationsOf } from "./relations.js";
 
 // Detector identity — bump when any threshold/weight/vector changes.
 export const DETECTOR_VERSION = "conflict-v1";
@@ -20,7 +22,10 @@ const OWNER_MULT = { self: 3, dependent: 2, spouse: 1, huf: 1 };
 const sev = (s) => (s >= 20 ? "SIGNIFICANT" : s >= 8 ? "NOTABLE" : "UNDER_REVIEW");
 
 // Pull the conflict-relevant structured data out of a rep's evidence.
-function gather(evidence) {
+// `politician` is optional: when supplied AND persisted director_of/owner_of edges
+// exist for its entity, they enrich `companies` (Plan 5). The enrichment is fully
+// guarded, so with an empty relationships table gather() behaves exactly as before.
+function gather(evidence, politician) {
   let power = null;
   const affidavits = [];
   const companies = [];
@@ -35,6 +40,26 @@ function gather(evidence) {
       for (const pr of n.projects) projects.push({ ...pr, url: e.url });
     }
   }
+
+  // Optional enrichment: fold persisted director_of/owner_of company links into
+  // `companies` so downstream checks can see MCA/ownership relations even when the
+  // mca_company evidence row is absent. Cheap existence check first (no entity → skip).
+  if (politician?.id) {
+    try {
+      const ent = findEntityByStrongId("person", { politician_id: politician.id });
+      if (ent) {
+        for (const rel of relationsOf(ent.id, {})) {
+          if (rel.src_entity_id !== ent.id) continue;
+          if (rel.rel_type !== "director_of" && rel.rel_type !== "owner_of") continue;
+          const d = rel.data ?? {};
+          const name = d.company_name ?? d.name;
+          if (!name) continue;
+          companies.push({ name, status: d.status ?? null, cin: d.cin ?? null, source_url: d.evidence_url ?? null, from_relation: rel.rel_type });
+        }
+      }
+    } catch { /* enrichment is best-effort; never breaks detection */ }
+  }
+
   affidavits.sort((a, b) => (a.election_year ?? 0) - (b.election_year ?? 0));
   const latest = affidavits.at(-1) ?? null;
   // Carry the affidavit's year onto each property: with no acquisition date in
@@ -57,7 +82,7 @@ function sameDistrict(a, b) {
 }
 
 export function detectConflicts(politician, evidence, roster, scandals) {
-  const g = gather(evidence);
+  const g = gather(evidence, politician);
   const leads = [];
   const mk = (o) => leads.push({ actor_id: politician.id, actor_name: politician.name, evidence_urls: [], detector_version: DETECTOR_VERSION, ...o });
 

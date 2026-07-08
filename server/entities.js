@@ -73,6 +73,11 @@ export function findEntityByAlias(kind, name) {
   return findEntitiesByAlias(kind, name)[0] ?? null;
 }
 
+export function getEntity(entityId) {
+  const row = db.prepare("SELECT * FROM entities WHERE id = ?").get(entityId);
+  return row ? parseEntity(row) : null;
+}
+
 // ── Mutation ──────────────────────────────────────────────────────────────
 function upsertAlias(entityId, name, source) {
   const aliasLc = key(name);

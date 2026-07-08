@@ -109,6 +109,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_assertions_status ON entity_assertions(status);
   CREATE INDEX IF NOT EXISTS idx_assertions_src    ON entity_assertions(source, raw_name);
+
+  -- Temporal relationship/event store. Relationships/events between entities carry
+  -- validity dates + per-edge evidence provenance, so temporal questions ("who
+  -- owned this company WHEN the tender was awarded") become answerable instead of
+  -- being recomputed statelessly in memory on every request.
+  CREATE TABLE IF NOT EXISTS relationships (
+    id TEXT PRIMARY KEY, src_entity_id TEXT, dst_entity_id TEXT, rel_type TEXT,
+    valid_from TEXT, valid_to TEXT, confidence REAL, evidence_id TEXT, source TEXT,
+    detector_version TEXT, created_at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rel_src ON relationships(src_entity_id, rel_type);
+  CREATE INDEX IF NOT EXISTS idx_rel_dst ON relationships(dst_entity_id, rel_type);
+  -- Null valid_from folds to '' so re-runs are idempotent under INSERT OR IGNORE.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_rel_uniq
+    ON relationships(src_entity_id, dst_entity_id, rel_type, source, coalesce(valid_from, ''));
+
+  CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY, kind TEXT, at TEXT, entity_ids TEXT, evidence_id TEXT,
+    source TEXT, created_at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, at);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uniq
+    ON events(kind, source, coalesce(at, ''), entity_ids);
 `);
 
 // Shared connection for the entity layer (server/entities.js) — one DB handle,

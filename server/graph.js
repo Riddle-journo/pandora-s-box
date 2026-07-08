@@ -6,6 +6,8 @@
 // dynasties and family-network overlaps deterministically, in code — no LLM
 // guessing, every edge traceable to a source.
 import { listPoliticians, listScandals } from "./store.js";
+import { findEntityByStrongId, getEntity } from "./entities.js";
+import { relationsOf } from "./relations.js";
 
 const HON = new Set(["dr", "shri", "smt", "kumari", "ms", "mr", "mrs", "prof", "adv", "shrimati", "sardar", "km"]);
 const toks = (s) => (s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((t) => t.length >= 3 && !HON.has(t));
@@ -99,4 +101,40 @@ export function buildRelations(politician, evidence) {
     }
   }
   return { relatives, links };
+}
+
+// Persisted-read path (Plan 5): reconstruct the {relatives, links} shape from the
+// relationships table via the politician's person entity, so relationships are no
+// longer recomputed statelessly on every request. Returns null when the politician
+// has no person entity; returns empty arrays when the entity exists but carries no
+// family edges (the caller treats both as "fall back to buildRelations").
+export function persistedRelations(politicianId) {
+  const ent = findEntityByStrongId("person", { politician_id: politicianId });
+  if (!ent) return null;
+  const family = relationsOf(ent.id, { relType: "family_of" }).filter((r) => r.src_entity_id === ent.id);
+  const relatives = [];
+  const links = [];
+  for (const e of family) {
+    const dst = getEntity(e.dst_entity_id);
+    const name = dst?.canonical_name ?? "";
+    if (!name) continue;
+    const relation = e.data?.relation ?? "relative";
+    if (!relatives.some((x) => x.name === name)) relatives.push({ name, relation, source_url: null });
+    if (e.data?.dynasty) {
+      links.push({
+        type: "DYNASTY", relation, relative_name: name, target_kind: "politician",
+        target_id: dst?.strong_ids?.politician_id ?? null, target_name: name,
+        note: `${name} — ${relation} — persisted family/dynasty edge.`, source_url: null,
+      });
+    }
+  }
+  return { relatives, links };
+}
+
+// Non-breaking wrapper: prefer the persisted store, fall back to the in-memory
+// buildRelations when nothing is persisted for this politician's entity.
+export function relationsForPolitician(politician, evidence) {
+  const persisted = persistedRelations(politician.id);
+  if (persisted && (persisted.links.length || persisted.relatives.length)) return persisted;
+  return buildRelations(politician, evidence);
 }
