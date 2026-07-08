@@ -18,6 +18,7 @@ import { generateReport } from "./report-generator.js";
 import { maybeDiscover } from "./scandal-discovery.js";
 import { classifyHealth } from "./health.js";
 import { startScheduler } from "./scheduler.js";
+import { runAnomalyScan } from "./anomaly.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -30,6 +31,7 @@ export const MIN_GAP_MS = {
   ingest_politician: 0,
   ingest_all: 0,
   source_health: 0,
+  anomaly_scan: 0,        // pure code, no network/LLM — self-limited by the weekly schedule
   noop: 0,
 };
 
@@ -70,6 +72,11 @@ export const HANDLERS = {
     }
     const pruned = pruneFetchRuns(90);
     return { sources: health.length, rotted: rotted.length, stale: stale.length, pruned };
+  },
+  // Statistical outlier scan: manufactures anomaly leads (assets, MPLADS
+  // utilisation, donation→award timing) for the L1 funnel. Pure code, no network.
+  async anomaly_scan() {
+    return await runAnomalyScan();
   },
   // Built-in health/verification job: does nothing but echo its payload. Safe to
   // enqueue anywhere (no network, no LLM) to confirm the worker is consuming.
