@@ -119,6 +119,38 @@ const clip = (s, n) => (s ?? "").toString()
   .replace(/&[a-z#0-9]+;/gi, " ")      // strip HTML entities
   .replace(/\s+/g, " ").trim().slice(0, n);
 
+// ── Shared: verbatim question-PDF fulltext ─────────────────────────────
+// Factored out of the Lok Sabha path so Rajya Sabha reuses the SAME logic and
+// the SAME SANSAD_FULLTEXT_LIMIT cap. Given a list of question records, take the
+// first `limit` that carry a PDF path (read from `pathField`), download+parse
+// each with bounded concurrency (mapLimit ..., 3), and return a formatted
+// "VERBATIM …" block to append to the evidence content — or "" when disabled,
+// when no record carries a path, or when nothing usable is extracted.
+//
+// Pure-ish + graceful: the PDF fetcher is injected (`fetchPdf`, defaulting to the
+// real fetchPdfText) so it is unit-testable with no network; any per-PDF failure
+// yields null and is skipped; it never throws.
+export async function attachQuestionFulltext(records, {
+  pathField,
+  limit = FULLTEXT_LIMIT,
+  fetchPdf = fetchPdfText,
+  formatHeader = (q) => `Q.${q.quesNo} (${clip(q.date, 12)}, ${clip(q.ministry, 50)})`,
+} = {}) {
+  if (!Array.isArray(records) || !(limit > 0)) return "";
+  const targets = records.filter((q) => q && q[pathField]).slice(0, limit);
+  if (!targets.length) return "";
+  const texts = await mapLimit(targets, 3, async (q) => {
+    let t = "";
+    try { t = await fetchPdf(q[pathField], { timeoutMs: 25000, maxLen: 1600 }); }
+    catch { /* graceful: a failed PDF just contributes no fulltext */ }
+    return t && t.length > 120 ? `── ${formatHeader(q)} ──\n${t}` : null;
+  });
+  const got = texts.filter(Boolean);
+  return got.length
+    ? `\n\nVERBATIM QUESTION & ANSWER TEXT (most recent ${got.length}):\n${got.join("\n\n")}`
+    : "";
+}
+
 // ── Lok Sabha: full record ─────────────────────────────────────────────
 async function scrapeLS(p, m) {
   const id = m.id;
@@ -193,18 +225,9 @@ async function scrapeLS(p, m) {
     const indexLines = qList.map((q) =>
       `• [${clip(q.date, 12)}] ${clip(q.type, 10)} — ${clip(q.subjects, 140)} (${clip(q.ministry, 60)})`);
 
-    let verbatim = "";
-    if (FULLTEXT_LIMIT > 0) {
-      const pdfTargets = qList.filter((q) => q.questionsFilePath).slice(0, FULLTEXT_LIMIT);
-      const texts = await mapLimit(pdfTargets, 3, async (q) => {
-        const t = await fetchPdfText(q.questionsFilePath, { timeoutMs: 25000, maxLen: 1600 });
-        return t && t.length > 120
-          ? `── Q.${q.quesNo} (${clip(q.date, 12)}, ${clip(q.ministry, 50)}) ──\n${t}`
-          : null;
-      });
-      const got = texts.filter(Boolean);
-      if (got.length) verbatim = `\n\nVERBATIM QUESTION & ANSWER TEXT (most recent ${got.length}):\n${got.join("\n\n")}`;
-    }
+    // Verbatim PDF text for the most recent N questions, via the shared helper.
+    // (The RS path calls the identical helper — see attachQuestionFulltext.)
+    const verbatim = await attachQuestionFulltext(qList, { pathField: "questionsFilePath" });
 
     items.push(evi(p, "parliament_questions", `${bioUrl}#questions`,
       `Lok Sabha questions asked (${qTotal}) — ${p.name}`,
@@ -276,7 +299,15 @@ async function pastTermItems(p, id, bioUrl) {
   return out;
 }
 
-// ── Rajya Sabha: identity + positions (Q&A/debate endpoints are a TODO) ──
+// ── Rajya Sabha: identity + positions ──
+// NOTE (probed 2026-07-12): the RS Q&A/debate data is NOT reachable the way LS is.
+// The LS per-member endpoints (question/qetAllQuestionsForMember, debate/debate-search,
+// question|debate/participation) have NO working api_rs analogue — every path patterned
+// on them returns 404, and the few that 403 need the RS site's internal CSRF/referer
+// machinery, not a clean public JSON call. Only /member/bio-data and /member/position-held
+// respond publicly. So RS members carry identity + bio + positions; their questions/debates
+// would need a different (likely session-PDF or authenticated-search) source — left as a
+// known external gap, not a quick endpoint swap.
 async function scrapeRS(p, m) {
   const id = m.id;
   const [bio, positions] = await Promise.all([
@@ -285,12 +316,26 @@ async function scrapeRS(p, m) {
   ]);
   const posLines = (Array.isArray(positions) ? positions : [])
     .map((x) => `• ${clip(x.period, 60)} — ${clip(x.position, 160)}`);
+
+  // RS question fulltext — reuse the EXACT Lok Sabha path via attachQuestionFulltext,
+  // honouring the same SANSAD_FULLTEXT_LIMIT cap. The RS question JSON is NOT publicly
+  // reachable today (see NOTE above: qetAllQuestionsForMember has no working api_rs
+  // analogue), so `rsQuestions` is empty and the helper returns "" — RS content is
+  // unchanged for now. When an RS question source IS wired, populate `rsQuestions`
+  // with its records and set `pathField` to that JSON's PDF-path key. The LS analogue
+  // is `questionsFilePath`; the RS field name is UNCONFIRMED — no reachable RS question
+  // sample exists to read it from, so verify it against the live RS JSON before trusting
+  // it (pass a custom `formatHeader` too if the RS record's number/date/ministry keys
+  // differ from quesNo/date/ministry).
+  const rsQuestions = [];
+  const verbatim = await attachQuestionFulltext(rsQuestions, { pathField: "questionsFilePath" });
+
   const content = [
     `Rajya Sabha member — ${m.name}`,
     m.constituency ? `Represents: ${m.constituency}` : null,
     bio?.dateBirth ? `Date of birth: ${clip(bio.dateBirth, 20)}` : null,
     posLines.length ? `\nPOSITIONS HELD:\n${posLines.join("\n")}` : null,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n") + verbatim;
 
   return [evi(p, "parliament_rs", `https://sansad.in/rs/members#${id}`,
     `Rajya Sabha member record (Digital Sansad) — ${p.name}`,

@@ -8,7 +8,7 @@
 // politician (their own announcements) and extract {title, date, state, district,
 // ministry}. Parsing is best-effort — district names in free text are noisy — so
 // everything downstream treats a project as a LEAD input, never a finding.
-import { fetchText, htmlToText } from "./http.js";
+import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf, sleep } from "./http.js";
 
 // Indian states + UTs — used to anchor a location in free release text.
 export const STATES = [
@@ -63,6 +63,40 @@ export function parseProject(text, { title = null, ministry = null } = {}) {
   };
 }
 
+// PIB release-detail links live behind ASP.NET pages whose paths carry the
+// bureau's own (real, long-standing) misspelling "PressRelese" alongside the
+// correct "PressRelease" — e.g. PressReleasePage.aspx, PressReleaseIframePage.aspx,
+// PressReleseDetail.aspx, PressReleseDetailm.aspx — all keyed by ?PRID=. Anything
+// else on the listing (nav, social, photo/video galleries) is not a release.
+const RELEASE_HREF = /Press(?:Release|Relese)[\w]*\.aspx/i;
+
+// PURE. Pull the individual press-release links out of a PIB listing page's raw
+// HTML and absolutise them against `baseUrl` (default the PIB origin). Returns
+// [{title, href}] with duplicates collapsed; never throws, [] on empty/no-match.
+export function parseReleaseLinks(html, baseUrl = "https://pib.gov.in") {
+  if (!html) return [];
+  const out = [];
+  const seen = new Set();
+  for (const m of String(html).matchAll(/<a\b[^>]*?href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi)) {
+    // href attributes routinely HTML-encode the query separators (&amp;); decode
+    // so the resolved URL is actually fetchable, not literal "amp;" in the query.
+    const rawHref = m[1].replace(/&amp;/gi, "&").trim();
+    if (!RELEASE_HREF.test(rawHref)) continue;
+    let href;
+    try { href = new URL(rawHref, baseUrl).href; } catch { continue; }
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const title = m[2]
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ title, href });
+  }
+  return out;
+}
+
 export async function fetchPIBProjects(p) {
   if (process.env.PIB_PROJECTS_DISABLE === "1") return [];
   // PIB search-by-name page (best-effort; returns [] silently on any failure).
@@ -74,18 +108,58 @@ export async function fetchPIBProjects(p) {
   const i = text.toLowerCase().indexOf(p.name.toLowerCase());
   if (i < 0) return [];
   const ctx = text.slice(Math.max(0, i - 400), i + p.name.length + 1200);
-  const project = parseProject(ctx, { title: `PIB release mentioning ${p.name}`, ministry: p.office || null });
-  if (!project) return [];
-  return [{
+
+  // Level 1 — the listing-skim item (the original behaviour). This is also the
+  // fallback: if the deep follow-through fails, we return exactly this (or []).
+  const listingProject = parseProject(ctx, { title: `PIB release mentioning ${p.name}`, ministry: p.office || null });
+  const listingItem = listingProject ? {
     politician_id: p.id,
     source_type: "project_announcement",
     tier: 4,
     admissible: true,
     title: `Project/scheme announcement — ${p.name}`,
     url: listUrl,
-    date: project.date,
-    summary: `A government project/scheme announcement associated with ${p.name}${project.district ? ` (district: ${project.district})` : ""}. Used only to time declared-property overlaps — a lead input, not a finding.`,
+    date: listingProject.date,
+    summary: `A government project/scheme announcement associated with ${p.name}${listingProject.district ? ` (district: ${listingProject.district})` : ""}. Used only to time declared-property overlaps — a lead input, not a finding.`,
     content: ctx.slice(0, 4000),
-    numbers: { projects: [project] },
-  }];
+    numbers: { projects: [listingProject] },
+  } : null;
+
+  // Level 2 — follow through to the FULL press-release body. Best-effort and
+  // fail-silent: any error here degrades to the listing-skim behaviour above.
+  let deepItems = [];
+  try {
+    const parsed = Number.parseInt(process.env.PIB_FULLTEXT_LIMIT ?? "4", 10);
+    const limit = Number.isFinite(parsed) && parsed >= 0 ? parsed : 4;
+    const links = parseReleaseLinks(html, "https://pib.gov.in").slice(0, limit);
+    const fetched = await mapLimit(links, 3, async (link) => {
+      await sleep(700); // polite pacing between PIB hits
+      const body = isPdf(link.href)
+        ? await fetchPdfText(link.href, { maxLen: 6000 })
+        : htmlToText(await fetchText(link.href, { timeoutMs: 12000 }), 6000);
+      const excerpt = contextAround(body, p.name, 800);
+      if (!excerpt) return null; // the release doesn't actually name the politician
+      const proj = parseProject(excerpt, { title: link.title || `PIB release naming ${p.name}`, ministry: p.office || null });
+      return {
+        politician_id: p.id,
+        source_type: "project_announcement",
+        tier: 4,
+        admissible: true,
+        title: `Project/scheme announcement — ${link.title ? link.title.slice(0, 160) : p.name}`,
+        url: link.href,
+        date: proj?.date ?? null,
+        summary: `Full text of a PIB release naming ${p.name}${proj?.district ? ` (district: ${proj.district})` : ""}. Used only to time declared-property overlaps — a lead input, not a finding.`,
+        content: excerpt.slice(0, 4000),
+        numbers: { projects: proj ? [proj] : [] },
+      };
+    });
+    deepItems = fetched.filter(Boolean);
+  } catch {
+    deepItems = []; // degrade silently to the listing-skim item
+  }
+
+  const out = [];
+  if (listingItem) out.push(listingItem);
+  out.push(...deepItems);
+  return out;
 }
