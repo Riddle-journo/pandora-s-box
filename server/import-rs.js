@@ -17,7 +17,6 @@ import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
 
 const RS_API   = "https://sansad.in/api_rs";
 const MYNETA   = "https://www.myneta.info";
-const UA       = { "User-Agent": "PandorosBox/0.1 (public-accountability research)" };
 
 const APPLY      = process.argv.includes("--apply");
 const NO_MYNETA  = process.argv.includes("--no-myneta");
@@ -49,9 +48,25 @@ async function fetchRsSittingMembers() {
   return data?.records ?? [];
 }
 
-// For each RS member, try to find their affidavit via MyNeta search.
-// RS members were often former LS MPs or state MLAs — so search for their name
-// and pick the most recent match from any election (MP, MLA, etc.).
+// Decide which MyNeta search row (if any) is a SAFE match for a member. Guards the
+// fuzzy match that used to hand same-named people each other's affidavits (repaired
+// by server/fix-rs-myneta-mismatch.js): name similarity must clear a RAISED bar
+// (0.8, was 0.65) AND the member's FIRST name token must appear in the candidate's
+// name, so "Nitin … Patil" never matches "Makrand … Patil". Same-name + same-state
+// collisions can't be told apart from a search row alone, so main() ALSO enforces
+// myneta_url uniqueness across the roster as the definitive backstop. Pure +
+// exported so the acceptance rule is unit-tested without hitting the network.
+export function selectMynetaMatch({ name, minScore = 0.8 }, rows = []) {
+  const lead = NORM(name)[0];
+  if (!lead) return null;
+  return rows
+    .map((r) => ({ r, ns: nameScore(name, r.cname) }))
+    .filter((x) => x.ns >= minScore && NORM(x.r.cname).includes(lead))
+    .sort((a, b) => b.ns - a.ns || (b.r.year || 0) - (a.r.year || 0))[0]?.r ?? null;
+}
+
+// For each RS member, try to find their affidavit via MyNeta search. RS members were
+// often former LS MPs or state MLAs — so search by name and pick the best recent match.
 async function findMynetaUrl(name) {
   try {
     const html = await fetchText(`${MYNETA}/search_myneta.php?q=${encodeURIComponent(name)}`, { timeoutMs: 18000 });
@@ -65,14 +80,8 @@ async function findMynetaUrl(name) {
       const year = Number(m[1].match(/(\d{4})/)?.[1] ?? 0);
       rows.push({ slug: m[1], id: m[2], cname, year });
     }
-    // Pick best name match, prefer most recent
-    const scored = rows
-      .map((r) => ({ r, ns: nameScore(name, r.cname) }))
-      .filter((x) => x.ns >= 0.65)
-      .sort((a, b) => b.ns - a.ns || b.r.year - a.r.year);
-    if (!scored.length) return null;
-    const best = scored[0].r;
-    return `${MYNETA}/${best.slug}/candidate.php?candidate_id=${best.id}`;
+    const best = selectMynetaMatch({ name }, rows);
+    return best ? `${MYNETA}/${best.slug}/candidate.php?candidate_id=${best.id}` : null;
   } catch { return null; }
 }
 
@@ -128,6 +137,24 @@ async function main() {
       console.log(`  [${done}/${newMembers.length}] ${name} — ${party}, ${state} — ${tick}`);
   });
 
+  // Uniqueness backstop: never assign a myneta_url that already belongs to another
+  // politician. Every wrong affidavit we've seen came from the fuzzy name search
+  // grabbing an EXISTING (LS/MLA) politician's candidate page for a same-named RS
+  // member — refusing the duplicate blocks the mis-attribution at the source, even
+  // when name+state are identical and the search row can't disambiguate.
+  const usedMyneta = new Set(listPoliticians().map((p) => p.myneta_url).filter(Boolean));
+  let droppedDup = 0;
+  for (const p of politicians) {
+    if (!p.myneta_url) continue;
+    if (usedMyneta.has(p.myneta_url)) {
+      console.warn(`  ⚠ ${p.name}: MyNeta URL already assigned to another politician — dropping (fuzzy name collision).`);
+      p.myneta_url = null; droppedDup++;
+    } else {
+      usedMyneta.add(p.myneta_url);
+    }
+  }
+  if (droppedDup) console.log(`Dropped ${droppedDup} duplicate MyNeta URL(s) to prevent mis-attribution.`);
+
   console.log(`\nBuilt ${politicians.length} RS politician records.`);
   const found = politicians.filter((p) => p.myneta_url).length;
   console.log(`MyNeta affidavit found for ${found}/${politicians.length} members.`);
@@ -148,4 +175,7 @@ async function main() {
   console.log("  node server/report-generator.js all --tier 2 --office RS  # generate RS reports");
 }
 
-main().catch((err) => { console.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));
+const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("import-rs.js");
+if (invokedDirectly) {
+  main().catch((err) => { console.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));
+}

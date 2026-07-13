@@ -10,13 +10,24 @@ import { sourceHealth } from "./store.js";
 // Pure classifier — extracted from the CLI so it is unit-testable without any
 // I/O. `health` is sourceHealth()'s output; `knownSources` is the full fetcher
 // roster (for detecting STALE sources that produced zero runs in the window).
-//   ROTTED = ran at least once but is failing: success rate < 50% OR zero items.
+//   ROTTED = actually failing: erroring on ≥50% of its runs. The only state
+//            that means "provably broken" (a fetcher throwing/timing out).
+//   QUIET  = runs cleanly (no errors) but has found ZERO items every time.
+//            NOT a failure — many sources are legitimately rare-hit (ICIJ
+//            leaks, SEBI orders, ED/CBI press releases only match a sliver of
+//            politicians) or are optional/unconfigured (no MCA_DB_PATH set).
+//            Zero items only becomes suspicious once a source has run against
+//            enough politicians that "never once matched" is itself a signal
+//            — that judgment belongs to a human reading the numbers, not a
+//            blanket rule, so QUIET is reported separately and never treated
+//            as rot (previously ROTTED conflated the two; see fetch-health.test.js).
 //   STALE  = a known source with no runs at all in the window.
 export function classifyHealth(health = [], knownSources = []) {
   const ran = new Set(health.map((h) => h.source));
-  const rotted = health.filter((h) => h.runs > 0 && (h.ok_rate < 0.5 || h.total_items === 0));
+  const rotted = health.filter((h) => h.runs > 0 && h.ok_rate < 0.5);
+  const quiet = health.filter((h) => h.runs > 0 && h.ok_rate >= 0.5 && h.total_items === 0);
   const stale = knownSources.filter((s) => !ran.has(s));
-  return { rows: health, rotted, stale };
+  return { rows: health, rotted, quiet, stale };
 }
 
 function humanizeAge(at) {
@@ -41,7 +52,7 @@ async function main() {
   let knownSources = [];
   try { ({ FETCHER_NAMES: knownSources } = await import("./ingest.js")); } catch { /* roster unavailable → no STALE */ }
 
-  const { rows, rotted, stale } = classifyHealth(health, knownSources);
+  const { rows, rotted, quiet, stale } = classifyHealth(health, knownSources);
 
   console.log(`\nSource health — last ${days} day(s)  (${rows.length} source(s) with runs)\n`);
   if (rows.length) {
@@ -62,10 +73,14 @@ async function main() {
     console.log("  (no fetch_runs recorded in this window)");
   }
 
-  console.log(`\nROTTED (runs>0, success <50% or zero items): ${rotted.length}`);
+  console.log(`\nROTTED (runs>0, success <50% — actually failing): ${rotted.length}`);
   for (const r of rotted) {
     console.log(`  ✗ ${padR(r.source, 22)} ${Math.round(r.ok_rate * 100)}% ok, ${r.total_items} items — ${trunc(r.last_error ?? "no error logged", 60)}`);
   }
+
+  console.log(`\nQUIET (runs cleanly, but zero items every time — not necessarily broken, ` +
+    `may be a rare-hit or unconfigured source): ${quiet.length}`);
+  for (const r of quiet) console.log(`  · ${padR(r.source, 22)} ${r.runs} run(s), 0 items`);
 
   console.log(`\nSTALE (known source, zero runs in window): ${stale.length}`);
   for (const s of stale) console.log(`  · ${s}`);

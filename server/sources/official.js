@@ -6,8 +6,13 @@
 // POINTERS vs CONTENT: items here are research-pointer links stored in evidence
 // (URL + summary). Separate async fetchers in /fetchers/ add actual content for
 // the sources that can be machine-read.
+//
+// DEAD SOURCES REMOVED: pointers to sources that cannot be machine-read within
+// our constraints (CAPTCHA / login / no name-indexed search — MCA21, DILRMP land
+// records, PFMS, GeM, Lokpal, CIC/RTI, state-assembly & MLALAD portals) have been
+// pulled out of this catalogue and recorded in sources_catalog.json →
+// rejected_sources with the exact blocker, so we don't carry plumbing we can't run.
 
-const UA = { "User-Agent": "PandorosBox/0.1 (public-accountability research)" };
 const MYNETA = "https://www.myneta.info";
 
 const ev = (politician_id, obj) => ({ politician_id, date: null, ...obj });
@@ -46,7 +51,6 @@ function tier1ECI(p) {
 // TIER 2 — Parliament & State Legislatures
 // ===================================================================
 function tier2Parliament(p) {
-  const q = encodeURIComponent(p.name);
   const items = [];
 
   if (p.office === "MP") {
@@ -70,27 +74,7 @@ function tier2Parliament(p) {
         admissible: true,
         title: `MPLADS fund utilization — ${p.name} — ${p.constituency ?? ""}`,
         url: "https://mplads.mospi.gov.in/digigov/landingpage.html",
-        summary: "MP Local Area Development Scheme: ₹5 crore/year per MP for constituency works. Fund released vs. utilised is a direct accountability metric for the individual MP. Portal is login-walled — requires manual check or RTI.",
-      })
-    );
-  }
-
-  if (p.office === "MLA") {
-    const stateQ = encodeURIComponent(`${p.state ?? ""} vidhan sabha proceedings ${p.name}`);
-    items.push(
-      ev(p.id, {
-        source_type: "assembly",
-        admissible: true,
-        title: `${p.state ?? "State"} Legislative Assembly proceedings — ${p.name}`,
-        url: `https://www.google.com/search?q=${stateQ}+site%3Agov.in`,
-        summary: "State assembly debates, questions, attendance and vote records. Each state has its own portal; link is a scoped gov.in search. Cannot be uniformly automated across 28 portals.",
-      }),
-      ev(p.id, {
-        source_type: "mlalads",
-        admissible: true,
-        title: `MLALAD / constituency development fund — ${p.constituency ?? ""}`,
-        url: `https://www.google.com/search?q=${encodeURIComponent(`${p.state ?? ""} MLALAD utilization ${p.constituency ?? ""}`)}+site%3Agov.in`,
-        summary: "State MLA Local Area Development fund utilisation. State-controlled; no central portal. Most states do not publish this publicly — RTI is the main path.",
+        summary: "MP Local Area Development Scheme: ₹5 crore/year per MP for constituency works. Fund released vs. utilised is a direct accountability metric for the individual MP. Content fetched by mplads.js (MoSPI API).",
       })
     );
   }
@@ -103,21 +87,13 @@ function tier2Parliament(p) {
 // ===================================================================
 function tier3AntiCorruption(p) {
   const q = encodeURIComponent(p.name);
-  const stateQ = encodeURIComponent(`${p.state ?? ""} lokayukta ${p.name}`);
   return [
     ev(p.id, {
       source_type: "cag",
       admissible: true,
       title: `CAG audit reports — ${p.state || "India"} — ${p.name}`,
       url: `https://cag.gov.in/en/audit-report?title=&field_state_target_id=All&keys=${q}`,
-      summary: "Comptroller & Auditor General audit reports laid before Parliament/state legislatures. Constitutional authority; primary admissible record for financial irregularities. Content fetched by cag-reports.js.",
-    }),
-    ev(p.id, {
-      source_type: "lokpal",
-      admissible: true,
-      title: `Lokpal of India — complaints & disposal orders`,
-      url: "https://lokpal.gov.in/",
-      summary: "Statutory anti-corruption ombudsman for MPs and Union functionaries. Published orders are public records. Cannot be automated: no name-indexed search; orders are PDFs keyed by case number.",
+      summary: "Comptroller & Auditor General audit reports laid before Parliament/state legislatures. Constitutional authority; primary admissible record for financial irregularities. Content matched via the cag-audit-index / cag-bihar / cag-odisha L1 datasets (readBodies).",
     }),
     ev(p.id, {
       source_type: "ed",
@@ -132,20 +108,6 @@ function tier3AntiCorruption(p) {
       title: `CBI press releases / cases — ${p.name}`,
       url: "https://cbi.gov.in/press.php",
       summary: "CBI press releases on corruption/criminal cases. Content fetched by press-releases.js. Corroborate with eCourts for case status.",
-    }),
-    ev(p.id, {
-      source_type: "lokayukta",
-      admissible: true,
-      title: `${p.state ?? "State"} Lokayukta findings — ${p.name}`,
-      url: `https://www.google.com/search?q=${stateQ}+site%3Agov.in`,
-      summary: "State-level anti-corruption ombudsman orders. Admissible as a public record against MLAs and state ministers. Cannot be automated: 28 separate portals, most JS-rendered or captcha-walled.",
-    }),
-    ev(p.id, {
-      source_type: "cic_rti",
-      admissible: true,
-      title: `CIC decisions / RTI disclosures — ${p.name}`,
-      url: "https://ciconline.nic.in/cic_decisions/",
-      summary: "Central Information Commission decisions and RTI-disclosed records. Cannot be automated: search returns case reference numbers not party names.",
     }),
   ];
 }
@@ -162,13 +124,6 @@ function tier4Courts(p) {
       title: `eCourts district judgment search — ${p.name}`,
       url: `https://judgments.ecourts.gov.in/pdfsearch/?p=pdf_search/index&search_text=${q}`,
       summary: "District and sessions court judgments — full text search. Indian Kanoon API (fetched by indian-kanoon.js) covers this more reliably.",
-    }),
-    ev(p.id, {
-      source_type: "ecourts_status",
-      admissible: true,
-      title: `eCourts live case status — ${p.name}`,
-      url: `https://ecourts.gov.in/ecourts_home/`,
-      summary: "Live pending-case status (stage, next hearing). Cannot be automated: status search requires the CNR case number, not a party name.",
     }),
     ev(p.id, {
       source_type: "supreme_court",
@@ -200,25 +155,11 @@ function tier4Courts(p) {
 function tier5Funds(p) {
   return [
     ev(p.id, {
-      source_type: "pfms",
-      admissible: true,
-      title: `PFMS — scheme fund flows — ${p.constituency ?? ""}`,
-      url: `https://pfms.nic.in/`,
-      summary: "Public Financial Management System — tracks fund releases under all central schemes to districts and implementing agencies. Cannot be automated: JS dashboard with no politician-name query.",
-    }),
-    ev(p.id, {
-      source_type: "gem",
-      admissible: true,
-      title: `GeM — government procurement orders — ${p.state ?? ""}`,
-      url: `https://gem.gov.in/`,
-      summary: "Government e-Marketplace — all central procurement orders and seller names. To use: cross-reference sellers with MCA for beneficial-ownership links to the politician. Cannot be automated without MCA data as prior step.",
-    }),
-    ev(p.id, {
       source_type: "eprocure",
       admissible: true,
       title: `Central Public Procurement Portal — tenders — ${p.state ?? ""}`,
       url: `https://eprocure.gov.in/`,
-      summary: "All central government tenders — contractor identities. Favoritism trail requires knowing the contractor company associated with the politician first.",
+      summary: "All central government tenders — contractor identities. Favoritism trail requires knowing the contractor company associated with the politician first. Content fetched by cppp-procurement.js.",
     }),
   ];
 }
@@ -229,13 +170,6 @@ function tier5Funds(p) {
 function tier6Corporate(p) {
   const q = encodeURIComponent(p.name);
   return [
-    ev(p.id, {
-      source_type: "mca",
-      admissible: true,
-      title: `MCA company directorships — ${p.name}`,
-      url: "https://www.mca.gov.in/content/mca/global/en/mca/master-data/MDS.html",
-      summary: "Ministry of Corporate Affairs: company directorships, shareholding, charges. Cannot be automated: MCA21 requires user login + GSTIN verification. Paid alternatives: Probe42, SurePass, tofler.in.",
-    }),
     ev(p.id, {
       source_type: "sebi",
       admissible: true,
@@ -268,30 +202,6 @@ function tier6Corporate(p) {
 }
 
 // ===================================================================
-// TIER 7 — Land & Property Records
-// ===================================================================
-function tier7Land(p) {
-  const state = p.state ?? "";
-  const stateQ = encodeURIComponent(`${state} land registration property records`);
-  return [
-    ev(p.id, {
-      source_type: "land_records",
-      admissible: true,
-      title: `State land registration records — ${state}`,
-      url: `https://dilrmp.gov.in/`,
-      summary: "Digital India Land Records Modernisation Programme — land ownership and mutation records. Cross-match with declared assets in ECI affidavit. Cannot be automated: 28 separate state portals, captcha-walled.",
-    }),
-    ev(p.id, {
-      source_type: "state_land_portal",
-      admissible: true,
-      title: `${state} property registration portal`,
-      url: `https://www.google.com/search?q=${stateQ}+site%3Agov.in`,
-      summary: "State-specific land/property registration portal (Bhoomi/Karnataka, Dharani/Telangana, IGR/Maharashtra, Bhulekh/UP, etc.).",
-    }),
-  ];
-}
-
-// ===================================================================
 // Tier registry — single source of truth. Add a tier here and it flows
 // through ingestion, tier-filtering, and the methodology UI automatically.
 // ===================================================================
@@ -302,57 +212,14 @@ export const TIER_INFO = [
   { tier: 4, name: "Courts",                         fn: tier4Courts },
   { tier: 5, name: "Public Funds & Procurement",    fn: tier5Funds },
   { tier: 6, name: "Corporate & Ownership",         fn: tier6Corporate },
-  { tier: 7, name: "Land & Property",               fn: tier7Land },
 ];
 
 // Assemble all tiers for a politician, tagging each item with its tier number.
-export function officialSourceLinks(p, tier_max = 7) {
+export function officialSourceLinks(p, tier_max = 6) {
   const out = [];
   for (const { tier, fn } of TIER_INFO) {
     if (tier > tier_max) break;
     for (const item of fn(p)) out.push({ ...item, tier });
   }
   return out;
-}
-
-// ===================================================================
-// MyNeta scrape: extract headline facts from a candidate's affidavit page.
-// Used by the report generator for quick summary stats separate from
-// the full-content fetch in myneta-full.js.
-// ===================================================================
-export async function fetchMyNetaFacts(p) {
-  if (!p.myneta_url) return [];
-  try {
-    const res = await fetch(p.myneta_url, { headers: UA });
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    const grab = (re) => html.match(re)?.[1]?.replace(/<[^>]+>/g, "").trim() ?? null;
-
-    const cases  = grab(/Criminal Cases[^:]*:\s*<\/b>\s*([^<]+)/i)
-                ?? grab(/criminal_cases?[^>]*>([^<]+)/i);
-    const assets  = grab(/Total Assets[^:]*:?\s*<\/(?:b|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
-    const liabs   = grab(/Total Liabilities[^:]*:?\s*<\/(?:b|td)>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
-    const edu     = grab(/Education[^:]*:\s*<\/b>\s*([^<]+)/i);
-
-    const out = [];
-    if (cases)
-      out.push({ politician_id: p.id, source_type: "eci_affidavit", tier: 1, admissible: true,
-        title: `Self-declared criminal cases: ${cases}`, url: p.myneta_url, date: null,
-        summary: `Candidate's sworn ECI affidavit (via ADR/MyNeta): criminal cases declared = ${cases}. Note: charges, not convictions.` });
-    if (assets)
-      out.push({ politician_id: p.id, source_type: "eci_affidavit", tier: 1, admissible: true,
-        title: `Declared total assets: ${assets}`, url: p.myneta_url, date: null,
-        summary: "Total declared assets per sworn ECI affidavit (via ADR/MyNeta)." });
-    if (liabs)
-      out.push({ politician_id: p.id, source_type: "eci_affidavit", tier: 1, admissible: true,
-        title: `Declared total liabilities: ${liabs}`, url: p.myneta_url, date: null,
-        summary: "Total declared liabilities per sworn ECI affidavit." });
-    if (edu)
-      out.push({ politician_id: p.id, source_type: "eci_affidavit", tier: 1, admissible: true,
-        title: `Declared education: ${edu}`, url: p.myneta_url, date: null,
-        summary: "Declared educational qualification from sworn ECI affidavit." });
-
-    return out;
-  } catch { return []; }
 }

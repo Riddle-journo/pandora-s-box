@@ -38,6 +38,19 @@ export function upsertRelationship(r = {}) {
   return { id: row.id, inserted: true };
 }
 
+// Raise an existing edge's confidence (never lowers it) and merge fields into its
+// `data`. Plan A2 uses this to mark an extraction edge CORROBORATED once a second
+// independent source (a Tofler DIRECTOR_LINK lead) confirms the same politician↔company
+// link — without minting a duplicate edge. Returns true if the row existed.
+export function updateRelationship(relId, { confidence, data } = {}) {
+  const row = db.prepare("SELECT confidence, data FROM relationships WHERE id = ?").get(relId);
+  if (!row) return false;
+  const nextData = data ? { ...safeJson(row.data), ...data } : safeJson(row.data);
+  const nextConf = confidence != null ? Math.max(Number(row.confidence) || 0, Number(confidence) || 0) : row.confidence;
+  db.prepare("UPDATE relationships SET confidence = ?, data = ? WHERE id = ?").run(nextConf, JSON.stringify(nextData), relId);
+  return true;
+}
+
 // Idempotent via the unique index (kind,source,coalesce(at,''),entity_ids).
 export function upsertEvent(e = {}) {
   const entity_ids = JSON.stringify(e.entity_ids ?? []);

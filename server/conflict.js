@@ -21,6 +21,13 @@ const INFRA_SECTORS = ["transport", "realestate", "infrastructure", "mining"];
 const OWNER_MULT = { self: 3, dependent: 2, spouse: 1, huf: 1 };
 const sev = (s) => (s >= 20 ? "SIGNIFICANT" : s >= 8 ? "NOTABLE" : "UNDER_REVIEW");
 
+// Tunable defaults (the engine passes DB-backed overrides; standalone use unchanged).
+export const CONFLICT_DEFAULTS = {
+  PROPERTY_MIN_VALUE: 1e7, // ₹1 Cr floor for a weak location-only front-running lead
+  DYNASTY_SCORE: 10,       // fixed score for a family-holds-office link
+  STRUCK_OFF_SCORE: 12,    // fixed score for a struck-off company in a covered sector
+};
+
 // Pull the conflict-relevant structured data out of a rep's evidence.
 // `politician` is optional: when supplied AND persisted director_of/owner_of edges
 // exist for its entity, they enrich `companies` (Plan 5). The enrichment is fully
@@ -81,7 +88,8 @@ function sameDistrict(a, b) {
   return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
 }
 
-export function detectConflicts(politician, evidence, roster, scandals) {
+export function detectConflicts(politician, evidence, roster, scandals, overrides = {}) {
+  const { PROPERTY_MIN_VALUE, DYNASTY_SCORE, STRUCK_OFF_SCORE } = { ...CONFLICT_DEFAULTS, ...overrides };
   const g = gather(evidence, politician);
   const leads = [];
   const mk = (o) => leads.push({ actor_id: politician.id, actor_name: politician.name, evidence_urls: [], detector_version: DETECTOR_VERSION, ...o });
@@ -142,8 +150,8 @@ export function detectConflicts(politician, evidence, roster, scandals) {
       }
 
       // No timing match → fall back to the weak location-overlap lead, and only
-      // when it clears the noise floor (ministerial infra portfolio OR ≥₹1cr).
-      if (!ministerial && val < 1e7) continue;
+      // when it clears the noise floor (ministerial infra portfolio OR ≥ floor).
+      if (!ministerial && val < PROPERTY_MIN_VALUE) continue;
       const signal_score = Math.min(Math.round(val / 1e7), 40) + (ministerial ? 8 : 0);
       mk({
         vector: "PROJECT_FRONT_RUNNING", instrument: `infrastructure/land-affecting office`,
@@ -163,7 +171,7 @@ export function detectConflicts(politician, evidence, roster, scandals) {
     mk({
       vector: "DYNASTY_CONCENTRATION", instrument: "elected office held by family",
       beneficiary: link.relative_name, beneficiary_kind: "politician",
-      signal_score: 10, severity: "NOTABLE",
+      signal_score: DYNASTY_SCORE, severity: sev(DYNASTY_SCORE),
       headline: `A ${link.relation} also holds elected office (family concentration of political power).`,
       evidence_urls: [link.source_url].filter(Boolean), detail: link.note,
     });
@@ -197,7 +205,7 @@ export function detectConflicts(politician, evidence, roster, scandals) {
     mk({
       vector: "SHELL_OR_STRUCK_OFF_LINK", instrument: `${sector}-sector office attention`,
       beneficiary: c.name, beneficiary_kind: "company",
-      signal_score: 12, severity: "NOTABLE",
+      signal_score: STRUCK_OFF_SCORE, severity: sev(STRUCK_OFF_SCORE),
       headline: `A declared ${sector}-sector company linked to the member is struck-off/dormant in the MCA registry.`,
       evidence_urls: [c.source_url].filter(Boolean),
       detail: `${c.name} — MCA status: ${c.status}. Struck-off companies in a sector the office covers are worth review.`,

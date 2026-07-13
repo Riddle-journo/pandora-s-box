@@ -24,6 +24,7 @@
         <a href="#/funding"    data-nav="funding">Follow the Money</a>
         <a href="#/issues"     data-nav="issues">Where India Stands</a>
         <a href="#/tips"       data-nav="tips" class="appnav-tip">Submit a Tip</a>
+        <a href="#/ops"        data-nav="ops" class="appnav-ops">Ops</a>
       </nav>
     </div>
   </header>
@@ -58,7 +59,6 @@
         <a href="#/browse" class="nav-card nc-reps"><span class="nc-icon">🧑‍⚖️</span><span class="nc-count" data-count="reps"></span><span class="nc-title">Representatives</span><span class="nc-desc">Search MPs, MLAs &amp; MLCs — full cited dossiers &amp; scorecards.</span></a>
         <a href="#/leaderboard" class="nav-card nc-board"><span class="nc-icon">🏆</span><span class="nc-title">Leaderboards</span><span class="nc-desc">Who's most charged, richest, fastest-growing, least accountable.</span></a>
         <a href="#/govwatch" class="nav-card nc-gov"><span class="nc-icon">🏛️</span><span class="nc-count" data-count="scandals"></span><span class="nc-title">Government Watch</span><span class="nc-desc">Scandals &amp; failures, traced to the minister responsible.</span></a>
-        <a href="#/conflicts" class="nav-card nc-conflicts"><span class="nc-icon">🔎</span><span class="nc-title">Conflicts of Interest</span><span class="nc-desc">Office-vs-private-interest leads — AI-tested, human-approved.</span></a>
         <a href="#/issues" class="nav-card nc-issues"><span class="nc-icon">🧭</span><span class="nc-count" data-count="issues"></span><span class="nc-title">Where India Stands</span><span class="nc-desc">Poverty, press freedom, climate, health — India vs the world.</span></a>
         <a href="#/scorecards" class="nav-card nc-score"><span class="nc-icon">📊</span><span class="nc-title">Scorecards</span><span class="nc-desc">Accountability by party, government, ministry &amp; sector.</span></a>
         <a href="#/funding" class="nav-card nc-money"><span class="nc-icon">💰</span><span class="nc-title">Follow the Money</span><span class="nc-desc">Electoral-bond funding by party &amp; industry.</span></a>
@@ -244,22 +244,6 @@
   </section>
 
   <!-- ============ POSSIBLE CONFLICTS OF INTEREST ============ -->
-  <section id="conflicts-view" hidden>
-    <header class="hero hero-slim">
-      <div class="wrap">
-        <a href="#/" class="back">← All representatives</a>
-        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
-      </div>
-    </header>
-    <main class="wrap">
-      <h2 class="gw-title">Possible Conflicts of Interest</h2>
-      <p class="muted small">Overlaps between public office and private interest, surfaced by a code detector, tested by <strong>two independent AI passes</strong> (an investigator, then a skeptical "defence" referee), and <strong>approved by a human editor</strong> before appearing here. <strong>Each is a LEAD, not a proven finding</strong> — the evidence for and against is shown so you can judge for yourself, and every claim links to its source. Nothing appears here automatically.</p>
-      <p class="muted small" id="conflicts-count"></p>
-      <div id="conflicts-list"></div>
-      <p id="conflicts-empty" class="muted center" hidden>No conflict-of-interest leads have been published yet. Leads are only shown after two AI reviews and explicit human approval.</p>
-    </main>
-  </section>
-
   <!-- ============ SCANDAL DETAIL ============ -->
   <section id="scandal-view" hidden>
     <header class="hero hero-slim">
@@ -327,10 +311,13 @@
       </div>
     </header>
     <main class="wrap">
-      <h2 class="gw-title">Admin — Review Queue</h2>
+      <h2 class="gw-title">Admin — Investigator Desk</h2>
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin-tab="scandals" type="button">Scandal Proposals</button>
-        <button class="admin-tab" data-admin-tab="leads" type="button">Investigation Leads</button>
+        <button class="admin-tab" data-admin-tab="leads" type="button">Lead Review</button>
+        <button class="admin-tab" data-admin-tab="conflicts" type="button">All Leads</button>
+        <button class="admin-tab" data-admin-tab="stories" type="button">Story Drafts</button>
+        <button class="admin-tab" data-admin-tab="directorships" type="button">Directorship Network</button>
       </div>
       <div class="admin-auth">
         <input type="password" id="admin-token" placeholder="Admin token (x-admin-token)" autocomplete="off" />
@@ -345,14 +332,249 @@
       </div>
 
       <div id="admin-panel-leads" class="admin-panel" hidden>
-        <p class="muted small">Conflict-of-interest LEADS a code detector flagged and two independent AI passes (an investigator, then a skeptical "defence" referee) could not dismiss as coincidence. <strong>Nothing here is public until you approve it.</strong> These are the most serious, least-proven claims on the site — read the evidence for/against carefully before publishing.</p>
+        <p class="muted small">Conflict-of-interest LEADS a code detector flagged and two independent AI passes (an investigator, then a skeptical "defence" referee) could not dismiss as coincidence. <strong>Nothing in the Investigator branch is ever public.</strong> "Clear" marks a lead as vetted &amp; shareable with a journalist off-platform; "Dismiss" discards it.</p>
         <div id="lead-list"></div>
-        <p id="lead-empty" class="muted center" hidden>No investigation leads awaiting review. Run <code>report-generator.js</code> to detect and investigate new ones.</p>
+        <p id="lead-empty" class="muted center" hidden>No investigation leads awaiting review. Run <code>node server/investigate.js</code> to detect and investigate new ones.</p>
+      </div>
+
+      <div id="admin-panel-conflicts" class="admin-panel" hidden>
+        <p class="muted small">Every lead in the Investigator pipeline, at every stage: <strong>detected</strong> (code detectors), <strong>proposed</strong> (survived both AI reviews), <strong>cleared</strong> (you vetted it for external sharing), <strong>dismissed</strong>. Private — for your journalist workflow only.</p>
+        <div class="sc-tabs" id="conflict-status-tabs">
+          <button class="sc-tab active" data-lead-status="">All</button>
+          <button class="sc-tab" data-lead-status="detected">Detected</button>
+          <button class="sc-tab" data-lead-status="proposed">Proposed</button>
+          <button class="sc-tab" data-lead-status="published">Cleared</button>
+          <button class="sc-tab" data-lead-status="dismissed">Dismissed</button>
+        </div>
+        <div id="conflict-list"></div>
+        <p id="conflict-empty" class="muted center" hidden>No leads at this stage.</p>
+      </div>
+
+      <div id="admin-panel-stories" class="admin-panel" hidden>
+        <p class="muted small">Incident-narrative drafts assembled from cleared leads — written for handing to a real journalist, <strong>never published on the site</strong>. Copy what you need.</p>
+        <div class="sc-tabs" id="story-status-tabs">
+          <button class="sc-tab active" data-story-status="draft">Drafts</button>
+          <button class="sc-tab" data-story-status="proposed">Proposed</button>
+          <button class="sc-tab" data-story-status="published">Cleared</button>
+        </div>
+        <div id="story-list"></div>
+        <p id="story-empty" class="muted center" hidden>No stories at this stage.</p>
+      </div>
+
+      <div id="admin-panel-directorships" class="admin-panel" hidden>
+        <p class="muted small">The company web around a politician — companies they hold a seat in, plus the co-directors and relatives on those boards discovered from evidence text, the MCA registry, and the Tofler board lookup. <strong>Admin-only</strong>: includes private, name/DIN-matched links that are journalist work-product and never appear on the public report.</p>
+        <div class="admin-auth">
+          <input type="text" id="dirnet-pid" placeholder="Politician id (e.g. from a report URL #/rep/&lt;id&gt;)" autocomplete="off" />
+          <button id="dirnet-load" class="primary" type="button">Show network</button>
+        </div>
+        <div id="admin-dirnet"></div>
+        <p id="dirnet-empty" class="muted center" hidden>No directorship links for this politician yet. Run <code>npm run extract:directorships</code> (and the Tofler/crossfeed steps) to populate the graph.</p>
       </div>
     </main>
   </section>
 
+  <!-- ============ OPS CONSOLE (admin) ============ -->
+  <section id="ops-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← Home</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span> · Ops</h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title">Ops Console — database &amp; pipeline control</h2>
+      <div class="admin-auth">
+        <input type="password" id="ops-token" placeholder="Admin token (x-admin-token)" autocomplete="off" />
+        <button id="ops-load" class="primary" type="button">Connect</button>
+        <label class="ops-auto"><input type="checkbox" id="ops-auto" checked /> auto-refresh</label>
+        <span id="ops-status" class="muted small"></span>
+      </div>
+
+      <div id="ops-body" hidden>
+        <nav id="ops-tabs" class="ops-tabs">
+          <button class="ops-tab active" data-tab="overview" type="button">Overview</button>
+          <button class="ops-tab" data-tab="pipeline" type="button">Pipeline</button>
+          <button class="ops-tab" data-tab="engine" type="button">Engine</button>
+          <button class="ops-tab" data-tab="tuning" type="button">Tuning</button>
+          <button class="ops-tab" data-tab="flags" type="button">Flags <span id="ops-flagcount" class="ops-tabcount"></span></button>
+          <button class="ops-tab" data-tab="leads" type="button">Leads <span id="ops-leadcount" class="ops-tabcount"></span></button>
+          <button class="ops-tab" data-tab="roster" type="button">Roster</button>
+          <button class="ops-tab" data-tab="jobs" type="button">Jobs</button>
+        </nav>
+
+        <div class="ops-tabpane" data-pane="overview">
+          <section class="ops-panel">
+            <h3 class="ops-h">Overview</h3>
+            <div id="ops-tiles" class="ops-tiles"></div>
+            <h4 class="ops-sub">Evidence coverage by source</h4>
+            <div id="ops-coverage" class="ops-cov"></div>
+          </section>
+          <section class="ops-panel">
+            <h3 class="ops-h">Source health
+              <span class="muted small">— last <input type="number" id="ops-health-days" value="14" min="1" max="365" class="ops-days" /> days</span>
+            </h3>
+            <div id="ops-health"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="pipeline" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">One-click pipelines</h3>
+            <p class="muted small">Each preset enqueues its steps in order (the worker is serial, so they run as a chain).</p>
+            <div id="ops-presets" class="ops-cmds"></div>
+          </section>
+          <section class="ops-panel">
+            <h3 class="ops-h">Run a command</h3>
+            <p class="muted small">Each command is queued as a job and run by the in-process worker. Watch progress in <strong>Jobs</strong>.</p>
+            <div id="ops-commands" class="ops-cmds"></div>
+          </section>
+          <details class="ops-danger">
+            <summary>⚠ Danger zone — destructive maintenance</summary>
+            <div id="ops-danger-body" class="ops-cmds"></div>
+          </details>
+        </div>
+
+        <div class="ops-tabpane" data-pane="engine" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Anomaly Engine <span id="ops-engine-totals" class="muted small"></span></h3>
+            <p class="muted small">The code-only layer before the LLM. Detectors emit <span class="flag-chip small">small</span> and <span class="flag-chip big">BIG</span> flags; big flags and multi-detector clusters become leads (with evidence) for the GLM investigator. <strong>Dry run</strong> previews what current thresholds would flag — it writes nothing.</p>
+            <div class="ops-filters">
+              <button id="ops-engine-run" class="primary" type="button">Run full engine</button>
+              <button id="ops-engine-dryrun" class="ghost" type="button">Dry-run full engine</button>
+              <button id="ops-engine-synth" class="ghost" type="button">Re-synthesise leads only</button>
+              <span id="ops-engine-status" class="muted small"></span>
+            </div>
+            <div id="ops-engine-detectors" class="ops-cmds"></div>
+          </section>
+          <section class="ops-panel">
+            <h3 class="ops-h">Detector precision <span class="muted small">— from your approve / reject decisions</span></h3>
+            <p class="muted small">Every decision you make on a lead is logged against its detector. When a detector's leads are mostly rejected, it suggests raising that detector's thresholds; mostly approved suggests you can lower them. <strong>Suggestions only — nothing auto-tunes.</strong></p>
+            <div id="ops-precision"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="tuning" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Tuning <span class="muted small">— DB-backed, applies on the next run; blank = code default</span></h3>
+            <div class="ops-filters">
+              <button id="ops-tuning-save" class="primary" type="button">Save changes</button>
+              <span id="ops-tuning-status" class="muted small"></span>
+            </div>
+            <div id="ops-tuning"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="flags" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Flags <span id="ops-flags-summary" class="muted small"></span></h3>
+            <div class="ops-filters">
+              <select id="ops-fdetector"><option value="">any detector</option></select>
+              <select id="ops-fseverity"><option value="">any severity</option><option value="big">big</option><option value="small">small</option></select>
+              <select id="ops-fstatus"><option value="active">active</option><option value="stale">stale</option><option value="all">all</option></select>
+              <input id="ops-fq" placeholder="search subject / headline" />
+              <button id="ops-fsearch" class="ghost" type="button">Filter</button>
+            </div>
+            <div id="ops-flags"></div>
+            <div id="ops-flags-pager" class="ops-pager"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="leads" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Lead pipeline <span id="ops-leads-summary" class="muted small"></span></h3>
+            <p class="muted small">detected → (GLM investigates) → proposed → <strong>your approve/reject</strong> → published. <em>Investigate</em> sends one lead to GLM now; <em>Dismiss</em> parks it.</p>
+            <div class="ops-filters">
+              <select id="ops-lstatus"><option value="">any status</option><option value="detected">detected</option><option value="proposed">proposed</option><option value="published">published</option><option value="dismissed">dismissed</option></select>
+              <select id="ops-lvector"><option value="">any vector</option></select>
+              <input id="ops-lq" placeholder="search name / headline" />
+              <button id="ops-lsearch" class="ghost" type="button">Filter</button>
+            </div>
+            <div id="ops-leads"></div>
+            <div id="ops-leads-pager" class="ops-pager"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="roster" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Roster</h3>
+            <div class="ops-filters">
+              <input id="ops-rq" placeholder="search name / constituency" />
+              <select id="ops-roffice"><option value="">any office</option><option>MP</option><option>RS</option><option>MLA</option></select>
+              <input id="ops-rstate" placeholder="state" />
+              <select id="ops-rreport"><option value="">report: any</option><option value="1">has report</option><option value="0">no report</option></select>
+              <select id="ops-rev"><option value="">evidence: any</option><option value="1">has evidence</option><option value="0">none</option></select>
+              <button id="ops-rsearch" class="ghost" type="button">Filter</button>
+            </div>
+            <div id="ops-roster-batch" class="ops-batch-bar">
+              <label class="ck"><input id="ops-rall" type="checkbox" /> select page</label>
+              <span id="ops-rselcount" class="muted small">0 selected</span>
+              <span class="ops-sep">·</span>
+              <span class="muted small">run</span>
+              <select id="ops-baction">
+                <option value="ingest">Ingest (fetch evidence)</option>
+                <option value="cards">Summarizer cards</option>
+                <option value="engine">Engine scan (per rep)</option>
+                <option value="investigate">Investigate (GLM · paid)</option>
+              </select>
+              <button id="ops-brun-sel" class="primary small" type="button">on selected</button>
+              <button id="ops-brun-filter" class="ghost small" type="button">on all matching filter</button>
+              <span id="ops-batch-status" class="ops-run-status muted small"></span>
+            </div>
+            <div id="ops-roster"></div>
+            <div id="ops-roster-pager" class="ops-pager"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="jobs" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Jobs <span id="ops-jobcounts" class="muted small"></span></h3>
+            <div id="ops-job-controls" class="ops-job-controls">
+              <button id="ops-pause" class="ghost" type="button">⏸ Pause queue</button>
+              <button id="ops-reclaim" class="ghost" type="button" title="Requeue jobs stuck in 'running' from a past crash/restart">♻ Reclaim stuck</button>
+              <span class="ops-sep">·</span>
+              <span class="muted small">Trim:</span>
+              <button class="ghost small ops-trim" data-status="done" type="button">clear done</button>
+              <button class="ghost small ops-trim" data-status="dead" type="button">clear dead</button>
+              <button class="ghost small ops-trim" data-status="queued" type="button">drop all queued</button>
+              <button class="ghost small ops-trim" data-older="7" type="button">older than 7d</button>
+            </div>
+            <div id="ops-jobs"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div id="ops-drawer" class="ops-drawer" hidden>
+      <div class="ops-drawer-head">
+        <span id="ops-drawer-title" class="small"></span>
+        <button id="ops-drawer-close" class="ghost" type="button">Close</button>
+      </div>
+      <pre id="ops-drawer-log" class="ops-log"></pre>
+    </div>
+  </section>
+
   <!-- ============ REPORT VIEW ============ -->
+  <!-- Ministry / party report card (Summarizer) -->
+  <section id="org-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/scorecards" class="back">← Scorecards</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <div class="card report-head">
+        <div class="report-meta">
+          <h2 id="org-name"></h2>
+          <p id="org-sub" class="muted"></p>
+          <p id="org-headline" class="headline"></p>
+        </div>
+      </div>
+      <div id="org-scope-tabs" class="lb-tabs" hidden></div>
+      <div id="org-sections"></div>
+    </main>
+  </section>
+
   <section id="report-view" hidden>
     <header class="hero hero-slim">
       <div class="wrap">
@@ -398,6 +620,9 @@
       <div class="exec-card card" id="exec-card" hidden>
         <p id="exec-summary" class="exec-text"></p>
       </div>
+
+      <!-- Summarizer report card sections (Branch 1) — built dynamically -->
+      <div id="card-sections" hidden></div>
 
       <!-- Verified findings — computed in code, not AI judgment -->
       <section class="record-section" id="verified-section" hidden>
@@ -476,13 +701,6 @@
         </div>
         <p class="section-sub">Cross-referencing public records to identify patterns not visible in any single source. <strong>No allegation of wrongdoing is made.</strong> Each pattern cites its specific sources — the citizen is invited to review them directly.</p>
         <div id="pattern-cards"></div>
-      </section>
-
-      <!-- Possible Conflicts of Interest — published investigation leads (L1→L2→L3, admin-approved) -->
-      <section class="record-section" id="conflicts-section" hidden>
-        <div class="section-head"><h3>Possible Conflicts of Interest</h3><span class="source-label">Source: code detector + two independent AI reviews, human-approved</span></div>
-        <p class="section-sub">Overlaps between public office and private interest that a detector flagged and two independent AI passes (an investigator, then a skeptical "defence" referee) could not dismiss as coincidence — then a human editor approved for display. <strong>Each is a LEAD, not a proven finding.</strong> The evidence for and against is shown so you can judge for yourself; every claim links to its source.</p>
-        <div id="conflicts-body"></div>
       </section>
 
       <!-- Career timeline -->

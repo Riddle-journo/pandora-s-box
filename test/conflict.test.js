@@ -11,6 +11,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-conflict-${process.pid}.db`);
+// A prior run whose test.after() unlink failed (common on Windows, where the
+// SQLite handle isn't released synchronously) leaves this file behind; PID reuse
+// then reopens it dirty and flakes exact-count/idempotency assertions. Delete any
+// leftover BEFORE the store opens it so every run starts from an empty DB.
+for (const suffix of ["", "-wal", "-shm"]) {
+  try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
+}
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "conflict.json"), "utf8"));

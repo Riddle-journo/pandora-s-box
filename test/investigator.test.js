@@ -10,9 +10,22 @@ import path from "node:path";
 
 process.env.INVESTIGATOR_MOCK = "1";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-investigator-${process.pid}.db`);
+// A prior run whose test.after() unlink failed (common on Windows, where the
+// SQLite handle isn't released synchronously) leaves this file behind; PID reuse
+// then reopens it dirty and flakes exact-count/idempotency assertions. Delete any
+// leftover BEFORE the store opens it so every run starts from an empty DB.
+for (const suffix of ["", "-wal", "-shm"]) {
+  try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
+}
+
 
 const { upsertLead, getLead } = await import("../server/store.js");
 const { investigateLead, setMockResponses } = await import("../server/investigator.js");
+const { setSetting } = await import("../server/engine-settings.js");
+
+// Pin the L2 step budget to the historical 4 so the cap test is deterministic
+// regardless of the (now higher) default. Other tests don't hit the cap.
+setSetting("engine.investigator.maxSteps", 4);
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -82,7 +95,7 @@ test("(c) step-cap forces a verdict when the model keeps requesting actions", as
     { innocent_explanation: "x", fully_explainable: false, why: "y" }, // L3 (SUGGESTIVE ≠ COINCIDENCE)
   ]);
   const out = await investigateLead(lead);
-  assert.equal(out.investigation.steps.filter((s) => s.ran).length, 4, "exactly MAX_STEPS tools ran");
+  assert.equal(out.investigation.steps.filter((s) => s.ran).length, 4, "exactly MAX_STEPS (pinned to 4) tools ran");
   assert.equal(out.investigation.verdict, "SUGGESTIVE");
   assert.equal(out.status, "proposed");   // survived L3 (not fully explainable)
   assert.equal(out.investigation.status, "done");
@@ -95,4 +108,49 @@ test("(d) malformed JSON degrades to status:error and leaves the lead in detecte
   assert.equal(out.status, "detected", "lead is not promoted or dismissed");
   assert.equal(out.investigation.status, "error");
   assert.equal(getLead("d").investigation.status, "error");
+});
+
+test("(e) the investigator can follow the trail with the new internal tools", async () => {
+  // A cluster lead carrying engine citations; the model reads a cited record, checks
+  // sibling flags, then verdicts — all via the (mock) trail tools.
+  const lead = upsertLead({
+    key: "e", vector: "FLAG_CLUSTER", actor_id: "pol-e", actor_name: "Trail MP",
+    instrument: "cluster", beneficiary: "Trail MP", detail: "cluster of flags", headline: "Trail MP: 3 flags",
+    status: "detected",
+    data: { flags: [
+      { detector: "da_ratio", severity: "big", score: 40, headline: "assets 16x income", rationale: "check period", evidence: [{ evidence_id: "ev-e-1", note: "2024 affidavit" }] },
+      { detector: "benford", severity: "big", score: 22, headline: "digit anomaly", evidence: [] },
+    ], detectors: ["da_ratio", "benford"] },
+  });
+  setMockResponses([
+    { action: { tool: "read_evidence", args: { evidence_id: "ev-e-1" } }, reason: "open the cited affidavit" },
+    { action: { tool: "related_flags", args: {} }, reason: "see corroborating flags" },
+    { verdict: { verdict: "SUGGESTIVE", mechanism: "m", evidence_for: ["e"], evidence_against: [], timeline: "t", confidence: 55, confirming_record: "r", discovered_relations: [{ entity: "Shell Co", kind: "company", rel_type: "linked_to", note: "named in the affidavit" }], summary: "worth a look" } },
+    { innocent_explanation: "x", fully_explainable: false, why: "y" },
+  ]);
+  const out = await investigateLead(lead);
+  const ranTools = out.investigation.steps.filter((s) => s.ran).map((s) => s.tool);
+  assert.ok(ranTools.includes("read_evidence"), "read a cited evidence row");
+  assert.ok(ranTools.includes("related_flags"), "checked sibling flags");
+  assert.equal(out.investigation.verdict, "SUGGESTIVE");
+  assert.deepEqual(out.investigation.discovered_relations[0].entity, "Shell Co");
+});
+
+test("(f) a surviving investigation spawns a follow-up lead for the discovered entity", async () => {
+  const { listLeads } = await import("../server/store.js");
+  const lead = upsertLead({
+    key: "f", vector: "DA_RATIO", actor_id: "pol-f", actor_name: "Spawn MP",
+    instrument: "assets", beneficiary: "Spawn MP", detail: "big DA", headline: "Spawn MP DA", status: "detected",
+  });
+  setMockResponses([
+    { verdict: { verdict: "SUGGESTIVE", mechanism: "m", evidence_for: ["e"], evidence_against: [], timeline: "t", confidence: 60, confirming_record: "r",
+      discovered_relations: [{ entity: "Phantom Holdings Pvt Ltd", kind: "company", rel_type: "linked_to", note: "receives the unexplained funds" }], summary: "s" } },
+    { innocent_explanation: "x", fully_explainable: false, why: "y" },
+  ]);
+  const out = await investigateLead(lead);
+  assert.equal(out.status, "proposed");
+  assert.ok(out.investigation.spawned?.length === 1, "one follow-up spawned");
+  const follow = listLeads({ status: "detected" }).find((l) => l.vector === "TRAIL_DISCOVERY" && l.actor_name === "Phantom Holdings Pvt Ltd");
+  assert.ok(follow, "the discovered entity is now its own candidate lead");
+  assert.equal(follow.data.spawned_from, "f", "it points back at the investigation that produced it");
 });

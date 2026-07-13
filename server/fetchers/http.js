@@ -6,8 +6,42 @@ export const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountabilit
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+export const isPdf = (url) => /\.pdf($|\?)/i.test(url);
+
+// The passage surrounding the first mention of `name`, or null if unmentioned.
+export function contextAround(text, name, window = 1000) {
+  const i = text.toLowerCase().indexOf(name.toLowerCase());
+  if (i < 0) return null;
+  return text.slice(Math.max(0, i - window), i + name.length + window).trim();
+}
+
+// Some Indian government sites (e.g. wbindustries.gov.in) serve a broken/expired
+// TLS chain — a real cert misconfiguration on their end, not a spoofing risk for
+// a read-only public-document fetch. Node's global fetch has no per-call TLS
+// override, so a broken chain needs the classic `https` module with
+// rejectUnauthorized:false instead. Buffer-only (caller decides text/binary).
+async function fetchInsecureBuffer(url, timeoutMs = 30000) {
+  const { default: https } = await import("node:https");
+  return new Promise((resolve) => {
+    const req = https.get(url, { headers: UA, rejectUnauthorized: false, timeout: timeoutMs }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+    });
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+  });
+}
+
 // Fetch raw text with timeout + polite UA. Returns "" on any failure.
-export async function fetchText(url, { timeoutMs = 15000, headers = {} } = {}) {
+// `insecure: true` routes through fetchInsecureBuffer for sites with a broken
+// TLS chain (see above) — off by default, since almost no site needs it.
+export async function fetchText(url, { timeoutMs = 15000, headers = {}, insecure = false } = {}) {
+  if (insecure) {
+    const buf = await fetchInsecureBuffer(url, timeoutMs);
+    return buf ? buf.toString("utf8") : "";
+  }
   try {
     const res = await fetch(url, { headers: { ...UA, ...headers }, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return "";
@@ -50,7 +84,7 @@ export function htmlToText(html, maxLen = 2500) {
 // package (v2.x, which exports a PDFParse class); returns "" (and logs once)
 // if it isn't installed.
 let pdfWarned = false;
-export async function fetchPdfText(url, { timeoutMs = 30000, maxLen = 4000 } = {}) {
+export async function fetchPdfText(url, { timeoutMs = 30000, maxLen = 4000, insecure = false } = {}) {
   let PDFParse;
   try {
     ({ PDFParse } = await import("pdf-parse"));
@@ -60,12 +94,31 @@ export async function fetchPdfText(url, { timeoutMs = 30000, maxLen = 4000 } = {
     return "";
   }
   try {
-    const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return "";
-    const buf = new Uint8Array(await res.arrayBuffer());
+    let buf;
+    if (insecure) {
+      const b = await fetchInsecureBuffer(url, timeoutMs);
+      if (!b) return "";
+      buf = new Uint8Array(b);
+    } else {
+      const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) return "";
+      buf = new Uint8Array(await res.arrayBuffer());
+    }
     const parser = new PDFParse({ data: buf });
     const data = await parser.getText();
-    return (data.text ?? "").replace(/\s+/g, " ").trim().slice(0, maxLen);
+    const text = (data.text ?? "").replace(/\s+/g, " ").trim();
+    // OCR fallback: a scanned/image-only PDF has no text layer, so pdf-parse
+    // returns (almost) nothing. When PDF_OCR=1, read the pixels instead. The
+    // same downloaded buffer is reused — no second fetch. Fail-silent + off by
+    // default (OCR is slow), so nothing changes for the common digital-PDF case.
+    if (text.length < 40) {
+      const { ocrEnabled, ocrPdfBuffer } = await import("./pdf-ocr.js");
+      if (ocrEnabled()) {
+        const ocr = await ocrPdfBuffer(buf, { maxLen });
+        if (ocr) return ocr.slice(0, maxLen);
+      }
+    }
+    return text.slice(0, maxLen);
   } catch { return ""; }
 }
 

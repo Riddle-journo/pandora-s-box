@@ -20,7 +20,9 @@ function flag(code, param, weight, severity, headline, detail, sources = []) {
 
 // Merge all evidence `numbers` for a politician into one view. Where a politician
 // has multiple affidavits (different election years), keep them all for growth.
-function gatherNumbers(evidence) {
+// Exported: the Summarizer card engine (cards.js) builds its wealth/criminal/
+// business sections from this same gathered view.
+export function gatherNumbers(evidence) {
   const affidavits = [];
   let mplads = null;
   const companies = []; // {name, status, cin, source_url} from mca verification

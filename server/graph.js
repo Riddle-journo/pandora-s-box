@@ -31,7 +31,17 @@ function identityStrong(shared) {
   const distinctive = shared.filter((t) => !COMMON.has(t));
   return distinctive.length >= 2 || (distinctive.length >= 1 && shared.length >= 3);
 }
-function sameName(a, b) {
+
+// Distinctive (non-common) name tokens for inverted-index candidate gathering;
+// falls back to all tokens when a name is made only of common tokens. Exported so
+// the director-link matcher can bucket names without pairwise-comparing everyone.
+export function candidateTokens(name) {
+  const t = toks(name);
+  const distinctive = t.filter((x) => !COMMON.has(x));
+  return distinctive.length ? distinctive : t;
+}
+
+export function sameName(a, b) {
   const ta = toks(a), tb = toks(b);
   if (ta.length < 2 || tb.length < 2) return false;
   const setB = new Set(tb);

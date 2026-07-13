@@ -15,7 +15,7 @@
 //   node server/scandal-discovery.js --days 30      # widen the news window
 //   node server/scandal-discovery.js --list         # show the current queue
 import "dotenv/config";
-import OpenAI from "openai";
+import { AI_BASE, MODEL, AI_KEY, makeClient } from "./llm.js";
 import { upsertScandal, listProposals, listScandals, getMeta, setMeta } from "./store.js";
 import { SCANDAL_SEEDS } from "./data/scandal-seeds.js";
 import { gdeltJson } from "./sources/gdelt-fetch.js";
@@ -25,9 +25,6 @@ import { gdeltJson } from "./sources/gdelt-fetch.js";
 // news, and non-economic failures (accidents, exam leaks, etc.), are exempt.
 const MIN_ECONOMIC_LOSS_CR = 5;
 
-const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
-const AI_KEY  = process.env.AI_API_KEY  || "";
 const GDELT   = "https://api.gdeltproject.org/api/v2/doc/doc";
 
 // Neutral, broad net — failure vocabulary, not party names.
@@ -94,10 +91,7 @@ async function discover(days) {
 
   const existingTitles = [...SCANDAL_SEEDS.map((s) => s.title), ...listScandals().map((s) => s.title), ...listProposals().map((s) => s.title)];
 
-  const client = new OpenAI({
-    baseURL: AI_BASE, apiKey: AI_KEY,
-    defaultHeaders: AI_BASE.includes("openrouter") ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-  });
+  const client = makeClient();
 
   const r = await client.chat.completions.create({
     model: MODEL, messages: [{ role: "user", content: buildPrompt(headlines.slice(0, 120), existingTitles) }],

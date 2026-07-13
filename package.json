@@ -6,11 +6,25 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
+    "ops": "node server/index.js",
     "seed": "node server/seed.js",
     "generate": "node server/report-generator.js",
     "ingest": "node server/ingest.js",
+    "extract:directorships": "node server/extractors/directorships.js && node server/extractors/directorship-verify.js",
+    "extract:directorships:all": "node server/extractors/directorships-run-all.js",
+    "extract:party-finance": "node server/extractors/party-finance.js",
+    "extract:financial-links": "node server/extractors/financial-links.js",
+    "extract:prose": "node server/extractors/prose-llm.js",
+    "extract:all": "node server/extract-all.js",
+    "detect:ledger": "node server/ledger-detectors.js",
+    "reingest:party-finance": "node server/reingest-party-finance.js",
     "worker": "node server/worker.js",
     "worker:once": "node server/worker.js --once",
+    "db:backup": "node server/db-maintenance.js backup",
+    "db:check": "node server/db-maintenance.js check",
+    "db:doctor": "node server/db-maintenance.js doctor",
+    "db:vacuum": "node server/db-maintenance.js vacuum",
+    "db:maintain": "node server/db-maintenance.js all",
     "test": "node --test test/*.test.js"
   },
   "engines": {
@@ -25,5 +39,11 @@
     "pdf-parse": "^2.4.5",
     "playwright": "^1.61.1",
     "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "@napi-rs/canvas": "^1.0.2",
+    "pdf-to-img": "^6.2.0",
+    "pdfjs-dist": "^4.10.38",
+    "tesseract.js": "^7.0.0"
   }
 }

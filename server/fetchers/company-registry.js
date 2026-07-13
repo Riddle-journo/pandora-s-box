@@ -57,6 +57,41 @@ function nameVariants(name) {
   return [...out];
 }
 
+// Verify ONE company name against the MCA Company Master registry. Tries the
+// spelling variants, exact-match-validates each returned record (never trusting
+// the API's own matching), and returns the first confirmed record — or null.
+// Exported (Phase 3): the directorship graph reuses this to registry-check the
+// companies discovered from court/leak/press evidence, so the "declared-company"
+// path (this fetcher) and the "discovered-company" path share ONE MCA lookup.
+export async function verifyCompanyName(name, { key = process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_KEY, timeoutMs = 15000 } = {}) {
+  if (!key || !name || String(name).trim().length < 6) return null;
+  const seen = new Set();
+  for (const q of nameVariants(name)) {
+    if (!q || seen.has(q)) continue;
+    seen.add(q);
+    let d;
+    try {
+      d = await fetchJson(`${API}?api-key=${key}&format=json&limit=3&filters%5BCompanyName%5D=${encodeURIComponent(q)}`, { timeoutMs });
+    } catch { continue; }
+    for (const r of d?.records ?? []) {
+      // Belt-and-braces: only accept a record whose name really IS the one we
+      // asked for — never trust the API's matching semantics blindly.
+      if (registryName(r.CompanyName) !== q) continue;
+      const registered_address = pick(r, "Registered_Office_Address", "registered_office_address", "RegisteredOfficeAddress", "Registered_Office");
+      return {
+        name: r.CompanyName, cin: r.CIN, status: r.CompanyStatus ?? "",
+        paidup_capital: Number(r.PaidupCapital) || null,
+        state: r.CompanyStateCode ?? "", registered: r.CompanyRegistrationdate_date ?? "",
+        registered_address,
+        pincode: pincodeFrom(registered_address),
+        industrial_classification: pick(r, "CompanyIndustrialClassification", "industrial_classification", "PrincipalBusinessActivityasperCIN", "nic_code"),
+        source_url: `https://www.mca.gov.in/mcafoportal/viewCompanyMasterData.do`,
+      };
+    }
+  }
+  return null;
+}
+
 export async function fetchCompanyRegistry(p) {
   const key = process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_KEY;
   if (!key || process.env.COMPANY_REGISTRY_DISABLE === "1") return [];
@@ -67,34 +102,10 @@ export async function fetchCompanyRegistry(p) {
     .filter((c) => c.name && c.name.length >= 6);
   if (!declared.length) return [];
 
-  const seen = new Set();
   const verified = [];
-  let queries = 0;
   for (const c of declared.slice(0, 8)) {
-    for (const q of nameVariants(c.name)) {
-      if (!q || seen.has(q) || queries >= 12) continue;
-      seen.add(q); queries++;
-      let d;
-      try {
-        d = await fetchJson(`${API}?api-key=${key}&format=json&limit=3&filters%5BCompanyName%5D=${encodeURIComponent(q)}`, { timeoutMs: 15000 });
-      } catch { continue; }
-      for (const r of d?.records ?? []) {
-        // Belt-and-braces: only accept a record whose name really IS the one we
-        // asked for — never trust the API's matching semantics blindly.
-        if (registryName(r.CompanyName) !== q) continue;
-        const registered_address = pick(r, "Registered_Office_Address", "registered_office_address", "RegisteredOfficeAddress", "Registered_Office");
-        verified.push({
-          name: r.CompanyName, cin: r.CIN, status: r.CompanyStatus ?? "",
-          paidup_capital: Number(r.PaidupCapital) || null,
-          state: r.CompanyStateCode ?? "", registered: r.CompanyRegistrationdate_date ?? "",
-          registered_address,
-          pincode: pincodeFrom(registered_address),
-          industrial_classification: pick(r, "CompanyIndustrialClassification", "industrial_classification", "PrincipalBusinessActivityasperCIN", "nic_code"),
-          declared_relation: c.relation,
-          source_url: `https://www.mca.gov.in/mcafoportal/viewCompanyMasterData.do`,
-        });
-      }
-    }
+    const rec = await verifyCompanyName(c.name, { key });
+    if (rec) verified.push({ ...rec, declared_relation: c.relation });
   }
   if (!verified.length) return [];
 

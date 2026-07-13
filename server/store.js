@@ -24,6 +24,23 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 db.pragma("synchronous = NORMAL");
+// WAL allows one writer at a time; without a busy timeout a second writer (e.g. a
+// background ingest running alongside the Ops worker) throws SQLITE_BUSY instantly.
+// Wait-and-retry for up to 15s so concurrent writers serialise instead of failing.
+db.pragma("busy_timeout = 15000");
+
+// ── Ledger-shape migration ───────────────────────────────────────────────
+// The facts/claims analysis ledgers moved to universal entity subjects
+// (entity_id NOT NULL + subject_kind). They are rebuildable by design (delete
+// by extractor_version, re-extract), so an old-shape table is dropped and
+// recreated rather than ALTERed — the raw evidence blobs are the source of truth.
+for (const t of ["facts", "claims"]) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+  if (exists) {
+    const cols = db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+    if (!cols.includes("subject_kind")) db.exec(`DROP TABLE ${t}`);
+  }
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS politicians (
@@ -47,6 +64,16 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_rep_pol  ON reports(politician_id);
   CREATE INDEX IF NOT EXISTS idx_rep_pt   ON reports(politician_id, report_tier, generated_at);
+
+  -- Summarizer report cards (Branch 1). One row per generation; latest wins.
+  -- kind: politician | ministry | party. subject_key: politician id or org slug.
+  -- scope: 'union' or a state name (for state-level ministries/parties).
+  CREATE TABLE IF NOT EXISTS cards (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, subject_key TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'union', card_version INTEGER, generated_at TEXT,
+    score INTEGER, grade TEXT, data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_cards_subject ON cards(kind, subject_key, generated_at);
 
   CREATE TABLE IF NOT EXISTS tips (
     id TEXT PRIMARY KEY, politician_id TEXT, status TEXT, data TEXT
@@ -138,6 +165,75 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, at);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uniq
     ON events(kind, source, coalesce(at, ''), entity_ids);
+
+  -- ── Analysis ledger layer (Phase 1) ─────────────────────────────────────────
+  -- Everything above is the DISPLAY store: whole objects in the data blob column,
+  -- feeding pages. The ledgers below are the ANALYSIS store: the comparable bits
+  -- pulled OUT of those blobs into typed, dated, indexed rows, so the DB can diff,
+  -- and cross-join them to surface anomalies. Blobs stay the source of truth; the
+  -- ledgers are always rebuildable (delete by extractor_version, re-extract), so
+  -- improving an extractor never risks the raw data.
+  --
+  -- UNIVERSAL SUBJECT: every ledger row points at ONE entity_id (→ entities.id),
+  -- never a per-type column. A subject can be ANY kind of node — person (incl.
+  -- politician, family, associate), company, party, ministry, department, org —
+  -- so the scanner treats all of them symmetrically. subject_kind is a denormalized
+  -- copy of entities.kind, so "outliers among companies" is as cheap to ask as
+  -- "outliers among politicians". Extraction MUST resolve the subject to an entity
+  -- first (creating a provisional entity if none exists), so entity_id is always
+  -- present; the raw source id (politician_id, raw name) is kept in the data blob
+  -- for provenance. Politicians are not special here — they are kind='person'
+  -- entities carrying strong_ids.politician_id, exactly like the graph already does.
+
+  -- Numeric ledger — one row per measured quantity, per subject, per date. Feeds
+  -- the statistical detectors in server/anomaly.js (peer outlier, growth spike).
+  CREATE TABLE IF NOT EXISTS facts (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL, subject_kind TEXT,
+    metric TEXT, value REAL, unit TEXT,
+    as_of_date TEXT, period TEXT,
+    source_type TEXT, tier INTEGER,
+    evidence_id TEXT, extractor_version TEXT, created_at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(entity_id, metric, as_of_date);
+  CREATE INDEX IF NOT EXISTS idx_facts_kind    ON facts(subject_kind, metric, value);
+  -- Re-running an extractor is idempotent: same measurement/subject/date/source
+  -- (per version) folds to one row under INSERT OR IGNORE.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_uniq ON facts(
+    metric, entity_id, coalesce(as_of_date,''), coalesce(evidence_id,''), coalesce(extractor_version,'')
+  );
+
+  -- Claim ledger — allegations/links asserted by a source, WITH confidence + a
+  -- verification status. Kept separate from facts so an unverified news claim never
+  -- mixes into a tier-1 affidavit number. subject → (claim_type) → object, where
+  -- BOTH sides are entities (object_text holds an as-yet-unresolved name).
+  CREATE TABLE IF NOT EXISTS claims (
+    id TEXT PRIMARY KEY,
+    subject_entity_id TEXT NOT NULL, subject_kind TEXT,
+    claim_type TEXT, object_entity_id TEXT, object_text TEXT,
+    status TEXT DEFAULT 'unverified', confidence REAL,
+    as_of_date TEXT, source_type TEXT, tier INTEGER,
+    evidence_id TEXT, extractor_version TEXT, created_at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_claims_subj   ON claims(subject_entity_id, claim_type);
+  CREATE INDEX IF NOT EXISTS idx_claims_kind   ON claims(subject_kind, claim_type);
+  CREATE INDEX IF NOT EXISTS idx_claims_obj    ON claims(object_entity_id, claim_type);
+  CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_uniq ON claims(
+    claim_type, subject_entity_id,
+    coalesce(object_entity_id,''), coalesce(object_text,''),
+    coalesce(evidence_id,''), coalesce(extractor_version,'')
+  );
+
+  -- (The events table above IS the third ledger — one row per dated occurrence.)
+
+  -- Full-text index over evidence prose. Standalone FTS5 table, populated by
+  -- server/backfill-fts.js. Turns "every doc mentioning both X and Y" from a 36k
+  -- blob scan into an indexed MATCH — the basis for text co-occurrence mining.
+  CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
+    evidence_id UNINDEXED, politician_id UNINDEXED, source_type UNINDEXED,
+    title, summary, body, tokenize = 'unicode61'
+  );
 `);
 
 // Shared connection for the entity layer (server/entities.js) — one DB handle,
@@ -311,9 +407,68 @@ export function reportHistory(pid) {
 
 export function addReport(report) {
   const row = { id: id(), generated_at: new Date().toISOString(), ...report };
-  if (!report.generated_at) row.generated_at = new Date().toISOString();
   insReport.run(repRow(row));
   return row;
+}
+
+// ---- Summarizer report cards (Branch 1) ----
+const insCard = db.prepare(`INSERT OR REPLACE INTO cards
+  (id, kind, subject_key, scope, card_version, generated_at, score, grade, data)
+  VALUES (@id, @kind, @subject_key, @scope, @card_version, @generated_at, @score, @grade, @data)`);
+
+export function addCard(card) {
+  const row = { id: id(), generated_at: new Date().toISOString(), ...card };
+  insCard.run({
+    id: row.id, kind: row.kind, subject_key: row.subject_key,
+    scope: row.scope ?? "union", card_version: row.card_version ?? null,
+    generated_at: row.generated_at,
+    score: typeof row.score === "number" ? row.score : null,
+    grade: row.grade ?? null, data: JSON.stringify(row),
+  });
+  return row;
+}
+
+export function latestCard(kind, subjectKey, scope = null) {
+  const sql = scope
+    ? "SELECT data FROM cards WHERE kind = ? AND subject_key = ? AND scope = ? ORDER BY generated_at DESC LIMIT 1"
+    : "SELECT data FROM cards WHERE kind = ? AND subject_key = ? ORDER BY generated_at DESC LIMIT 1";
+  const args = scope ? [kind, subjectKey, scope] : [kind, subjectKey];
+  return J(db.prepare(sql).get(...args));
+}
+
+// Like listPoliticiansWithLatest, but joined against cards instead of reports.
+export function listPoliticiansWithCard() {
+  const pols = db.prepare("SELECT data FROM politicians").all().map(J);
+  const latest = db.prepare(`
+    SELECT c.subject_key, c.grade, c.score, c.generated_at,
+           json_extract(c.data, '$.headline') headline
+    FROM cards c
+    JOIN (SELECT subject_key, MAX(generated_at) mg FROM cards WHERE kind = 'politician' GROUP BY subject_key) m
+      ON c.subject_key = m.subject_key AND c.generated_at = m.mg
+    WHERE c.kind = 'politician'
+  `).all();
+  const byPol = {};
+  for (const r of latest) byPol[r.subject_key] = r;
+  return pols.map((p) => {
+    const r = byPol[p.id];
+    return { ...p, card: r ? { grade: r.grade, score: r.score, headline: r.headline, generated_at: r.generated_at } : null };
+  });
+}
+
+// One indexed row per latest politician card with the leaderboard-relevant
+// computed facts pulled out via json_extract — avoids parsing 4,000+ blobs.
+export function cardLeaderboardRows() {
+  return db.prepare(`
+    SELECT c.subject_key id, c.grade, c.score,
+      json_extract(c.data,'$.computed_facts.criminal_cases')      cases,
+      json_extract(c.data,'$.computed_facts.net_worth')           net_worth_num,
+      json_extract(c.data,'$.computed_facts.net_worth_display')   net_worth,
+      json_extract(c.data,'$.computed_facts.asset_growth_multiple') asset_growth_x
+    FROM cards c
+    JOIN (SELECT subject_key, MAX(generated_at) mg FROM cards WHERE kind = 'politician' GROUP BY subject_key) m
+      ON c.subject_key = m.subject_key AND c.generated_at = m.mg
+    WHERE c.kind = 'politician'
+  `).all();
 }
 
 // ---- Anonymous tips ----
@@ -423,6 +578,163 @@ export function listLeadProposals() {
 export function deleteLead(idOrKey) {
   return db.prepare("DELETE FROM investigation_leads WHERE id = ? OR key = ?").run(idOrKey, idOrKey).changes;
 }
+
+// ---- Tofler company cache (director enrichment for FLAGGED companies only). ----
+// One row per company we've looked up on Tofler, keyed by a stable company_key
+// (CIN when known, else a name slug). This is BOTH the dedup guard (never re-hit
+// Tofler for a company already fetched recently) and the persistence layer that
+// Phase 2's director→politician matching will read. Decoupled from any single
+// politician on purpose: a flag can be a collusion cluster or a tender award with
+// no actor attached, yet its directors are still worth caching.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tofler_companies (
+    company_key TEXT PRIMARY KEY, cin TEXT, name TEXT, fetched_at TEXT, data TEXT
+  );
+`);
+
+export function getToflerCompany(companyKey) {
+  return J(db.prepare("SELECT data FROM tofler_companies WHERE company_key = ? LIMIT 1").get(companyKey));
+}
+
+export function upsertToflerCompany(rec) {
+  const now = new Date().toISOString();
+  const row = { ...rec, fetched_at: rec.fetched_at ?? now };
+  db.prepare(`INSERT OR REPLACE INTO tofler_companies (company_key, cin, name, fetched_at, data)
+    VALUES (@company_key, @cin, @name, @fetched_at, @data)`).run({
+    company_key: row.company_key, cin: row.cin ?? null, name: row.name ?? null,
+    fetched_at: row.fetched_at, data: JSON.stringify(row),
+  });
+  return row;
+}
+
+export function listToflerCompanies() {
+  return db.prepare("SELECT data FROM tofler_companies ORDER BY fetched_at DESC").all().map(J);
+}
+
+// ---- Lead feedback ledger (the human-decision signal for precision reporting) ----
+// `decision`: approved | rejected | dismissed | glm_proposed | glm_dismissed.
+// `detector` is derived from the lead's data.engine_flag_key / data.flags when
+// present so cluster leads attribute back to their contributing detectors.
+// Table created HERE (not in the later flags/engine_settings db.exec block) —
+// module top-level code runs in order, so the CREATE TABLE must precede this
+// db.prepare() of an INSERT against it, or every import of this module throws
+// "no such table: lead_feedback" before a single line of app code runs.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS lead_feedback (
+    id TEXT PRIMARY KEY, lead_key TEXT, lead_id TEXT, vector TEXT, detector TEXT,
+    decision TEXT, source TEXT, signal_score REAL, at TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_feedback_vector ON lead_feedback(vector, decision);
+  CREATE INDEX IF NOT EXISTS idx_feedback_detector ON lead_feedback(detector, decision);
+`);
+const insFeedback = db.prepare(`INSERT INTO lead_feedback
+  (id, lead_key, lead_id, vector, detector, decision, source, signal_score, at, data)
+  VALUES (@id, @lead_key, @lead_id, @vector, @detector, @decision, @source, @signal_score, @at, @data)`);
+
+export function recordLeadFeedback(lead, decision, { source = "admin" } = {}) {
+  if (!lead) return null;
+  // Attribute to contributing detectors: a cluster lead lists them; a promoted big
+  // flag carries its flag key (detector is the prefix); else fall back to the vector.
+  const detectors = new Set();
+  if (Array.isArray(lead.data?.flags)) for (const f of lead.data.flags) if (f.detector) detectors.add(f.detector);
+  if (lead.data?.engine_flag_key) detectors.add(String(lead.data.engine_flag_key).split("|")[0]);
+  if (!detectors.size && lead.vector) detectors.add(String(lead.vector).toLowerCase());
+  const now = new Date().toISOString();
+  for (const detector of detectors) {
+    insFeedback.run({
+      id: id(), lead_key: lead.key ?? null, lead_id: lead.id ?? null,
+      vector: lead.vector ?? null, detector, decision, source,
+      signal_score: Number(lead.signal_score) || 0, at: now,
+      data: JSON.stringify({ headline: lead.headline, actor_name: lead.actor_name }),
+    });
+  }
+  return { decision, detectors: [...detectors] };
+}
+
+// Per-detector precision: approvals vs rejections/dismissals, with a suggestion
+// when the reject rate is high on a meaningful sample. Suggestion-only — the ops
+// console shows it; nothing auto-changes a threshold.
+export function detectorPrecision({ minSample = 5 } = {}) {
+  const rows = db.prepare(`
+    SELECT detector, decision, COUNT(*) n, AVG(signal_score) avg_score
+    FROM lead_feedback GROUP BY detector, decision
+  `).all();
+  const byDetector = {};
+  for (const r of rows) {
+    const d = (byDetector[r.detector] ??= { detector: r.detector, approved: 0, rejected: 0, dismissed: 0, glm_proposed: 0, glm_dismissed: 0, avg_score: 0, total: 0 });
+    d[r.decision] = (d[r.decision] ?? 0) + r.n;
+    d.total += r.n;
+  }
+  const out = [];
+  for (const d of Object.values(byDetector)) {
+    const judged = d.approved + d.rejected + d.dismissed; // human-decided only
+    const rejectRate = judged >= 1 ? (d.rejected + d.dismissed) / judged : null;
+    let suggestion = null;
+    if (judged >= minSample && rejectRate != null) {
+      if (rejectRate >= 0.8) suggestion = `High reject rate (${Math.round(rejectRate * 100)}% of ${judged}) — consider RAISING this detector's thresholds (fewer, stronger flags).`;
+      else if (rejectRate <= 0.2 && d.approved >= minSample) suggestion = `Low reject rate (${Math.round(rejectRate * 100)}% of ${judged}) — this detector is reliable; you could LOWER thresholds to surface more.`;
+    }
+    out.push({ ...d, judged, reject_rate: rejectRate, suggestion });
+  }
+  out.sort((a, b) => (b.reject_rate ?? -1) - (a.reject_rate ?? -1));
+  return out;
+}
+
+// Reverse director lookup by PERSON name. This is the FREE replacement for the
+// (unobtainable) MCA bulk Director dataset: there is no free comprehensive
+// director index, so director names come from Tofler, fetched per FLAGGED
+// company and kept in the tofler_companies cache. This scans that cache for a
+// company whose board lists `name`. Targeted (only flagged companies are
+// cached), not comprehensive — by design. Returns rows shaped for consumers
+// that expect { company_name, cin, designation, active, matched_name, ... }.
+const _dirNorm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+export function lookupDirectorCompaniesByName(name, { limit = 25 } = {}) {
+  const q = _dirNorm(name);
+  const qTokens = q.split(" ").filter((t) => t.length >= 3);
+  if (!qTokens.length) return [];
+  const out = [];
+  for (const co of listToflerCompanies()) {
+    for (const d of co.directors ?? []) {
+      const dt = new Set(_dirNorm(d.name).split(" ").filter((t) => t.length >= 3));
+      const hit = qTokens.filter((t) => dt.has(t)).length;
+      if (hit / qTokens.length >= 0.6) {
+        out.push({
+          company_name: co.name ?? co.cin, cin: co.cin ?? null,
+          designation: "Director", active: true,
+          matched_name: d.name, matched_din: d.din ?? null,
+          source_url: co.source_url ?? null, source: "tofler",
+        });
+      }
+    }
+    if (out.length >= limit) break;
+  }
+  return out.slice(0, limit);
+}
+
+// ---- Anomaly Engine: flags + tunable settings ----
+// A FLAG is the engine's internal unit of suspicion — smaller than a lead. Every
+// detector emits flags (severity 'small' | 'big'); the lead-synthesis layer then
+// promotes big flags and multi-flag clusters into investigation_leads, carrying
+// the flags' evidence citations. Flags are rebuildable working state (re-running
+// a detector refreshes them); leads carry the human-gated lifecycle.
+// engine_settings holds the DB-backed tunables the ops console edits live —
+// key 'engine.<detector>.<param>' → JSON value; absent key = code default.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS flags (
+    id TEXT PRIMARY KEY, key TEXT UNIQUE, detector TEXT, severity TEXT,
+    score REAL, politician_id TEXT, entity_id TEXT, status TEXT DEFAULT 'active',
+    created_at TEXT, updated_at TEXT, run_id TEXT, data TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_flags_detector ON flags(detector, status);
+  CREATE INDEX IF NOT EXISTS idx_flags_severity ON flags(severity, status);
+  CREATE INDEX IF NOT EXISTS idx_flags_pol      ON flags(politician_id, status);
+
+  CREATE TABLE IF NOT EXISTS engine_settings (
+    key TEXT PRIMARY KEY, value TEXT, updated_at TEXT
+  );
+`);
+// (lead_feedback table is created earlier, right before its first db.prepare() —
+// see the "Lead feedback ledger" section above.)
 
 // ---- Issues (policy-area analyses: India context + party/govt stances) ----
 const insIssue = db.prepare(`INSERT OR REPLACE INTO issues
@@ -570,6 +882,83 @@ export function listJobs({ status } = {}) {
   return rows.map((r) => ({ ...r, payload: safeParse(r.payload) }));
 }
 
+// ---- Queue control: pause / cancel / edit / requeue / trim ----
+// Pause is a persisted meta flag the worker consults before each claim, so it
+// survives a restart and BOTH the in-process and standalone workers honour it.
+// (Pausing doesn't kill the running job — a serial worker finishes it, mirroring
+// the existing "SIGINT finishes the current job" semantics.)
+const QUEUE_PAUSED_KEY = "worker_paused";
+export function isQueuePaused() { return getMeta(QUEUE_PAUSED_KEY, false) === true; }
+export function setQueuePaused(on) { return setMeta(QUEUE_PAUSED_KEY, !!on); }
+
+// Cancel a QUEUED job (delete it). A running job can't be yanked mid-flight from a
+// serial worker, so the caller pauses the queue and lets it finish. Returns
+// { ok, reason?, status? }.
+export function cancelJob(id) {
+  const job = db.prepare("SELECT status FROM jobs WHERE id = ?").get(id);
+  if (!job) return { ok: false, reason: "not found" };
+  if (job.status === "running") return { ok: false, reason: "running", status: "running" };
+  db.prepare("DELETE FROM jobs WHERE id = ?").run(id);
+  return { ok: true };
+}
+
+// Patch a QUEUED job's priority / run_at / payload — nothing else is editable
+// (a running/done/dead job is history). `payload`, when supplied, fully replaces
+// the old one. Returns { ok, job? } / { ok:false, reason }.
+export function updateJob(id, { priority, payload, runAt } = {}) {
+  const job = db.prepare("SELECT status FROM jobs WHERE id = ?").get(id);
+  if (!job) return { ok: false, reason: "not found" };
+  if (job.status !== "queued") return { ok: false, reason: `not editable (${job.status})` };
+  const sets = [], vals = { id };
+  if (priority !== undefined) { sets.push("priority = @priority"); vals.priority = Number(priority) || 0; }
+  if (runAt !== undefined)    { sets.push("run_at = @run_at");     vals.run_at = Math.round(Number(runAt) || Date.now()); }
+  if (payload !== undefined)  { sets.push("payload = @payload");   vals.payload = JSON.stringify(payload ?? {}); }
+  if (sets.length) db.prepare(`UPDATE jobs SET ${sets.join(", ")} WHERE id = @id`).run(vals);
+  return { ok: true, job: getJob(id) };
+}
+
+// Re-run a finished/dead/failed job: reset it to queued, clear attempts + error,
+// make it due now. Refuses jobs still queued/running (nothing to re-run yet).
+export function requeueJob(id) {
+  const job = db.prepare("SELECT status FROM jobs WHERE id = ?").get(id);
+  if (!job) return { ok: false, reason: "not found" };
+  if (job.status === "queued" || job.status === "running") return { ok: false, reason: `already ${job.status}` };
+  db.prepare(`UPDATE jobs SET status = 'queued', attempts = 0, last_error = NULL,
+      run_at = @now, started_at = NULL, finished_at = NULL WHERE id = @id`).run({ id, now: Date.now() });
+  return { ok: true, job: getJob(id) };
+}
+
+// Reset orphaned 'running' jobs back to 'queued'. A serial worker processes one
+// job at a time, so a 'running' row with no live worker is a zombie left by a
+// crash or restart mid-job. olderThanMs>0 reclaims only jobs whose started_at is
+// older than the cutoff, so a MANUAL reclaim while a worker is live won't yank the
+// job it's actively running; the worker itself calls this with 0 at boot, when it
+// is the sole consumer and nothing of its own can be running yet. attempts is
+// preserved (not reset), so a job that keeps zombie-ing still dead-letters. Returns
+// the count reclaimed.
+export function reclaimRunningJobs({ olderThanMs = 0 } = {}) {
+  if (olderThanMs > 0) {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    return db.prepare(
+      "UPDATE jobs SET status = 'queued', started_at = NULL WHERE status = 'running' AND (started_at IS NULL OR started_at < ?)")
+      .run(cutoff).changes;
+  }
+  return db.prepare("UPDATE jobs SET status = 'queued', started_at = NULL WHERE status = 'running'").run().changes;
+}
+
+// Bulk-trim jobs. Filter by status and/or type; olderThanMs drops only jobs
+// created before the cutoff. RUNNING jobs are NEVER trimmed. Returns count deleted.
+export function trimJobs({ status, type, olderThanMs } = {}) {
+  const where = ["status != 'running'"], vals = {};
+  if (status) { where.push("status = @status"); vals.status = status; }
+  if (type)   { where.push("type = @type");     vals.type = type; }
+  if (olderThanMs != null) {
+    where.push("created_at < @cutoff");
+    vals.cutoff = new Date(Date.now() - Number(olderThanMs)).toISOString();
+  }
+  return db.prepare(`DELETE FROM jobs WHERE ${where.join(" AND ")}`).run(vals).changes;
+}
+
 // ---- Fetch-run health tracking ----
 // One row per fetcher per ingestFor() call. This is how the platform notices a
 // scraper has rotted: at 100+ sources, a source that silently returns [] forever
@@ -614,6 +1003,17 @@ export function pruneFetchRuns(olderThanDays = 90) {
   return db.prepare("DELETE FROM fetch_runs WHERE at < ?").run(cutoff).changes;
 }
 
+// Map of politician_id → last fetch_run timestamp (ms). A rep ABSENT from the map
+// has never been ingested — incremental ingest treats those as always-due (they
+// are exactly the "latest additions" a fresh roster_update leaves behind).
+export function lastFetchByPolitician() {
+  const rows = db.prepare(
+    "SELECT politician_id AS id, MAX(at) AS at FROM fetch_runs WHERE politician_id IS NOT NULL GROUP BY politician_id").all();
+  const m = new Map();
+  for (const r of rows) m.set(r.id, r.at);
+  return m;
+}
+
 // ---- Maintenance / reset helpers ----
 export function deleteAllJobs() {
   return db.prepare("DELETE FROM jobs").run().changes;
@@ -637,15 +1037,6 @@ export function findPolitician(idOrName) {
   const row = db.prepare("SELECT data FROM politicians WHERE name_lc = ? AND is_demo = 0 LIMIT 1").get(q)
     || db.prepare("SELECT data FROM politicians WHERE name_lc LIKE ? AND is_demo = 0 LIMIT 1").get(`%${q}%`);
   return J(row);
-}
-
-// Delete content-less "pointer" evidence — generic portal/search URLs with no
-// readable content. News leads (source_type 'news') and fact-checks are kept:
-// their headline IS the content. Returns rows removed.
-export function purgeUselessPointers() {
-  return db.prepare(
-    "DELETE FROM evidence WHERE has_content = 0 AND json_extract(data, '$.source_type') NOT IN ('news','fact_check')"
-  ).run().changes;
 }
 
 export function removeDemoPoliticians() {
@@ -691,4 +1082,75 @@ export function counts() {
   const c = {};
   for (const t of ["politicians", "evidence", "reports", "tips", "scandals"]) c[t] = db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
   return c;
+}
+
+// ---- Ops-console aggregates (read-only; power the monitoring dashboard) ----
+
+// Turn [{k, n}] rows into a plain { k: n } map (stable shape for the UI).
+function tally(rows, key = "k") {
+  const out = {};
+  for (const r of rows) out[r[key] ?? "(none)"] = r.n;
+  return out;
+}
+
+// Grade distribution over the LATEST report per politician (history is ignored),
+// plus jobs / leads / scandals / stories counted by status — the headline tiles.
+export function statsSummary() {
+  const grades = db.prepare(`
+    SELECT overall_grade AS k, COUNT(*) AS n FROM reports r
+    WHERE generated_at = (SELECT MAX(generated_at) FROM reports r2 WHERE r2.politician_id = r.politician_id)
+    GROUP BY overall_grade`).all();
+  const byStatus = (table) =>
+    tally(db.prepare(`SELECT status AS k, COUNT(*) AS n FROM ${table} GROUP BY status`).all());
+  return {
+    counts: counts(),
+    grades: tally(grades),
+    jobs: byStatus("jobs"),
+    leads: byStatus("investigation_leads"),
+    scandals: byStatus("scandals"),
+    stories: byStatus("stories"),
+  };
+}
+
+// Per-source_type evidence coverage: how many rows, how many carry real content,
+// and the freshest fetch. source_type lives in the JSON blob (not a hot column).
+export function evidenceCoverage() {
+  return db.prepare(`
+    SELECT json_extract(data, '$.source_type') AS source_type,
+           COUNT(*)          AS rows,
+           SUM(has_content)  AS with_content,
+           MAX(fetched_at)   AS last_fetched
+    FROM evidence GROUP BY source_type ORDER BY rows DESC`).all()
+    .map((r) => ({
+      source_type: r.source_type ?? "(unknown)",
+      rows: r.rows,
+      with_content: r.with_content ?? 0,
+      last_fetched: r.last_fetched ?? null,
+    }));
+}
+
+// Real (non-demo) reps with zero evidence rows / with no report at all — the two
+// coverage gaps the owner most needs to see. Also returns the non-demo total.
+export function politiciansMissing() {
+  const total = db.prepare("SELECT COUNT(*) c FROM politicians WHERE is_demo = 0").get().c;
+  const noEvidence = db.prepare(
+    "SELECT COUNT(*) c FROM politicians p WHERE p.is_demo = 0 AND NOT EXISTS (SELECT 1 FROM evidence e WHERE e.politician_id = p.id)").get().c;
+  const noReport = db.prepare(
+    "SELECT COUNT(*) c FROM politicians p WHERE p.is_demo = 0 AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.politician_id = p.id)").get().c;
+  return { total, noEvidence, noReport };
+}
+
+// Jobs grouped by status ({ queued, running, done, dead }) for the queue header.
+export function jobCounts() {
+  return tally(db.prepare("SELECT status AS k, COUNT(*) AS n FROM jobs GROUP BY status").all());
+}
+
+// Map of politician_id → evidence-row count (one query), for the roster grid's
+// per-rep evidence column and the has-evidence filter.
+export function evidenceCounts() {
+  const m = {};
+  for (const r of db.prepare("SELECT politician_id AS pid, COUNT(*) AS n FROM evidence GROUP BY politician_id").all()) {
+    m[r.pid] = r.n;
+  }
+  return m;
 }

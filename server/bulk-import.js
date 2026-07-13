@@ -134,6 +134,7 @@ const ASSEMBLIES = [
   ["Mizoram2023",          "Mizoram"],
   ["Sikkim2024",           "Sikkim"],
   ["ArunachalPradesh2024", "Arunachal Pradesh"],
+  ["Puducherry2021",       "Puducherry"],
 ];
 
 async function main() {

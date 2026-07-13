@@ -4,9 +4,8 @@
 //
 // Best-effort: paywalled or bot-blocked outlets are skipped silently. Only the
 // most recent N articles are fetched to keep ingest fast and polite.
-import { fetchText, htmlToText, fetchPdfText, mapLimit } from "./http.js";
+import { fetchText, htmlToText, fetchPdfText, mapLimit, isPdf } from "./http.js";
 
-const isPdf = (url) => /\.pdf($|\?)/i.test(url);
 
 export async function enrichNewsBodies(newsItems, { limit = 12 } = {}) {
   const targets = (newsItems ?? [])

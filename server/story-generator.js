@@ -12,15 +12,12 @@
 // a source, and any sentence whose [n] doesn't resolve to the numbered registry
 // is stripped — never guessed.
 import "dotenv/config";
-import OpenAI from "openai";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
 import {
   listLeads, listScandals, listEvidence, getPolitician, findPolitician, upsertStory,
 } from "./store.js";
 import { citationsFor, buildRegistry } from "./citations.js";
 
-const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
-const AI_KEY  = process.env.AI_API_KEY  || "";
 
 // Registry cap + per-source truncation — same numbers as the dossier engine.
 const SOURCE_CAP = 40;
@@ -177,16 +174,8 @@ function stripUnresolvedSentences(body, registry) {
 }
 
 export function validateAndRepairStory(raw, incident, registry) {
-  let text = String(raw ?? "").trim().replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "");
-  let parsed;
-  try { parsed = JSON.parse(text); }
-  catch {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("Model returned no valid JSON.");
-    parsed = JSON.parse(m[0]);
-  }
+  const parsed = parseModelJson(raw);
 
-  const arr = (x) => (Array.isArray(x) ? x : []);
   const headline = String(parsed.headline ?? "").trim() || `Incident: ${incident.label}`;
   const dek = String(parsed.dek ?? "").trim() || "This story is drawn from verified investigation leads.";
   const body_markdown = stripUnresolvedSentences(parsed.body_markdown, registry);
@@ -219,11 +208,7 @@ export async function generateStory(incident, { dryRun = false } = {}) {
   if (dryRun) return { dryRun: true, incident, registry, prompt: { system, user } };
   if (!AI_KEY) throw new Error("AI_API_KEY is not set in your .env file.");
 
-  const client = new OpenAI({
-    baseURL: AI_BASE, apiKey: AI_KEY,
-    defaultHeaders: AI_BASE.includes("openrouter")
-      ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-  });
+  const client = makeClient();
 
   let story = null, lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {

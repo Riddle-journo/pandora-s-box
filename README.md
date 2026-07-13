@@ -1,14 +1,30 @@
 # Pandoro's Box
 
-AI-generated, citation-backed accountability dossiers on India's elected representatives
-(MPs, MLAs, MLCs) + a Government Watch layer on scandals, ministers, and governments.
+Citation-backed accountability report cards on India's elected representatives
+(MPs, MLAs, MLCs), ministries, and parties + a Government Watch layer on scandals —
+and a **private AI Investigator desk** that surfaces leads for real journalists.
 Built only from public records; every adverse line is a sourced fact, never an accusation.
 
 > **Design principle: aggregation + citation, not accusation.** The site never asserts
 > "X is corrupt." It presents the documents — "CAG Report 4/2023 flagged ₹62 cr [link];
 > two cases pending per X's sworn affidavit [link]" — and lets the citizen conclude.
 
-- **Engine:** GLM-5.2 via OpenRouter (the investigative journalist).
+## Architecture: two branches after ingest
+
+```
+                     ┌─ SUMMARIZER (public, ~free)
+ingest.js/fetchers ──┤   cards.js → report cards for politicians/ministries/parties
+(evidence.numbers)   │   all numbers computed in code; a FREE model chain writes
+                     │   only connective prose (cards work with zero LLM calls)
+                     │
+                     └─ AI INVESTIGATOR (private, admin-only — the GLM budget)
+                         investigate.js → conflict/anomaly/collusion detectors (code)
+                         → L2/L3 AI investigation → synthesis → story drafts
+                         reviewed at #/admin, shared with journalists OFF-platform
+```
+
+- **Summarizer engine:** deterministic code + a rotating chain of free models (`free-chain.js`).
+- **Investigator engine:** GLM-5.2 via OpenRouter — its output is never public.
 - **Store:** SQLite (`data/pandoros.db`, better-sqlite3) — indexed, row-level.
 - **Server:** Express, serves `public/` + a JSON API. Local only (not hosted yet).
 
@@ -28,6 +44,11 @@ AI_MODEL=z-ai/glm-5.2             # optional override
 ADMIN_TOKEN=choose-a-long-secret  # required for the in-site admin page
 PORT=3000                         # website port
 DATA_GOV_IN_KEY=...               # for MCA directorship download (optional)
+# Optional free-chain fallback slots — Summarizer prose polish only (cards.js
+# ships fine with plain template prose if these are blank). OpenRouter's free
+# models alone get rate-limited under shared load; Groq/Gemini rarely do.
+# GROQ_API_KEY=...                 # free: https://console.groq.com/keys
+# GEMINI_API_KEY=...               # free: https://aistudio.google.com/apikey
 # Optional source tuning:
 # INDIAN_KANOON_KEY=...           # court judgments via API (free web-scrape fallback works without it)
 # MCA_DB_PATH=data/mca.db         # directorship DB (build with mca-index.js)
@@ -80,40 +101,150 @@ node server/ingest.js --state Maharashtra   # one state
 
 ---
 
-## 4. Generate reports — `server/report-generator.js`
+## 4. Summarizer — public report cards (`server/summarize.js`, ~free)
 
-GLM writes **one report per politician** (auto-ingesting first). The scandal generator +
-auto-discovery run **as part of this** (scandals are GLM work, not ingest). Prints elapsed time.
+Builds the public report card for each politician: every number computed **in code**
+from the evidence corpus (affidavits, MPLADS, MCA, Sansad, Wikidata), scored by the
+transparent flags→baseline formula in `scoring.js`/`analyzer.js`. A rotating chain of
+**free** models (`free-chain.js`) writes short connective prose; if every free model is
+rate-limited the card ships with template prose — **a card never needs a paid LLM call**.
 
 ```bash
-node server/report-generator.js all                  # everyone (incremental)
-node server/report-generator.js all --office MP       # all MPs
-node server/report-generator.js all --state Bihar     # one state
-node server/report-generator.js all --limit 20        # first 20 (good for testing)
-node server/report-generator.js <politician-id>       # a single rep
+node server/summarize.js --all                    # card every real rep
+node server/summarize.js --all --office MP        # filter by office
+node server/summarize.js --all --state Bihar      # one state
+node server/summarize.js --id <politician-id>     # a single rep
+node server/summarize.js --all --no-prose         # pure templates, zero LLM
+node server/summarize.js --all --no-ingest        # card existing evidence only
 ```
 
-**Update mode — you choose (default `incremental`):**
+Ministry & party cards (`/api/ministries/*/card`, `/api/parties/*/card?scope=<State>`)
+are pure aggregation computed on request — scandal buckets, roster grade distributions,
+electoral-bond funding. Canonical subjects live in `server/data/ministries.js`.
 
-| Mode | Sent to GLM | Use when |
-|------|-------------|----------|
-| `--mode incremental` | prior-findings digest + **only new** evidence; skips reps with nothing new | routine refresh, cheapest |
-| `--mode full` | the **whole** raw corpus, **no** memory of past findings | clean-slate rebuild |
-| `--mode recheck` | the **whole** raw corpus **again** + the prior digest, told to confirm known patterns and hunt for **new** ones | periodic deep re-investigation |
-| `--full` | alias for `--mode full` | — |
+## 4b. AI Investigator — private leads desk (`server/investigate.js`, the GLM budget)
 
-**Other flags:** `--new-only` (only reps with no report yet — pure resume), `--force` (regen
-even if incremental finds nothing new), `--no-scandals` (skip the GLM scandal step).
+Finds leads worth a real journalist's follow-up. **Nothing here is ever public** — leads
+live behind the admin token, reviewed at `#/admin`, and shared off-platform.
 
-**Reprocess-on-change:** reports are stamped with `PIPELINE_VERSION` (in `report-generator.js`).
-Bump it whenever you add a source/field/issue or materially change the prompt — the next run then
-auto-re-investigates the **whole back-catalogue** once in `recheck` mode, so nothing is left behind.
+```bash
+node server/investigate.js                      # L1 detectors (free) + L2/L3 on top 50 leads (paid)
+node server/investigate.js --id <politician>    # one rep
+node server/investigate.js --l1-only            # detectors/statistics only — zero LLM
+node server/investigate.js --top 20             # cap the paid L2/L3 spend
+node server/investigate.js --stories            # also draft journalist-handoff narratives (paid)
+```
+
+Layers: L1 the **Anomaly Engine** (below) → L2 agentic investigator +
+L3 skeptical referee (`investigator.js`, GLM) → L4 `synthesis.js` network hubs (code, part of
+L1 synthesis) → L5 `story-generator.js` drafts (GLM). The L2 investigator now **follows the
+trail**: the engine's structured citations are fed into its prompt, and it has free internal
+tools to read a cited evidence row (`read_evidence`), pull sibling flags on the same subject
+(`related_flags`), walk the entity's relationship graph (`entity_relations`), and full-text
+search the whole corpus (`search_corpus`) — before spending any network tool. Concrete links
+it establishes are written back as low-confidence relationship edges, so every investigation
+grows the graph the next engine run reads. And when it surfaces a **new** suspicious entity
+(a shell company, a co-director), it spawns a fresh `TRAIL_DISCOVERY` lead for that entity —
+so investigation feeds discovery, not just verdicts. Its budgets are DB-tunable
+(`engine.investigator.*`). Lead flow: `detected → proposed →
+cleared | dismissed` ("cleared" = vetted for external sharing; it never publishes anything).
+
+### The Anomaly Engine — `server/engine.js` (L1, code-only, free)
+
+One registry of **46 detectors** across 13 categories runs over everything the store knows and
+emits **flags**: `small` (context; feeds clusters) and `big` (lead-worthy alone). Every flag
+carries evidence citations and a rationale with the actual numbers. `lead-synthesis.js` then
+promotes big flags and multi-detector clusters into `investigation_leads` — same admin-gated
+GLM funnel as always. Every detector's thresholds are **DB-backed and editable live** from the
+ops console Tuning tab — including the wrapped legacy vectors (conflict, collusion, statistical
+outliers), whose constants are now exposed as tunables too.
+
+**The general / catch-all detectors** (find anomalies nobody wrote a rule for):
+- **`generic_outlier`** — z-scores *every* numeric metric against the subject's cohort
+  (robust median+MAD modified z, signed-log space), both tails. Covers any new metric the
+  moment it lands in the ledger.
+- **`multivariate_outlier`** — catches a rep unremarkable on every *single* metric but whose
+  whole *profile* is unusual (e.g. moderate assets + low income + high spend together).
+  Robust Mahalanobis-style distance over the full metric vector vs the office cohort.
+- **`metric_changepoint`** — finds the year a trajectory *broke* (a step-change a
+  consecutive-year ratio misses), on any series with enough points.
+
+**The nexus net** (government–business–entity corruption shapes):
+- **`nexus_triangle`** — a politician whose office covers a sector + a private interest in it
+  + a government benefit to a connected entity. Two legs = candidate, all three = big.
+- **`ownership_chain`** — follows director/owner edges multiple hops to an ultimate
+  controller; flags deep layering chains and sets of companies tracing to one controller
+  ("independent bidders secretly one group").
+- **`tender_capacity_mismatch`** — a company on a government award whose paid-up capital is
+  implausibly small (the "tiny shell wins a big tender" shape).
+
+**Cross-source contradiction** (the sworn-declaration-vs-reality shapes — a genuine gap the
+engine previously lacked):
+- **`undeclared_criminal_case`** — declares zero (or fewer) criminal cases, yet ≥N independent
+  court/CBI records name the rep. Every flag is explicitly a lead to verify identity on.
+- **`vanishing_asset_item`** — a specific property/interest disappears between affidavits with
+  no matching fall in total assets (the silent-omission / moved-to-family shape).
+- **`copy_paste_affidavit`** — core figures identical to the rupee across different election
+  years (real wealth never repeats exactly).
+
+**Deeper wealth forensics**: `net_worth_reconciliation` (sources-and-uses flow of funds, nets
+out leverage so it beats a gross-asset test), `liability_writeoff` (debt that vanishes with no
+sale or income to clear it — loan-waiver shape), `zero_liability_implausibility` (large assets
++ businesses beside zero declared debt).
+
+**Procurement forensics — the CPPP suite** (`server/cppp-detectors.js`, 9 detectors over the
+**4.9M-award** Central Public Procurement Portal corpus): `cppp_single_bidder` (uncontested
+wins — the #1 Open-Contracting red flag), `cppp_supplier_capture` (one firm dominates a
+buyer), `cppp_contract_splitting` (values hugging just under approval thresholds),
+`cppp_short_window`, `cppp_repeat_winner`, `cppp_benford_values`, `cppp_fy_end_bunching`,
+`cppp_date_integrity` (contracts dated before publication — backdating), `cppp_anonymous_winner`
+(materially-paid bidder with no address). These emit **company/buyer** flags with a synthetic
+entity id so a supplier tripping several detectors **stacks** into one big lead — which the
+investigator's Tofler tool then expands to directors and links to politicians. The 6.6 GB CPPP
+DB is flattened once (`cppp-index.js`) into a lean indexed table; the detectors are **opt-in**
+(they scan millions of rows) and run as their own ops job, never slowing a normal engine pass.
+
+All general/nexus/contradiction detectors are small-flag-dominant (they earn weight inside
+clusters); only the strongest go big.
+
+**The feedback loop** — every approve / reject / dismiss decision (and each GLM verdict) is
+logged to a `lead_feedback` ledger, attributed back to the contributing detector(s). The ops
+console **Engine → Detector precision** panel shows each detector's reject rate and suggests
+raising thresholds for detectors whose leads you mostly reject (and lowering for ones you
+mostly approve). Suggestion-only — nothing auto-tunes.
+
+```bash
+node server/engine.js                       # full ledger scan → flags → leads (writes; procurement OFF)
+node server/engine.js --dry-run             # preview under current thresholds, writes nothing
+node server/engine.js --detector da_ratio   # one detector
+node server/engine.js --id <politician>     # scope to one rep
+node server/cppp-index.js                    # (one-time) flatten the 4.9M-award CPPP DB → indexed table
+# procurement scan is opt-in: run it via the ops console "Engine · procurement scan (CPPP)"
+# job, or runEngine({ procurement: true }); it scans millions of rows so it's kept separate.
+```
+
+Detector families: wrapped legacy vectors (conflict, collusion, statistical outliers,
+multi-source corroboration) + disproportionate-assets check-period, liability spikes,
+criminal-case escalation, election-spend-vs-cap tails (ADR bunching), assets-vs-income
+mismatch, young wealth, Benford first-digit screens (Nigrini MAD bands), parliamentary
+inactivity, MPLADS completion gaps, nominee-director/shell markers, award concentration,
+family adverse links, party income spikes, party spend-vs-donations. Thresholds are
+DB-backed and editable live from the ops console (`#/ops` → Tuning); enrichment
+(Tofler directors + director-link) is free-only and records everything it learns as
+evidence. Flags live in the `flags` table; re-runs are idempotent, and a full run marks
+no-longer-supported flags `stale`.
+
+## 4c. Legacy dossiers — `server/report-generator.js` (retired)
+
+The old one-GLM-call-per-rep public dossier is retired in favour of the Summarizer card;
+existing reports are kept as a frozen archive. The CLI still works during the transition.
 
 ---
 
-## 5. Government Watch (scandals)
+## 5. Government Watch (scandals) — the "editorial" bucket
 
-Run automatically inside `report-generator.js`; also available standalone:
+Public, GLM-written, and always human-gated (discovery only queues proposals; the GLM
+analysis runs when you approve one at `#/admin`). Standalone commands:
 
 ```bash
 node server/scandal-generator.js seed           # analyses for all built-in seeds
@@ -169,24 +300,63 @@ Enter your `ADMIN_TOKEN` to review auto-discovered scandal proposals and approve
 
 ---
 
+## 8b. Ops Console — monitor & control the DB from a browser
+
+A local, admin-gated dashboard to see what's in the database and run every
+DB-related command without the terminal.
+
+```bash
+npm run ops        # = node server/index.js, but also runs the job worker in-process
+```
+
+Then open **`http://localhost:3000/#/ops`** and enter your `ADMIN_TOKEN`. Tabs:
+
+- **Overview** — reps / evidence / reports / scandals counts, per-source evidence
+  coverage, coverage gaps, and source health (ROTTED / STALE / QUIET).
+- **Pipeline** — one-click preset chains (ingest → extract → engine; analyze-only;
+  full investigation; card refresh) plus every individual command, each queued as a
+  job with **live streaming logs**. Danger zone gated behind a typed `RESET` phrase.
+- **Engine** — every Anomaly Engine detector with live flag counts; run or **dry-run**
+  any one detector (or the whole engine) and see what current thresholds would flag
+  before writing anything.
+- **Tuning** — every detector's thresholds/weights/on-off as editable fields
+  (DB-backed; applies on the next run; blank/reset = code default).
+- **Flags** — browse small/big flags by detector/severity/subject, each expanding to
+  its rationale and clickable evidence citations.
+- **Leads** — the full pipeline (`detected → proposed → published/dismissed`) with
+  per-lead actions: **Investigate (GLM)** on a detected lead, **Approve / Reject** on
+  proposals (same gate as `#/admin`), **Dismiss** to park.
+- **Roster / Jobs** — rep browser and the job queue with logs.
+
+How it works: the console enqueues jobs onto the existing `jobs` queue; an
+**in-process worker** (started by `npm run ops`) drains them. Env toggles:
+
+| Env | Default | Effect |
+|-----|---------|--------|
+| `OPS_INPROC_WORKER` | on | set `0` to NOT run the worker in-process (run `node server/worker.js` separately instead) |
+| `OPS_SCHEDULER` | off | set `1` to also run the recurring scheduler (auto-ingest/discovery). Off = nothing runs unless you click it. |
+
 ## Typical workflows
 
-**First full build of all MPs:**
+**First full build of all MPs (free):**
 ```bash
 node server/ingest.js --office MP                    # pull sources (free)
 node server/ingest.js --office RS
-node server/report-generator.js all --office MP      # write reports (GLM)
-node server/report-generator.js all --office RS
+node server/summarize.js --all --office MP --no-ingest   # public report cards (free)
+node server/summarize.js --all --office RS --no-ingest
 ```
 
-**Weekly refresh (cheap):**
+**Weekly refresh (free):**
 ```bash
-node server/report-generator.js all                  # incremental; skips unchanged reps
+node server/ingest.js                                # new evidence only (URL-deduped)
+node server/summarize.js --all --no-ingest           # re-card everyone
 ```
 
-**After adding a new source/field (bump PIPELINE_VERSION first):**
+**Investigation sweep (paid — your call, never automatic):**
 ```bash
-node server/report-generator.js all --mode recheck   # re-investigate everyone, with memory
+node server/investigate.js --top 50                  # L1 free + L2/L3 on the best 50 leads
+# then review at #/admin → clear leads → optionally:
+node server/investigate.js --stories                 # journalist-handoff drafts
 ```
 
 ---

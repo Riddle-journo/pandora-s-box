@@ -10,10 +10,12 @@ import { enqueueJob, getMeta, setMeta } from "./store.js";
 // generate_report's 30s gap in the worker), so this only has to be a coarse
 // "kick it off roughly this often" cadence.
 export const SCHEDULES = [
-  { type: "discover_scandals", payload: {}, everyMs: 6 * 3600_000 },       // ~every 6h
+  { type: "discover_scandals", payload: {}, everyMs: 6 * 3600_000 },       // ~every 6h (proposals only — GLM runs on admin approve)
   { type: "ingest_all",        payload: {}, everyMs: 7 * 24 * 3600_000 },  // ~weekly
+  { type: "cards_all",         payload: { ingest: false }, everyMs: 7 * 24 * 3600_000 }, // ~weekly, after ingest (free Summarizer refresh)
   { type: "source_health",     payload: {}, everyMs: 24 * 3600_000 },      // ~daily
-  { type: "anomaly_scan",      payload: {}, everyMs: 7 * 24 * 3600_000 },  // ~weekly
+  { type: "extract_all",       payload: {}, everyMs: 7 * 24 * 3600_000 },  // ~weekly (rebuild ledgers from fresh evidence)
+  { type: "engine_scan",       payload: {}, everyMs: 7 * 24 * 3600_000 },  // ~weekly (full Anomaly Engine — free; GLM stays manual)
 ];
 
 const metaKey = (type) => `sched_last_enqueue_${type}`;

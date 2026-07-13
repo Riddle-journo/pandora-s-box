@@ -8,6 +8,14 @@ import path from "node:path";
 
 const DB_PATH = path.join(os.tmpdir(), `pandoros-test-health-${process.pid}.db`);
 process.env.PANDOROS_DB_PATH = DB_PATH;
+// A prior run whose test.after() unlink failed (common on Windows, where the
+// SQLite handle isn't released synchronously) leaves this file behind; PID reuse
+// then reopens it dirty and flakes exact-count/idempotency assertions. Delete any
+// leftover BEFORE the store opens it so every run starts from an empty DB.
+for (const suffix of ["", "-wal", "-shm"]) {
+  try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
+}
+
 
 const store = await import("../server/store.js");
 const { runFetchers } = await import("../server/ingest.js");
@@ -53,18 +61,21 @@ test("runFetchers records one fetch_run per fetcher with correct ok/items/error"
   assert.equal(bySrc.empty_source.total_items, 0);
 });
 
-test("classifyHealth flags ROTTED (failing / zero-item) and STALE (no runs) sources", () => {
+test("classifyHealth separates ROTTED (real failures) from QUIET (clean but zero-item) and STALE (no runs)", () => {
   const health = [
     { source: "healthy", runs: 4, ok_rate: 1,    total_items: 40, last_success_at: Date.now(), last_error: null },
     { source: "flaky",   runs: 4, ok_rate: 0.25, total_items: 3,  last_success_at: Date.now(), last_error: "429" },
     { source: "dry",     runs: 4, ok_rate: 1,    total_items: 0,  last_success_at: Date.now(), last_error: null },
   ];
   const known = ["healthy", "flaky", "dry", "never_ran"];
-  const { rotted, stale } = classifyHealth(health, known);
+  const { rotted, quiet, stale } = classifyHealth(health, known);
 
-  const rottedNames = rotted.map((r) => r.source).sort();
-  assert.deepEqual(rottedNames, ["dry", "flaky"], "low success-rate AND zero-items are both ROTTED");
-  assert.ok(!rottedNames.includes("healthy"));
+  // ROTTED means "actually failing" (low success rate) — a clean run with zero
+  // items ("dry") is NOT rot; many sources are legitimately rare-hit or simply
+  // unconfigured, and flagging them as broken was a false alarm (see health.js).
+  assert.deepEqual(rotted.map((r) => r.source), ["flaky"], "only the low-success-rate source is ROTTED");
+  assert.deepEqual(quiet.map((r) => r.source), ["dry"], "a clean run with zero items is QUIET, not ROTTED");
+  assert.ok(!rotted.map((r) => r.source).includes("healthy"));
 
   assert.deepEqual(stale, ["never_ran"], "a known source with no runs is STALE");
 });

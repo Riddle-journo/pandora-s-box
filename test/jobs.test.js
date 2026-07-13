@@ -9,15 +9,25 @@ import path from "node:path";
 
 const DB_PATH = path.join(os.tmpdir(), `pandoros-test-jobs-${process.pid}.db`);
 process.env.PANDOROS_DB_PATH = DB_PATH;
+// A prior run whose test.after() unlink failed (common on Windows, where the
+// SQLite handle isn't released synchronously) leaves this file behind; PID reuse
+// then reopens it dirty and flakes exact-count/idempotency assertions. Delete any
+// leftover BEFORE the store opens it so every run starts from an empty DB.
+for (const suffix of ["", "-wal", "-shm"]) {
+  try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
+}
+
 
 const store = await import("../server/store.js");
 const worker = await import("../server/worker.js");
 const scheduler = await import("../server/scheduler.js");
 const {
   enqueueJob, claimNextJob, completeJob, failJob, getJob, deleteAllJobs,
+  cancelJob, updateJob, requeueJob, trimJobs, isQueuePaused, setQueuePaused,
+  recordFetchRun, lastFetchByPolitician,
 } = store;
 
-test.beforeEach(() => deleteAllJobs());
+test.beforeEach(() => { deleteAllJobs(); setQueuePaused(false); });
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -135,6 +145,88 @@ test("worker fails/dead-letters a job whose type has no handler", async () => {
   assert.equal(res.ok, false);
   // attempts(1) >= max_attempts(1) -> dead
   assert.equal(getJob(jid).status, "dead");
+});
+
+test("pause flag round-trips and defaults to false", () => {
+  assert.equal(isQueuePaused(), false);
+  setQueuePaused(true);
+  assert.equal(isQueuePaused(), true);
+  setQueuePaused(false);
+  assert.equal(isQueuePaused(), false);
+});
+
+test("cancelJob deletes a queued job but refuses a running one", () => {
+  const { id: jid } = enqueueJob({ type: "cancel_me", payload: {} });
+  const r = cancelJob(jid);
+  assert.equal(r.ok, true);
+  assert.equal(getJob(jid), null, "queued job is gone");
+
+  const { id: rid } = enqueueJob({ type: "cancel_running", payload: {} });
+  claimNextJob(); // -> running
+  const r2 = cancelJob(rid);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, "running");
+  assert.equal(getJob(rid).status, "running", "running job untouched");
+
+  assert.equal(cancelJob("nope").ok, false, "missing job -> ok:false");
+});
+
+test("updateJob edits priority/run_at/payload of a queued job only", () => {
+  const { id: jid } = enqueueJob({ type: "edit_me", payload: { a: 1 }, priority: 0 });
+  const r = updateJob(jid, { priority: 5, payload: { a: 2, b: 3 } });
+  assert.equal(r.ok, true);
+  const j = getJob(jid);
+  assert.equal(j.priority, 5);
+  assert.deepEqual(j.payload, { a: 2, b: 3 }, "payload fully replaced");
+
+  claimNextJob(); // -> running
+  const r2 = updateJob(jid, { priority: 9 });
+  assert.equal(r2.ok, false, "running job is not editable");
+  assert.match(r2.reason, /running/);
+});
+
+test("requeueJob re-runs a done/dead job and refuses a queued one", () => {
+  const { id: jid } = enqueueJob({ type: "rerun_me", payload: {}, maxAttempts: 1 });
+  claimNextJob();
+  completeJob(jid);
+  assert.equal(getJob(jid).status, "done");
+
+  const r = requeueJob(jid);
+  assert.equal(r.ok, true);
+  const j = getJob(jid);
+  assert.equal(j.status, "queued");
+  assert.equal(j.attempts, 0, "attempts reset");
+  assert.equal(j.last_error, null);
+  assert.equal(j.finished_at, null);
+
+  assert.equal(requeueJob(jid).ok, false, "already-queued job can't be re-run");
+});
+
+test("trimJobs bulk-deletes by status but never touches running", () => {
+  const a = enqueueJob({ type: "t", payload: { n: 1 } });
+  const b = enqueueJob({ type: "t", payload: { n: 2 } });
+  claimNextJob(); completeJob(a.id);   // a -> done
+  const running = enqueueJob({ type: "t", payload: { n: 3 } });
+  claimNextJob(); // b -> running (oldest queued); actually claims b
+
+  const deletedDone = trimJobs({ status: "done" });
+  assert.equal(deletedDone, 1, "only the done job removed");
+  assert.equal(getJob(a.id), null);
+
+  // A blanket trim still spares whatever is running.
+  const before = store.listJobs({ status: "running" }).length;
+  trimJobs({});
+  assert.equal(store.listJobs({ status: "running" }).length, before, "running survived a blanket trim");
+});
+
+test("lastFetchByPolitician maps id -> most-recent fetch_run timestamp", () => {
+  recordFetchRun({ source: "s1", politician_id: "p1", ok: 1, at: 1000 });
+  recordFetchRun({ source: "s2", politician_id: "p1", ok: 1, at: 5000 });
+  recordFetchRun({ source: "s1", politician_id: "p2", ok: 0, at: 2000 });
+  const m = lastFetchByPolitician();
+  assert.equal(m.get("p1"), 5000, "takes the MAX per rep");
+  assert.equal(m.get("p2"), 2000);
+  assert.equal(m.has("p3"), false, "never-fetched rep is absent (always-due for incremental)");
 });
 
 test("scheduler enqueues on first tick and respects everyMs spacing", () => {

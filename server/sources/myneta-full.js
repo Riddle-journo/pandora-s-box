@@ -118,6 +118,39 @@ function parseProperties(html) {
   return out;
 }
 
+// Asset-CATEGORY totals from the movable/immovable tables (gap-fill for the
+// wealth-forensics detectors). MyNeta prints category rows (Cash, Jewellery/
+// Bullion, Loans & advances GIVEN, Vehicles) whose LAST column is the family
+// total. Cash-in-hand and loans-given are the classic benami/parking markers;
+// jewellery is the under-valued-hard-asset marker. Once these land as facts, the
+// general detectors (generic_outlier, multivariate_outlier) cover them with no
+// new rule. Returns null when nothing parses.
+const ASSET_CATEGORY_RE = [
+  ["cash_in_hand", /\bcash\b/i],
+  ["jewellery_value", /jewel|bullion|ornament|\bgold\b|\bsilver\b/i],
+  ["loans_given", /loan[s]?\s*(?:to|given|and advance)|advance[s]?\s*(?:to|given)|receivable|due from/i],
+  ["vehicles_value", /vehicle|motor\s*car|automobile/i],
+];
+function parseAssetCategories(html) {
+  const cats = {};
+  const rowTotal = (r) => { const c = r[r.length - 1] ?? ""; const n = (String(c).match(/[\d,]{4,}/) ?? [])[0]; return n ? parseRupees(n) : null; };
+  for (const r of tableRows(html, "movable_assets")) {
+    const desc = String(r[1] ?? "").toLowerCase();
+    if (/^total/i.test(desc)) continue;
+    const val = rowTotal(r);
+    if (val == null) continue;
+    for (const [cat, re] of ASSET_CATEGORY_RE) if (re.test(desc)) { cats[cat] = (cats[cat] ?? 0) + val; break; }
+  }
+  let immovable = 0;
+  for (const r of tableRows(html, "immovable_assets")) {
+    const desc = String(r[1] ?? "");
+    if (/^total/i.test(desc) || /^sr\s*no|^description/i.test(desc)) continue;
+    const v = rowTotal(r); if (v) immovable += v;
+  }
+  if (immovable) cats.immovable_total = immovable;
+  return Object.keys(cats).length ? cats : null;
+}
+
 export async function fetchMyNetaProfile(p) {
   if (!p.myneta_url) return [];
   let html;
@@ -208,6 +241,11 @@ export async function fetchMyNetaProfile(p) {
   const properties = parseProperties(html);
   if (interests.length) numbers.interests = interests;
   if (properties.length) numbers.properties = properties;
+  // Asset-category totals (cash / jewellery / loans-given / vehicles / immovable) —
+  // the benami/parking markers the wealth detectors want. Populated on the NEXT
+  // re-ingest; the general outlier detectors pick them up automatically as facts.
+  const assetCategories = parseAssetCategories(html);
+  if (assetCategories) numbers.asset_categories = assetCategories;
   const election_year = Number((p.myneta_url.match(/(20\d{2})/) ?? [])[1]) || null;
   // Attach numbers only when something actually parsed — an all-null object
   // would just block future upgrade passes without carrying any information.

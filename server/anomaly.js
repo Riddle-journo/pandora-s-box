@@ -18,13 +18,18 @@ import {
 export const DETECTOR_VERSION = "anomaly-v1";
 
 // ── Thresholds (all named; one line each) ────────────────────────────────────
-const MIN_COHORT_N = 8;              // z-scores need a cohort of at least this many growth events
-const ASSET_Z_MIN = 3;              // flag asset growth this many std-devs above the cohort mean
-const ASSET_ABS_MIN = 2e7;          // …and only if the absolute jump is ≥ ₹2 crore (2e7 rupees)
-const UTIL_LOW_PCT = 15;            // MPLADS utilisation below this % is an extreme (funds parked)
-const UTIL_HIGH_PCT = 98;           // …above this % is the other extreme (spent to the rupee)
-const UTIL_MIN_FUND = 1e7;          // …only material when the fund is ≥ ₹1 crore (1e7 rupees)
-const TIMING_WINDOW_DAYS = 90;      // a tender within this many days of a donor's bond purchase
+// These are the DEFAULTS. Each detector accepts an optional overrides object so
+// the engine can pass DB-backed, ops-console-tuned values (see engine.js); called
+// with no overrides (e.g. tests, the standalone CLI) they behave exactly as before.
+export const ANOMALY_DEFAULTS = {
+  MIN_COHORT_N: 8,        // z-scores need a cohort of at least this many growth events
+  ASSET_Z_MIN: 3,         // flag asset growth this many std-devs above the cohort mean
+  ASSET_ABS_MIN: 2e7,     // …and only if the absolute jump is ≥ ₹2 crore (2e7 rupees)
+  UTIL_LOW_PCT: 15,       // MPLADS utilisation below this % is an extreme (funds parked)
+  UTIL_HIGH_PCT: 98,      // …above this % is the other extreme (spent to the rupee)
+  UTIL_MIN_FUND: 1e7,     // …only material when the fund is ≥ ₹1 crore (1e7 rupees)
+  TIMING_WINDOW_DAYS: 90, // a tender within this many days of a donor's bond purchase
+};
 
 // Score scaling — kept inside conflict.js's observed range (~8–50) so anomaly
 // leads rank alongside the hand-coded vectors rather than dominating or vanishing.
@@ -47,7 +52,8 @@ function meanStd(xs) {
 // fallback) — a rep whose wealth multiplied far faster than their peers stands
 // out even if everyone got richer. Cohorts with fewer than MIN_COHORT_N growth
 // events are suppressed (a z-score over 3 points is noise).
-export function detectAssetGrowthOutliers(records = []) {
+export function detectAssetGrowthOutliers(records = [], overrides = {}) {
+  const { MIN_COHORT_N, ASSET_Z_MIN, ASSET_ABS_MIN } = { ...ANOMALY_DEFAULTS, ...overrides };
   // 1. Per-politician consecutive-year growth events.
   const byPol = new Map();
   for (const r of records) {
@@ -110,7 +116,8 @@ export function detectAssetGrowthOutliers(records = []) {
 // Both tails are suspicious: near-zero utilisation means public money sits idle;
 // ~100% to the rupee is unusual for lumpy infrastructure spend and can signal
 // rushed/round-tripped disbursement. Only material when the fund is ≥ ₹1 crore.
-export function detectUtilizationExtremes(records = []) {
+export function detectUtilizationExtremes(records = [], overrides = {}) {
+  const { UTIL_LOW_PCT, UTIL_HIGH_PCT, UTIL_MIN_FUND } = { ...ANOMALY_DEFAULTS, ...overrides };
   const candidates = [];
   for (const r of records) {
     const util = r.utilization_pct, fund = r.allocated;
@@ -148,7 +155,7 @@ export function detectUtilizationExtremes(records = []) {
 // sharing a director with D — within TIMING_WINDOW_DAYS. This detector only runs
 // when relations.js is present (see runAnomalyScan); it is exported unconditionally
 // so it stays unit-testable with fixtures.
-export function detectTimingCorrelation(events = [], { sharesDirector = () => false } = {}) {
+export function detectTimingCorrelation(events = [], { sharesDirector = () => false, TIMING_WINDOW_DAYS = ANOMALY_DEFAULTS.TIMING_WINDOW_DAYS } = {}) {
   const purchases = events.filter((e) => e.kind === "bond_purchase" && e.at);
   const awards = events.filter((e) => e.kind === "awarded_tender" && e.at);
   const candidates = [];

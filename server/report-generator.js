@@ -18,19 +18,15 @@
 // then mechanically attaches the matching numbered source to each section,
 // so every [n] in the UI is a correct, clickable, verifiable link.
 import "dotenv/config";
-import OpenAI from "openai";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
 import { listPoliticians, getPolitician, listEvidence, listTips, addReport, latestReport } from "./store.js";
 import { ingestFor } from "./ingest.js";
 import { computeFlags, scoreFromFlags } from "./analyzer.js";
 import { buildRelations } from "./graph.js";
-import { detectConflicts } from "./conflict.js";
-import { upsertLead, listLeads } from "./store.js";
-import { mapLimit } from "./fetchers/http.js";
 import { citationsFor, selectSources } from "./citations.js";
-
-const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
-const AI_KEY  = process.env.AI_API_KEY  || "";
+import { FREE_CHAIN, freeComplete } from "./free-chain.js";
+import { PARAMETERS, SCORING, computeOverall } from "./scoring.js";
+export { PARAMETERS, SCORING, computeOverall };
 
 // ── Tone pass (Stage 2): a cheap/free "stylist" that re-voices the reader-
 // facing prose (headline, summary, category bodies) to match the record's
@@ -41,21 +37,9 @@ export const STYLE_VERSION = 1;
 let STYLE_ENABLED = /^(1|true|yes|on)$/i.test(process.env.AI_STYLE_ENABLED || "");
 export function setStyleEnabled(v) { STYLE_ENABLED = !!v; }
 
-// Ordered chain of FREE (provider, model) entries. All are OpenAI-compatible.
-// Entries whose apiKey env is missing are skipped, so the chain degrades
-// gracefully to whatever keys you have. Entry #1 needs no new setup (reuses the
-// existing OpenRouter key). Rotation advances on any rate-limit/quota error.
-// NOTE: OpenRouter's free catalogue changes over time (models get retired or move
-// to paid). Verify slugs occasionally: GET https://openrouter.ai/api/v1/models and
-// keep entries whose pricing.prompt/completion are "0" and id ends ":free".
-const STYLE_CHAIN = [
-  { provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",                          key: process.env.AI_API_KEY,  model: "openai/gpt-oss-120b:free" },
-  { provider: "groq",       baseURL: "https://api.groq.com/openai/v1",                        key: process.env.GROQ_API_KEY, model: "llama-3.3-70b-versatile" },
-  { provider: "google",     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", key: process.env.GEMINI_API_KEY, model: "gemini-2.0-flash" },
-  { provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",                          key: process.env.AI_API_KEY,  model: "meta-llama/llama-3.3-70b-instruct:free" },
-  { provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",                          key: process.env.AI_API_KEY,  model: "qwen/qwen3-next-80b-a3b-instruct:free" },
-  { provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",                          key: process.env.AI_API_KEY,  model: "google/gemma-4-31b-it:free" },
-].filter((e) => e.key); // drop entries with no key
+// The ordered chain of FREE (provider, model) entries now lives in
+// free-chain.js (shared with the Summarizer card engine). Imported above as
+// FREE_CHAIN / freeComplete.
 
 // ── Single report: one deep investigation using EVERY available source ──
 // (The old Tier 1 / Tier 2 split is gone — it doubled cost for near-identical
@@ -83,49 +67,9 @@ export const DOSSIER_CATEGORIES = [
   { key: "controversies", label: "Controversies & Allegations" },
 ];
 
-// ── Scorecard rubric (single source of truth) ──────────────────────────
-export const PARAMETERS = [
-  { key: "manifesto", label: "Manifesto delivery",
-    desc: "Share of concrete manifesto/campaign promises verifiably completed, in progress, or broken — judged against official completion records, not press releases." },
-  { key: "corruption", label: "Corruption indicators",
-    desc: "Documented findings only: CAG audit objections, court convictions or charges framed, Lokpal/Lokayukta findings, disproportionate asset growth across sworn affidavits. Allegations without records score as 'insufficient evidence', never as guilt." },
-  { key: "favoritism", label: "Favoritism / nepotism",
-    desc: "Documented patterns of directing public resources, contracts, or posts to relatives or associates (traceable via MCA directorship records, procurement databases)." },
-  { key: "hypocrisy", label: "Hypocrisy (says vs does)",
-    desc: "Preaching one thing while practising another. Examples: telling citizens to boycott a product while personally indulging in it; campaigning against a policy while voting for it; urging austerity while declaring lavish spending. Requires a documented statement AND a documented contradicting action by the same person." },
-  { key: "abuse_of_power", label: "Abuse of power",
-    desc: "Documented misuse of office to unjustly benefit self or others: court strictures, tribunal findings, official inquiry reports, misuse of discretionary funds (MPLADS/MLALAD irregularities)." },
-];
-
-export const SCORING = {
-  formula:
-    "Overall score = simple average of every parameter that had enough evidence to score. Parameters with insufficient evidence are EXCLUDED from the average (score -1) — never guessed, never counted against the person, and NEVER given a low number.",
-  scale: "Each parameter is scored 0–100, where 100 = exemplary documented conduct and 0 = serious documented wrongdoing. CRITICAL: a CLEAN record scores HIGH. Absence of documented wrongdoing = a high score (75–90), NOT a low one. A LOW score (below 40) requires SPECIFIC documented wrongdoing — a conviction, a CAG objection, a framed charge, a proven disproportionate-assets finding. 'I am unsure' or 'the case is unexamined' is NEVER a low score — it is -1 (excluded). Do not collapse everyone to F by scoring uncertainty as wrongdoing.",
-  bands: [
-    { min: 85, grade: "A", meaning: "Strong documented record" },
-    { min: 70, grade: "B", meaning: "Good record, minor issues" },
-    { min: 55, grade: "C", meaning: "Mixed record" },
-    { min: 40, grade: "D", meaning: "Significant documented concerns" },
-    { min: 25, grade: "E", meaning: "Serious documented concerns" },
-    { min: 0,  grade: "F", meaning: "Severe documented record" },
-  ],
-  confidence_levels: {
-    high: "Strong evidence — at least two independent official records (affidavit, CAG, court, parliamentary) point the same way.",
-    medium: "Moderate evidence — one official record, or several consistent news reports awaiting an official record.",
-    low: "Limited evidence — news leads only, sparse, or contradictory. Treat the score as provisional.",
-  },
-};
-
-export function computeOverall(parameters) {
-  const scored = parameters.filter((p) => p.score >= 0);
-  if (scored.length === 0) {
-    return { overall_score: -1, overall_grade: "INSUFFICIENT_DATA", calc: "No parameter had enough evidence to score." };
-  }
-  const overall = Math.round(scored.reduce((s, p) => s + p.score, 0) / scored.length);
-  const grade = SCORING.bands.find((b) => overall >= b.min)?.grade ?? "F";
-  const calc = `(${scored.map((p) => p.score).join(" + ")}) ÷ ${scored.length} = ${overall} → Grade ${grade}`;
-  return { overall_score: overall, overall_grade: grade, calc };
-}
+// ── Scorecard rubric ───────────────────────────────────────────────────
+// PARAMETERS / SCORING / computeOverall now live in scoring.js (shared with
+// the Summarizer card engine); imported and re-exported above.
 
 // ── Citation integrity helper ──────────────────────────────────────────
 // citationsFor() now lives in ./citations.js and is shared with the story
@@ -399,18 +343,10 @@ Now produce the COMPLETE JSON report for this subject, following every rule and 
 
 // ── Validation / repair ────────────────────────────────────────────────
 export function validateAndRepair(raw, politician, registry) {
-  let text = raw.trim().replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "");
-  let parsed;
-  try { parsed = JSON.parse(text); }
-  catch {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("Model returned no valid JSON.");
-    parsed = JSON.parse(m[0]);
-  }
+  const parsed = parseModelJson(raw);
 
   // Scorecard — all parameters present, clamped, citations attached from [n]
-  const byKey = {};
-  for (const pm of parsed.parameters ?? []) byKey[pm.key] = pm;
+  const byKey = Object.fromEntries((parsed.parameters ?? []).map((pm) => [pm.key, pm]));
   parsed.parameters = PARAMETERS.map((def) => {
     const pm = byKey[def.key] ?? {};
     const rationale = pm.rationale ?? "The model did not provide a rationale for this parameter.";
@@ -456,7 +392,6 @@ export function validateAndRepair(raw, politician, registry) {
   parsed.data_gaps = Array.isArray(parsed.data_gaps) ? parsed.data_gaps : [];
 
   // ── Institutional report-card layer (NayaNeeta) ──────────────────────
-  const arr = (x) => (Array.isArray(x) ? x : []);
   const SIGNAL = ["RED", "AMBER", "GREEN", "GREY"];
   const SIGNAL_DIMS = [
     ["criminal", "Criminal Record"], ["financial", "Financial Integrity"],
@@ -571,56 +506,10 @@ function citationSignature(text) {
   return String(text ?? "").match(/\[\d+\]/g)?.sort().join(",") ?? "";
 }
 
-// One OpenAI client per distinct (baseURL,key), built lazily and reused.
-const _styleClients = new Map();
-function styleClient(entry) {
-  const id = `${entry.baseURL}::${entry.key}`;
-  if (!_styleClients.has(id)) {
-    _styleClients.set(id, new OpenAI({
-      baseURL: entry.baseURL, apiKey: entry.key,
-      defaultHeaders: entry.baseURL.includes("openrouter")
-        ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-    }));
-  }
-  return _styleClients.get(id);
-}
-
-const _styleCooldownUntil = new Map(); // chain index → epoch ms until which it's skipped
-function isRateLimit(err) {
-  const s = err?.status ?? err?.code;
-  return s === 429 || /rate.?limit|quota|resource_exhausted|too many requests/i.test(err?.message ?? "");
-}
-
-// Try the chain in order, skipping cooling-down entries, rotating on rate-limit.
-// Returns { text, model } on success, or null when every entry is unavailable
-// (all cooling down / all errored) — the caller then keeps GLM's original text.
+// Free-chain rotation (clients, cooldowns, rate-limit rotation) now lives in
+// free-chain.js. styleComplete is a thin wrapper preserving the old signature.
 async function styleComplete(system, user) {
-  const now = Date.now();
-  const order = STYLE_CHAIN
-    .map((e, i) => ({ e, i }))
-    .filter(({ i }) => (_styleCooldownUntil.get(i) ?? 0) <= now);
-  for (const { e, i } of order) {
-    try {
-      const res = await styleClient(e).chat.completions.create({
-        model: e.model,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        temperature: 0.5,
-        max_tokens: 4000,
-      });
-      const text = res.choices?.[0]?.message?.content ?? "";
-      if (!text) throw new Error("empty stylist response");
-      return { text, model: `${e.provider}:${e.model}` };
-    } catch (err) {
-      if (isRateLimit(err)) {
-        _styleCooldownUntil.set(i, Date.now() + 60_000); // 60s cooldown, then re-enters rotation
-        console.warn(`[tone]   ${e.provider}:${e.model} rate-limited → rotating`);
-        continue;
-      }
-      console.warn(`[tone]   ${e.provider}:${e.model} failed (${err.message}) → rotating`);
-      continue; // non-rate-limit errors: try the next free entry too
-    }
-  }
-  return null; // nothing available right now
+  return freeComplete({ system, user, maxTokens: 4000, temperature: 0.5, tag: "tone" });
 }
 
 const TONE_REGISTER = `══════════ TONE REGISTER — MATCH THE GRAVITY TO THE RECORD ══════════
@@ -686,8 +575,7 @@ ${JSON.stringify(payload, null, 2)}`;
 
   let parsed;
   try {
-    let t = out.text.trim().replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "");
-    parsed = JSON.parse(t.match(/\{[\s\S]*\}/)?.[0] ?? t);
+    parsed = parseModelJson(out.text);
   } catch (err) {
     console.warn(`[tone]   unparseable stylist JSON — kept original (${err.message})`);
     return report;
@@ -784,14 +672,8 @@ export async function generateReport(politicianId, { mode = "incremental", force
   }
   const { baseline: scoreBaseline, contributions: scoreContributions } = scoreFromFlags(computedFlags);
 
-  // ── L1 Detector (conflict-of-interest engine) — code only, no model ────
-  // Writes candidate leads to the SEPARATE investigation_leads table with
-  // status:"detected". This NEVER touches the public report object — leads
-  // only reach the public via the gated L2/L3/admin-approval path (Phase B).
-  try {
-    const { leads } = detectConflicts(p, all);
-    for (const lead of leads) upsertLead(lead);
-  } catch (err) { console.warn(`[conflict] detector failed for ${p.name}: ${err.message}`); }
+  // (The L1 conflict detector no longer runs here — it moved to the private
+  // Investigator branch: server/investigate.js / the investigate_* jobs.)
 
   let newEvidence = all;
   if (effMode === "incremental") {
@@ -818,11 +700,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
   const corroboratedTips = listTips({ politician_id: p.id, status: "approved" })
     .filter((t) => t.corroborated);
 
-  const client = new OpenAI({
-    baseURL: AI_BASE, apiKey: AI_KEY,
-    defaultHeaders: AI_BASE.includes("openrouter")
-      ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-  });
+  const client = makeClient();
 
   const { system, user } = buildPrompt(p, sources, corroboratedTips, { mode: effMode, computedFlags, scoreBaseline });
   const srcDesc = effMode === "incremental" ? `INCREMENTAL: prior digest + ${newEvidence.length} new`
@@ -960,7 +838,7 @@ if (invokedDirectly) {
   }
   const runMode = flags.full ? "full" : (["incremental", "full", "recheck"].includes(flags.mode) ? flags.mode : "incremental");
   // --tone-pass turns on the Stage-2 stylist for this run (also honours AI_STYLE_ENABLED env).
-  if (flags["tone-pass"]) { setStyleEnabled(true); console.log(`[tone] Stage-2 tone pass ENABLED (chain: ${STYLE_CHAIN.map((e) => e.provider + ":" + e.model).join(", ") || "no free keys found!"})`); }
+  if (flags["tone-pass"]) { setStyleEnabled(true); console.log(`[tone] Stage-2 tone pass ENABLED (chain: ${FREE_CHAIN.map((e) => e.provider + ":" + e.model).join(", ") || "no free keys found!"})`); }
   const target = positional[0];
 
   let list;
@@ -1022,70 +900,21 @@ if (invokedDirectly) {
     } catch (err) { console.warn(`[issue] step skipped: ${err.message}`); }
   }
 
-  // --conflicts-only skips report generation entirely and just runs the
-  // L2/L3 conflict-investigation step below on whatever's already 'detected'
-  // for the target politician(s) — e.g. `report-generator.js "Some MP" --conflicts-only`.
-  if (!flags["conflicts-only"]) {
-    let ok = 0, fail = 0, skip = 0, i = 0;
-    for (const p of list) {
-      i++;
-      process.stdout.write(`[${i}/${list.length}] ${p.name}… `);
-      try {
-        const r = await generateReport(p.id, { mode: runMode, force: !!flags.force });
-        if (r.skipped_no_new) { console.log("· no new evidence, kept existing"); skip++; }
-        else { console.log(`${r.overall_grade} (${r.overall_score}/100), ${r.categories.length} cats, ${r.red_flags.length} flags [${r.update_mode}]`); ok++; }
-      } catch (err) { console.log(`✗ ${err.message}`); fail++; }
-    }
-    console.log(`\nDone. ${ok} generated, ${skip} unchanged, ${fail} failed.`);
-  }
-
-  // ── Conflict-of-interest investigation (L2 Investigator + L3 Referee) ──
-  // The Detector (L1) already wrote candidate leads with status:"detected"
-  // during generateReport, above. Here we take the TOP-SCORED leads among the
-  // politicians in THIS run and put them through the expensive AI layers —
-  // never the whole population at once. Nothing is published; leads only move
-  // to status:"proposed"/"dismissed", awaiting admin approval (Phase B4).
-  if (!flags["no-conflicts"]) {
+  // NOTE (branch split): this CLI is Summarizer-side only. The conflict/anomaly
+  // investigation that used to run here (collusion → L2/L3 GLM → hub synthesis)
+  // moved wholesale to the private Investigator branch — run the Anomaly Engine
+  // + AI layers via `node server/investigate.js` or the ops console instead.
+  let ok = 0, fail = 0, skip = 0, i = 0;
+  for (const p of list) {
+    i++;
+    process.stdout.write(`[${i}/${list.length}] ${p.name}… `);
     try {
-      const { investigateLead } = await import("./investigator.js");
-      const targetIds = new Set(list.map((p) => p.id));
-
-      // C2: population-level collusion detection (shared-address clusters +
-      // collusive bidding) — pure code, emits 'detected' leads into the queue.
-      try {
-        const { runCollusion } = await import("./collusion.js");
-        const { clusters, leads: colLeads } = runCollusion({});
-        if (colLeads.length) console.log(`[collusion] ${clusters.length} address cluster(s), ${colLeads.length} lead(s) detected.`);
-      } catch (e) { console.warn(`[collusion] step skipped: ${e.message}`); }
-
-      const topN = Number(process.env.CONFLICT_TOP_N) || 50;
-      const detected = listLeads({ status: "detected" })
-        .filter((l) => targetIds.has(l.actor_id))
-        .sort((a, b) => b.signal_score - a.signal_score)
-        .slice(0, topN);
-      if (detected.length) {
-        console.log(`\n[conflict] investigating top ${detected.length} lead(s) (of the population detected this run)…`);
-        let inv = 0, dis = 0, err = 0;
-        await mapLimit(detected, 2, async (lead) => {
-          try {
-            const r = await investigateLead(lead);
-            if (r.status === "proposed") inv++; else dis++;
-          } catch (e) { err++; console.warn(`[conflict]   ${lead.actor_name} · ${lead.vector}: ${e.message}`); }
-        });
-        console.log(`[conflict] done. ${inv} promoted to admin review, ${dis} dismissed, ${err} failed.`);
-      } else {
-        console.log(`\n[conflict] no detected leads for this run's politicians.`);
-      }
-
-      // D (L4): cross-entity synthesis — after investigating, look ACROSS all
-      // leads for beneficiaries that recur over many politicians (network hubs).
-      try {
-        const { runSynthesis } = await import("./synthesis.js");
-        const { hubs } = runSynthesis();
-        if (hubs.length) console.log(`[synthesis] ${hubs.length} network-hub meta-lead(s) detected.`);
-      } catch (e) { console.warn(`[synthesis] step skipped: ${e.message}`); }
-    } catch (err) { console.warn(`[conflict] step skipped: ${err.message}`); }
+      const r = await generateReport(p.id, { mode: runMode, force: !!flags.force });
+      if (r.skipped_no_new) { console.log("· no new evidence, kept existing"); skip++; }
+      else { console.log(`${r.overall_grade} (${r.overall_score}/100), ${r.categories.length} cats, ${r.red_flags.length} flags [${r.update_mode}]`); ok++; }
+    } catch (err) { console.log(`✗ ${err.message}`); fail++; }
   }
+  console.log(`\nDone. ${ok} generated, ${skip} unchanged, ${fail} failed.`);
 
   stop();
   // Let the process exit naturally so buffered stdout is fully flushed.

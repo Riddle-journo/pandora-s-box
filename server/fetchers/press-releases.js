@@ -4,9 +4,8 @@
 //
 // PIB removed: government's own press bureau adds PR noise, not accountability signal.
 // Free, no key. Two-level scrape: listing page → individual release pages.
-import { fetchText, htmlToText, fetchPdfText, mapLimit } from "./http.js";
+import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf } from "./http.js";
 
-const isPdf = (url) => /\.pdf($|\?)/i.test(url);
 
 // [label, source_type, tier, listing URL, base URL for resolving relative links]
 const SOURCES = [
@@ -19,11 +18,6 @@ const SOURCES = [
 ];
 
 // Return text within ±window chars of the first name occurrence.
-function contextAround(text, name, window = 1000) {
-  const i = text.toLowerCase().indexOf(name.toLowerCase());
-  if (i < 0) return null;
-  return text.slice(Math.max(0, i - window), i + name.length + window).trim();
-}
 
 // Extract same-domain links from raw HTML within ±windowChars of the name.
 // Filters out root-level nav links (pathname too short).

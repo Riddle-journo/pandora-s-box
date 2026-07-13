@@ -9,15 +9,10 @@
 // document text before being accepted).
 //
 // Lead only — a mention in a filing is not an adjudicated finding.
-import { fetchText, UA } from "./http.js";
+import { fetchText, UA, contextAround } from "./http.js";
 
 const SEARCH_API = "https://efts.sec.gov/LATEST/search-index";
 
-function contextAround(text, name, window = 900) {
-  const i = text.toLowerCase().indexOf(name.toLowerCase());
-  if (i < 0) return null;
-  return text.slice(Math.max(0, i - window), i + name.length + window).trim();
-}
 
 export async function fetchSECEdgar(p) {
   if (!p.name || p.name.split(/\s+/).length < 2) return []; // full-name phrase match only
@@ -48,7 +43,7 @@ export async function fetchSECEdgar(p) {
     const html = await fetchText(docUrl, { timeoutMs: 20000 });
     if (!html) continue;
     const text = html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
-    const ctx = contextAround(text, p.name);
+    const ctx = contextAround(text, p.name, 900);
     if (!ctx) continue; // name didn't actually resolve in the fetched document — skip
 
     const issuer = (src.display_names ?? [])[0] ?? "unknown filer";

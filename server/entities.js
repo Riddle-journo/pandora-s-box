@@ -101,11 +101,36 @@ function mergeStrongIds(entity, ids) {
   if (changed) db.prepare("UPDATE entities SET strong_ids = ? WHERE id = ?").run(JSON.stringify(cur), entity.id);
 }
 
+// True when `entity` already carries a DIFFERENT value for any strong id we hold.
+// A strong id is an identity key (politician_id, din, mpsno, myneta_url, cin …), so
+// a mismatch means this is a DIFFERENT real-world subject that merely shares a name.
+function strongIdsConflict(entity, ids) {
+  const cur = entity?.strong_ids ?? {};
+  for (const [k, v] of Object.entries(cleanIds(ids))) {
+    if (cur[k] != null && String(cur[k]) !== String(v)) return true;
+  }
+  return false;
+}
+
 // Match by strong id first, then by exact alias, else create. Always upserts the
 // alias and folds in any new strong ids. Returns the entity id.
 export function ensureEntity({ kind, name, strongIds = {}, source = null } = {}) {
   let ent = findEntityByStrongId(kind, strongIds);
-  if (!ent) ent = findEntityByAlias(kind, name);
+  // A strong-id match on ONE key must not merge subjects that DISAGREE on another:
+  // two politician rows the roster gave the same myneta_url but distinct politician_ids
+  // are different people (a source-roster duplicate) — collapsing them would silently
+  // drop one identity. Reject the match and mint a fresh entity instead.
+  if (ent && strongIdsConflict(ent, strongIds)) ent = null;
+  // Likewise a bare name (alias) match must NEVER override a strong id: if the
+  // name-matched entity already belongs to a different subject (a conflicting strong
+  // id), it is a namesake, not the same person — fall through and mint a fresh entity
+  // so two real people are never glued onto one shared entity. (The two guards share
+  // strongIdsConflict; server/split-shared-entities.js is the one-time repair for the
+  // rows the old, un-gated behaviour already created.)
+  if (!ent) {
+    const byAlias = findEntityByAlias(kind, name);
+    if (byAlias && !strongIdsConflict(byAlias, strongIds)) ent = byAlias;
+  }
   if (ent) {
     mergeStrongIds(ent, strongIds);
     upsertAlias(ent.id, name, source);
@@ -116,6 +141,46 @@ export function ensureEntity({ kind, name, strongIds = {}, source = null } = {})
     .run(eid, kind, String(name ?? ""), key(name), JSON.stringify(cleanIds(strongIds)), new Date().toISOString(), JSON.stringify({}));
   upsertAlias(eid, name, source);
   return eid;
+}
+
+// A company's reliable identity is its CIN (Corporate Identification Number) — name
+// spellings drift ("Pvt Ltd" vs "Private Limited", "&" vs "AND"), the CIN does not.
+// Accept anything registry-shaped (≥5 chars, has a digit) so foreign registration
+// numbers (e.g. "F06579") aren't dropped, but reject junk like "" / "NA" / "-" that
+// would wrongly glue unrelated companies onto one strong id.
+const looksLikeCin = (s) => { const t = String(s ?? "").trim(); return t.length >= 5 && /\d/.test(t); };
+
+// THE single canonical resolver/creator for a COMPANY entity — the shared dedup
+// point the plan's A3 calls for. Keyed by CIN when known, so the two directorship
+// paths converge on ONE entity: the extraction path learns a company by NAME first
+// and its CIN later (directorship-verify), while the Tofler path knows the CIN up
+// front — both land on the same entity via the `cin` strong id. When a CIN is
+// present, every supplied name spelling is also registered as an alias, so a later
+// lookup by any spelling resolves here. Without a CIN, only the primary name is used
+// (differing names can't be safely merged without an identity key). Returns the id.
+export function ensureCompanyEntity({ name, cin = null, names = [], source = null } = {}) {
+  const cinNorm = looksLikeCin(cin) ? String(cin).trim().toUpperCase() : null;
+  const strongIds = cinNorm ? { cin: cinNorm } : {};
+  const spellings = [...new Set([name, ...names].map((n) => (n == null ? "" : String(n).trim())).filter(Boolean))];
+  const primary = spellings[0] ?? String(name ?? "");
+  const eid = ensureEntity({ kind: "company", name: primary, strongIds, source });
+  // Extra spellings only fold onto this entity safely once a CIN proves identity.
+  if (cinNorm) for (const n of spellings.slice(1)) ensureEntity({ kind: "company", name: n, strongIds, source });
+  return eid;
+}
+
+// Fold additional strong ids onto an EXISTING entity (by id) — unless they conflict
+// with an id it already holds (a conflicting id means a different real-world subject;
+// see strongIdsConflict, so we refuse rather than corrupt identity). Returns true iff
+// something was added. Plan A1 uses this to attach a director's DIN, learned from
+// evidence text, onto the KNOWN politician entity (resolved by politician_id), so the
+// Tofler director-matcher's DIN-certain lookup (director-link.js) finally has data.
+export function attachStrongIds(entityId, ids = {}) {
+  const ent = getEntity(entityId);
+  if (!ent || strongIdsConflict(ent, ids)) return false;
+  const before = JSON.stringify(ent.strong_ids ?? {});
+  mergeStrongIds(ent, ids);
+  return JSON.stringify(getEntity(entityId)?.strong_ids ?? {}) !== before;
 }
 
 function strongIdsFrom(a) {
@@ -162,6 +227,56 @@ export function recordAssertion(a = {}) {
     return { id: existing?.id ?? null, inserted: false, status: existing?.status ?? null, entity_id: existing?.entity_id ?? null };
   }
   return { id: row.id, inserted: true, status, entity_id };
+}
+
+// ── Subject resolution (Phase 2A) ───────────────────────────────────────────
+// The analysis ledgers (facts/claims) key on a universal entity_id, so every
+// extractor must turn the politician_id it holds into the canonical person
+// entity. This is that bridge.
+
+// Resolve a politician_id to its canonical person entity id. Fast path is the
+// politician_id strong id; falls back to the accepted identity assertion that
+// already bound this politician, so coverage is total even before every strong
+// id is backfilled. Returns null only if the politician was never resolved.
+export function resolveEntityIdForPolitician(politicianId) {
+  if (politicianId == null || politicianId === "") return null;
+  const pid = String(politicianId);
+  const byStrong = findEntityByStrongId("person", { politician_id: pid });
+  if (byStrong) return byStrong.id;
+  const row = db.prepare(
+    "SELECT entity_id FROM entity_assertions WHERE politician_id = ? AND entity_id IS NOT NULL ORDER BY (status = 'accepted') DESC, created_at ASC LIMIT 1"
+  ).get(pid);
+  return row?.entity_id ?? null;
+}
+
+// Annotate each politician's resolved entity with its politician_id strong id, so
+// findEntityByStrongId('person', {politician_id}) becomes the total fast path.
+// No fuzzy re-matching — it only touches the already-resolved entity, so it can
+// never mint a duplicate. Four honest outcomes per politician:
+//   folded    — entity had no politician_id; we set it (safe)
+//   already   — entity already carries this exact politician_id
+//   collision — entity already belongs to a DIFFERENT politician (a name-duplicate
+//               merged two people); we do NOT steal the strong id — flagged for
+//               a separate entity-dedup pass
+//   created   — politician resolved to no entity at all (shouldn't happen post-backfill)
+// Re-run-safe. `politicians` is an array of {id, name, myneta_url?}.
+export function reconcilePoliticianStrongIds(politicians = []) {
+  const c = { folded: 0, already: 0, collision: 0, created: 0 };
+  for (const p of politicians) {
+    const eid = resolveEntityIdForPolitician(p.id);
+    if (!eid) {
+      const strongIds = { politician_id: p.id };
+      if (p.myneta_url) strongIds.myneta_url = p.myneta_url;
+      ensureEntity({ kind: "person", name: p.name, strongIds, source: "reconcile_politician" });
+      c.created++;
+      continue;
+    }
+    const owner = getEntity(eid)?.strong_ids?.politician_id;
+    if (owner == null) { mergeStrongIds(getEntity(eid), { politician_id: p.id }); c.folded++; }
+    else if (String(owner) === String(p.id)) c.already++;
+    else c.collision++;
+  }
+  return c;
 }
 
 export function listProposed({ source, limit = 100 } = {}) {

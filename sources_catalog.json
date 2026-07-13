@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-07-08T01:00:00+05:30",
+  "last_updated": "2026-07-13T12:00:00+05:30",
   "accepted_sources": [
     {
       "name": "IBBI Public Announcements of CIRP (Corporate Insolvency Resolution Process)",
@@ -3214,6 +3214,72 @@
     }
   ],
   "rejected_sources": [
+    {
+      "name": "DILRMP / State Land & Property Records (ownership + mutation)",
+      "url": "https://dilrmp.gov.in/",
+      "reason": "Dead source — removed from server/sources/official.js (tier 7) 2026-07-13. Land is a state subject: ~28 separate state Records-of-Rights portals (Bhulekh, Bhu-Naksha, Bihar Bhumi, etc.), the great majority CAPTCHA-walled with per-khata/per-survey-number lookup and no bulk export or name-indexed search. CAPTCHA solving is out of scope. The central DILRMP page itself only carries aggregate digitisation-progress stats (already covered by the L1 dilrmp-progress json-api). Realistic path is flag-triggered manual retrieval per implicated politician, not bulk ingest.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "State property registration / IGRS deed search (Bhoomi/Dharani/IGR/Bhulekh)",
+      "url": "https://www.google.com/search?q=state+land+registration+property+records",
+      "reason": "Dead source — removed from server/sources/official.js (tier 7) 2026-07-13. The per-state Stamps & Registration (IGRS) portals hold the real money-trail (registered sale-deed value, parties, stamp duty) but are individually CAPTCHA/session-gated with no enumerable listing, and the entry we carried was only a scoped google.com search pointer (no content). Un-automatable within constraints; best pursued as a targeted manual lookup when a specific land deal is already implicated.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "PFMS — per-politician scheme fund flows",
+      "url": "https://pfms.nic.in/",
+      "reason": "Dead source (per-politician angle) — removed from server/sources/official.js (tier 5) 2026-07-13. PFMS is a JavaScript dashboard with no politician-name query surface; fund flows are keyed by scheme/agency/district, not by legislator. There is no path from a politician name to a PFMS record without an intermediate agency mapping. Aggregate scheme-level PFMS data is separately catalogued (pfms-schemes L1 cache); only the name-query pointer is being retired.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "Lokpal of India — complaints & disposal orders",
+      "url": "https://lokpal.gov.in/",
+      "reason": "Dead source — removed from server/sources/official.js (tier 3) 2026-07-13. No name-indexed public search: orders are published as PDFs keyed by case number with no enumerable listing or name lookup, so a politician name cannot be resolved to a record. No realistic bulk-extraction path.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "State Lokayukta findings (generic cross-state pointer)",
+      "url": "https://www.google.com/search?q=state+lokayukta",
+      "reason": "Dead source (generic pointer) — removed from server/sources/official.js (tier 3) 2026-07-13. The entry was a scoped google.com search across ~28 separate state Lokayukta portals, most JS-rendered or CAPTCHA-walled with no uniform name search — no content of its own. NOTE: this only retires the generic catch-all pointer; specific state Lokayuktas that ARE scrapeable remain live as L1 sources (ap-lokayukta, ts-lokayukta, kerala-lokayukta, tn-lokayukta-stats).",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "CIC decisions / RTI disclosures (name search)",
+      "url": "https://ciconline.nic.in/cic_decisions/",
+      "reason": "Dead source — removed from server/sources/official.js (tier 3) 2026-07-13. Central Information Commission decision search returns case reference numbers, not party names; there is no name-indexed query, so a politician cannot be matched to a decision. No enumerable extraction path.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "State Legislative Assembly proceedings (28-state pointer)",
+      "url": "https://www.google.com/search?q=state+vidhan+sabha+proceedings",
+      "reason": "Dead source (generic pointer) — removed from server/sources/official.js (tier 2, MLA branch) 2026-07-13. Each of ~28 state assemblies has its own portal with no uniform schema or name search; the entry was only a scoped google.com search pointer with no content and cannot be uniformly automated. Revisit per-state individually if a specific assembly publishes a scrapeable member/debate record.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "MLALAD / MLA constituency development fund",
+      "url": "https://www.google.com/search?q=state+MLALAD+utilization",
+      "reason": "Dead source (generic pointer) — removed from server/sources/official.js (tier 2, MLA branch) 2026-07-13. State-controlled with no central portal; most states do not publish MLALAD utilisation online (RTI is the main path). The entry was a scoped google.com search pointer with no content and no realistic bulk-extraction path.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "eCourts live case status (by party name)",
+      "url": "https://ecourts.gov.in/ecourts_home/",
+      "reason": "Dead source — removed from server/sources/official.js (tier 4) 2026-07-13. Live pending-case status search requires the CNR case number, not a party name, so a politician name cannot resolve to a status record. Full-text judgment coverage is already provided by the Indian Kanoon fetcher; only the CNR-gated live-status pointer is retired.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "Rajya Sabha Q&A full-text feed (sansad.in)",
+      "url": "https://sansad.in/rs",
+      "reason": "Dead sub-source (confirmed 2026-07-13 during the sansad-mp fetcher deepening). Rajya Sabha question/answer data has no working public JSON endpoint: the Lok-Sabha-pattern paths (qetAllQuestionsForMember and siblings) return 404 for RS, or 403 requiring the site's internal CSRF/referer machinery, so there is no RS question record or PDF-path field to fetch. The reusable attachQuestionFulltext helper in server/fetchers/sansad-mp.js is wired for RS but stays dormant until a reachable RS question feed is found. RS bio-data/positions ARE fetched; only the Q&A fulltext is unavailable.",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
+    {
+      "name": "FCRA foreign-contribution disclosures (FC-4 annual returns / donor-wise received)",
+      "url": "https://fcraonline.gov.in/",
+      "reason": "Blocked source — 2026-07-13. The old fcraonline.nic.in ASP.NET portal is retired: all *.aspx report pages (incl. the once-public fc3_amount.aspx 'Foreign Contribution received - quarterwise' and fc_ann_return_all.aspx) now 307-redirect to a React/Vite SPA at fcraonline.gov.in. The SPA's backend is a clean REST API, but the openly-fetchable no-auth endpoints expose only aggregate counts (/api/hpdashboard/*) and an FCRA-registration DIRECTORY (POST /api/filterasso/getFilterData, modes YEAR/STATE_DIST) returning RegistrationNo/AssociationName/Address/Nature and nothing else — no amounts, no donors, no per-year FC-received figures. The actual foreign-contribution money trail (FC-4 annual returns / donor-wise received) is authentication-gated: GET /api/dashboard/annual-returns returns HTTP 401 'Authentication failed' (association login/OTP), and no public /api/public/* endpoint serves any amount or donor. So the disclosure DATA the source is wanted for is unreachable; only the registered-NGO directory is fetchable, which is not the money-from-abroad trail. Revisit if MHA republishes the public FC-received report or exposes a public FC-4 amount endpoint. (An open FCRA-registered-NGO directory json-api — id fcra_associations — could be wired as a weaker org-directory source if desired, but it carries no amounts/donors.)",
+      "last_checked": "2026-07-13T12:00:00+05:30"
+    },
     {
       "name": "MCA21 Index of Charges (Company Mortgage/Charge Records)",
       "url": "https://www.mca.gov.in/mca/html/mcav2_en/home/mcaservice/masterdata/viewindexofcharges/view+index+of+charges.html",

@@ -11,15 +11,12 @@
 //   node server/issue-analyzer.js seed --force   # regenerate all
 //   node server/issue-analyzer.js <slug>         # one issue
 import "dotenv/config";
-import OpenAI from "openai";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
 import { listIssues, getIssue, upsertIssue } from "./store.js";
 import { fetchNews } from "./sources/news.js";
 import { freedomFor } from "./data/freedom-index.js";
 import { ISSUE_SEEDS } from "./data/issues.js";
 
-const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
-const AI_KEY  = process.env.AI_API_KEY  || "";
 
 const ASSESS = ["STRONG", "MIXED", "WEAK", "UNCLEAR"];
 
@@ -61,11 +58,7 @@ Cover the major governments of the last ~25 years in by_government (at least UPA
 }
 
 function validate(raw, seed) {
-  let text = raw.trim().replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "");
-  let p;
-  try { p = JSON.parse(text); }
-  catch { const m = text.match(/\{[\s\S]*\}/); if (!m) throw new Error("no JSON"); p = JSON.parse(m[0]); }
-  const arr = (x) => (Array.isArray(x) ? x : []);
+  const p = parseModelJson(raw);
   const ivw = p.india_vs_world ?? {};
   return {
     what_it_means: String(p.what_it_means ?? seed.description ?? ""),
@@ -100,10 +93,7 @@ export async function generateIssue(seed) {
     newsLines = (news ?? []).slice(0, 12).flatMap((n) => (n.content ? String(n.content).split("\n") : [n.title]).filter(Boolean)).slice(0, 25);
   } catch { /* optional */ }
 
-  const client = new OpenAI({
-    baseURL: AI_BASE, apiKey: AI_KEY,
-    defaultHeaders: AI_BASE.includes("openrouter") ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-  });
+  const client = makeClient();
   const prompt = buildPrompt(seed, newsLines);
   console.log(`[issue] ${seed.slug} — "${seed.title}" → ${MODEL}`);
 

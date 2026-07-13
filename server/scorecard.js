@@ -13,7 +13,7 @@ import { listScandals } from "./store.js";
 // FULL accountability = 1.0, PARTIAL = 0.5, NONE = 0.0 → averaged to 0–100.
 const VERDICT_WEIGHT = { FULL: 1, PARTIAL: 0.5, NONE: 0 };
 
-function blankBucket(label) {
+export function blankBucket(label) {
   return {
     label, total: 0,
     verdict: { NONE: 0, PARTIAL: 0, FULL: 0 },
@@ -24,7 +24,7 @@ function blankBucket(label) {
   };
 }
 
-function addToBucket(b, s) {
+export function addToBucket(b, s) {
   b.total++;
   const v = s.accountability?.verdict ?? "NONE";
   if (b.verdict[v] != null) b.verdict[v]++;
@@ -36,7 +36,7 @@ function addToBucket(b, s) {
   b.scandals.push({ slug: s.slug, title: s.title, verdict: v, signal: sig, date: s.date, minister: s.minister_in_charge?.name ?? "" });
 }
 
-function finalize(bucketMap) {
+export function finalize(bucketMap) {
   const out = Object.values(bucketMap);
   for (const b of out) {
     const scored = b.verdict.NONE + b.verdict.PARTIAL + b.verdict.FULL;

@@ -20,7 +20,7 @@
 //   node server/scandal-generator.js seed --force  # regenerate even if present
 //   node server/scandal-generator.js <slug>        # (re)generate one seed by slug
 import "dotenv/config";
-import OpenAI from "openai";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
 import { listScandals, getScandal, upsertScandal, listPoliticians } from "./store.js";
 import { fetchNews } from "./sources/news.js";
 import { freedomFor } from "./data/freedom-index.js";
@@ -48,9 +48,6 @@ export function resolveMinisterPolitician(name) {
   return best?.id ?? null;
 }
 
-const AI_BASE = process.env.AI_BASE_URL || "https://openrouter.ai/api/v1";
-const MODEL   = process.env.AI_MODEL    || "z-ai/glm-5.2";
-const AI_KEY  = process.env.AI_API_KEY  || "";
 
 const ACCOUNTABILITY = ["NONE", "PARTIAL", "FULL"];
 const SIGNAL = ["RED", "AMBER", "GREEN", "GREY"];
@@ -105,12 +102,8 @@ Guidance: signal RED = documented failure with NO meaningful accountability; AMB
 }
 
 function validate(raw, seed) {
-  let text = raw.trim().replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "");
-  let p;
-  try { p = JSON.parse(text); }
-  catch { const m = text.match(/\{[\s\S]*\}/); if (!m) throw new Error("no JSON"); p = JSON.parse(m[0]); }
+  const p = parseModelJson(raw);
 
-  const arr = (x) => (Array.isArray(x) ? x : []);
   const acc = p.accountability ?? {};
 
   // Attach freedom-index context to each international precedent.
@@ -169,10 +162,7 @@ export async function generateScandal(seed) {
       (n.content ? String(n.content).split("\n") : [n.title]).filter(Boolean)).slice(0, 30);
   } catch { /* news is optional context */ }
 
-  const client = new OpenAI({
-    baseURL: AI_BASE, apiKey: AI_KEY,
-    defaultHeaders: AI_BASE.includes("openrouter") ? { "HTTP-Referer": "https://pandoros-box.app", "X-Title": "Pandoro's Box" } : {},
-  });
+  const client = makeClient();
 
   const prompt = buildPrompt(seed, newsLines);
   console.log(`[scandal] ${seed.slug} — "${seed.title}" → ${MODEL}`);
