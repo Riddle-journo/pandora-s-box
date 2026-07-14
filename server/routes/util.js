@@ -2,6 +2,10 @@
 // both index.js and the split-out route modules without an import cycle.
 import { upsertLead, recordLeadFeedback, deleteLead } from "../store.js";
 
+// Wrap an async route handler so a rejected promise is forwarded to Express's
+// error middleware instead of hanging the request.
+export const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 // Shared approve/reject mutation for a lead, used by both the #/admin lead
 // routes and the ops-console action route. The caller fetches `lead` and
 // enforces its own existence/status guards (which differ between routes);
