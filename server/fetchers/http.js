@@ -4,7 +4,8 @@
 
 export const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountability research)" };
 
-export { sleep } from "../util/timing.js";
+import { sleep } from "../util/timing.js";
+export { sleep };
 
 export const isPdf = (url) => /\.pdf($|\?)/i.test(url);
 
@@ -37,25 +38,41 @@ async function fetchInsecureBuffer(url, timeoutMs = 30000) {
 // Fetch raw text with timeout + polite UA. Returns "" on any failure.
 // `insecure: true` routes through fetchInsecureBuffer for sites with a broken
 // TLS chain (see above) — off by default, since almost no site needs it.
-export async function fetchText(url, { timeoutMs = 15000, headers = {}, insecure = false } = {}) {
+export async function fetchText(url, { timeoutMs = 15000, headers = {}, insecure = false, retries = 0, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   if (insecure) {
     const buf = await fetchInsecureBuffer(url, timeoutMs);
     return buf ? buf.toString("utf8") : "";
   }
-  try {
-    const res = await fetch(url, { headers: { ...UA, ...headers }, signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return "";
-    return await res.text();
-  } catch { return ""; }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchImpl(url, { headers: { ...UA, ...headers }, signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) {
+        if (res.status >= 500 && attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+        return "";
+      }
+      return await res.text();
+    } catch {
+      if (attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+      return "";
+    }
+  }
 }
 
 // Fetch + parse JSON. Returns null on any failure.
-export async function fetchJson(url, { timeoutMs = 15000, headers = {} } = {}) {
-  try {
-    const res = await fetch(url, { headers: { ...UA, Accept: "application/json", ...headers }, signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
+export async function fetchJson(url, { timeoutMs = 15000, headers = {}, retries = 0, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchImpl(url, { headers: { ...UA, Accept: "application/json", ...headers }, signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) {
+        if (res.status >= 500 && attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+        return null;
+      }
+      return await res.json();
+    } catch {
+      if (attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+      return null;
+    }
+  }
 }
 
 const ENTITIES = { "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&#39;": "'", "&quot;": '"', "&rsquo;": "'", "&lsquo;": "'", "&rdquo;": '"', "&ldquo;": '"', "&mdash;": "—", "&ndash;": "–" };
