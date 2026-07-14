@@ -344,6 +344,7 @@ const MEGA_SOURCES = [
         { field: "percentage_payments_gererated_within_15_days", metric: "mgnrega_pct_paid_15d", unit: "%" },
       ],
     },
+    note: "415k rows. The public sample OGD key returns only 10 rows/request — set a private OGD_API_KEY (free at data.gov.in) to raise the page cap, else a full pull is thousands of slow requests. Raise maxRows once keyed.",
     summary: "MGNREGA district-month MIS (expenditure, wage rate, persondays, works, job cards, payment timeliness) — ghost-worker + wage-skim denominators (VERIFIED live, ~monthly)." },
   // Central scheme allocation vs actual expenditure — the budget-vs-actual gap per scheme.
   { id: "ogd-scheme-expenditure", title: "Scheme-wise allocated fund and expenditure (OGD)", tier: 4, match: "none",
@@ -370,6 +371,47 @@ const MEGA_SOURCES = [
     },
     note: "Pick a datastore_active resource id from `npm run opendata:catalog` (openbudgetsindia) and set resourceId + confirm the real column names (subject.fields / periodField / metrics[].field) against ckanDatastoreSearch fields[].",
     summary: "Union/state scheme budget-estimate vs actuals per year — the budget-vs-actual gap denominator." },
+
+  // ==== Gov-action phases 1/3/6 — OWNER-RUN scrape/PDF targets (see GOVACTION-
+  // SOURCES-PLAN.md). Registered with the correct existing kind + the research-
+  // verified URL, but NOT sandbox-verified (these hosts WAF-block / don't resolve
+  // from a datacenter IP). Owner runs `--refresh <id>` from an India route; each
+  // plugs into the existing pdf-archive/browser-capture plumbing. Confirm the
+  // listing path + pagination on first run (same as every scrape source here). ====
+
+  // Phase 6 oversight — CONFIRMED-corruption ground truth (calibrates L1 detectors).
+  { id: "cci-cartel-orders", title: "CCI antitrust / cartel & bid-rigging orders", tier: 6, match: "name",
+    kind: "pdf-archive", url: "https://www.cci.gov.in/antitrust/orders", linkRe: "antitrustorder.*\\.pdf", maxDocs: 500,
+    note: "Listing is an AJAX-filtered table (Section/year); a plain fetch may need the results endpoint. PDFs live at /images/antitrustorder/en/order<ts>.pdf. Named companies + govt tenders + GeM bid-rigging + penalties → procurement-collusion detector.",
+    summary: "Cartel/bid-rigging order PDFs — collusive-tendering evidence (named firms, penalties)." },
+  { id: "cvc-reports", title: "CVC annual reports + CTE + sanction-for-prosecution", tier: 6, match: "name",
+    kind: "pdf-archive", url: "https://cvc.gov.in/cte-corner/cte-reports", linkRe: "\\.pdf", maxDocs: 300,
+    note: "Also harvest annual-report PDFs (penalties, sanction-for-prosecution-pending>1yr lists name departments). Static PDF listing; table extraction needed for the sanction lists.",
+    summary: "Vigilance CTE reports + sanction-for-prosecution data — procurement fraud + named public servants." },
+  { id: "ed-press", title: "Enforcement Directorate press releases (attachments/arrests)", tier: 6, match: "name",
+    kind: "pdf-archive", url: "https://www.enforcementdirectorate.gov.in/press-release", linkRe: "\\.pdf", maxDocs: 400,
+    note: "Listing path is intermittently broken (confirmed flaky) — build with retry; @dir_ed on X posts the same PDFs as a fallback. PMLA attachment orders name politicians/associates + amounts.",
+    summary: "ED PMLA attachment/arrest press-release PDFs — money-laundering signals (names + amounts)." },
+
+  // Phase 1 procurement — banned-vendor cross-reference (highest signal-per-record).
+  { id: "cppp-debarment", title: "CPPP debarment / blacklisted-bidder list", tier: 6, match: "name",
+    kind: "browser-capture", url: "https://eprocure.gov.in/eprocure/app?page=FrontEndDebarmentList&service=page", settleMs: 5000,
+    note: "GePNIC debarment listing — capture the XHR behind it, then promote to a json-api/paged-html entry. Cross-ref debarred firms (+ Tofler directors) against award winners = near-certain lead.",
+    summary: "Firms/individuals debarred from govt bidding (authority, reason, period) — blacklist-evasion detector." },
+
+  // Phase 3 allocation — discretionary resource grants (named allottee + date).
+  { id: "coal-block-allotment", title: "Ministry of Coal — coal block auction/allotment", tier: 5, match: "name",
+    kind: "pdf-archive", url: "https://coal.gov.in/en/major-statistics/coal-block-allocation", linkRe: "\\.pdf", maxDocs: 200,
+    note: "Small, structured (tranche-wise PDFs: allottee, date, revenue-share bid). The Coalgate surface — track direct-allotment vs auction + near-zero/round revenue-share bids. Confirm the current allocation page path.",
+    summary: "Coal block allottee/auction PDFs — direct-allotment favoritism + odd revenue-share bids." },
+  { id: "sez-approvals", title: "SEZ India — approved developers + Board of Approval minutes", tier: 5, match: "name",
+    kind: "pdf-archive", url: "https://sezindia.gov.in/board-of-approval", linkRe: "\\.pdf", maxDocs: 300,
+    note: "BoA agendas/minutes name who requested approvals/extensions/de-notifications; formal-approval list PDFs name developers. Small volume, static PDFs. Confirm the BoA-minutes listing path.",
+    summary: "SEZ developer approvals + BoA minutes — discretionary concessional-land allotment + de-notification scams." },
+  { id: "ibm-mining-leases", title: "IBM — All-India Directory of Mining Leases", tier: 5, match: "name",
+    kind: "pdf-archive", url: "https://ibm.gov.in/IBMPortal/pages/All_India_Directory_of_Mining_Leases", linkRe: "\\.pdf", maxDocs: 200,
+    note: "~3000 leases: lessee name+address, area, grant/execution date, period. 'Fully computerised' → published files. Confirm whether the directory is PDF or a table (may need paged-html-table/browser-render instead).",
+    summary: "Major-mineral mining-lease directory (named lessees + grant dates) — lease favoritism / below-auction grants." },
 ];
 
 // --- roster needles ---------------------------------------------------------

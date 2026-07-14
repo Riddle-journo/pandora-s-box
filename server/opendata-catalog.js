@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { CKAN_PORTALS, ckanPackageSearch } from "./fetchers/opendata.js";
+import { CKAN_PORTALS, ckanPackageSearch, ogdListSearch } from "./fetchers/opendata.js";
 import { sleep } from "./fetchers/http.js";
 
 const OUT = path.join(process.cwd(), "server", "data", "opendata-catalog.json");
@@ -102,6 +102,34 @@ export async function discover({ log = console.log, rowsPerTerm = 20, delayMs = 
     portalStatus[portalName] = { reached, blocked, rawHits: found };
     log(`  ${portalName}: ${blocked ? "BLOCKED (WAF/403 — run from an India/residential route)" : reached ? `${found} raw hits` : "unreachable"}`);
   }
+  // OGD arm — data.gov.in catalog via /lists?filters[title]=. Reachable where the
+  // CKAN portals WAF-block datacenter IPs, and each hit carries its field schema so
+  // a ledger mapping can be built directly. Scored the same way (fields count as
+  // datastore-active — every OGD resource is API-queryable).
+  let ogdReached = false, ogdHits = 0;
+  for (const { stage, terms } of QUERIES) {
+    for (const term of terms) {
+      const { total, resources } = await ogdListSearch(term, { limit: rowsPerTerm });
+      await sleep(delayMs);
+      if (total > 0 || resources.length) ogdReached = true;
+      for (const r of resources) {
+        if (!r.id) continue;
+        ogdHits++;
+        const d = { title: r.title, notes: `${r.sector ?? ""} ${(r.fields ?? []).join(" ")}`, resources: [{ datastore_active: true, format: "JSON" }] };
+        hits.push({
+          portal: "data.gov.in", baseUrl: "https://api.data.gov.in", stage,
+          score: scoreDataset(d) + 1, stages: [stage],
+          id: r.id, name: r.id, title: r.title, org: r.org, modified: r.updated,
+          notes: (r.sector ?? "").slice(0, 120),
+          resources: [{ id: r.id, format: "JSON", datastore_active: true }],
+          fields: r.fields ?? [],
+        });
+      }
+    }
+  }
+  portalStatus["data.gov.in"] = { reached: ogdReached, blocked: false, rawHits: ogdHits };
+  log(`  data.gov.in: ${ogdReached ? `${ogdHits} raw hits` : "unreachable"}`);
+
   const datasets = mergeHits(hits);
   return { datasets, portalStatus };
 }
