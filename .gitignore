@@ -4,3 +4,11 @@ data/*.db-*
 .env
 graphify-out/
 data/backups/
+*.db
+*.db-shm
+*.db-wal
+UsersDELLAppDataLocalTemp/
+eng.traineddata
+data/db.json
+data/db.json.bak
+logs/
