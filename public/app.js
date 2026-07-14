@@ -1143,7 +1143,7 @@ function downloadFile(filename, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function slugify(s) { return (s || "rep").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
-function csvCell(s) { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function csvCell(s) { s = String(s ?? ""); if (/^[=+\-@]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 function exportEvidenceCsv() {
   if (!currentEvidence.length) return;
   const rows = [["#", "Date", "Type", "Title", "URL", "Summary"]];
