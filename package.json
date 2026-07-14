@@ -28,6 +28,7 @@
     "db:vacuum": "node server/db-maintenance.js vacuum",
     "db:maintain": "node server/db-maintenance.js all",
     "test": "node --test test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json",
     "smoke": "node scripts/smoke.js",
     "lint": "eslint .",
     "check": "npm run lint && npm test && npm run smoke",
@@ -57,6 +58,7 @@
   },
   "devDependencies": {
     "eslint": "^9.39.5",
-    "pm2": "^7.0.3"
+    "pm2": "^7.0.3",
+    "typescript": "^7.0.2"
   }
 }

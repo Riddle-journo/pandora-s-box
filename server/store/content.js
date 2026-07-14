@@ -10,12 +10,13 @@ import { id, J } from "./shared.js";
 // Privacy invariant unchanged: tips store only the ISO week, never IP/UA/time.
 export function addTip({ politician_id, category, text }) {
   const now = new Date();
-  const week = `${now.getUTCFullYear()}-W${String(Math.ceil(((now - new Date(Date.UTC(now.getUTCFullYear(), 0, 1))) / 86400000 + 1) / 7)).padStart(2, "0")}`;
+  const week = `${now.getUTCFullYear()}-W${String(Math.ceil(((now.getTime() - Date.UTC(now.getUTCFullYear(), 0, 1)) / 86400000 + 1) / 7)).padStart(2, "0")}`;
   const row = { id: id(), politician_id, category, text, week, status: "pending", corroborated: false };
   db.prepare("INSERT INTO tips (id, politician_id, status, data) VALUES (?, ?, ?, ?)").run(row.id, politician_id, "pending", JSON.stringify(row));
   return row;
 }
 
+/** @param {{ politician_id?: string, status?: string }} [filter] */
 export function listTips({ politician_id, status } = {}) {
   let sql = "SELECT data FROM tips", where = [], args = [];
   if (politician_id) { where.push("politician_id = ?"); args.push(politician_id); }
@@ -98,6 +99,7 @@ export function getLead(idOrKey) {
   return J(db.prepare("SELECT data FROM investigation_leads WHERE id = ? OR key = ? LIMIT 1").get(idOrKey, idOrKey));
 }
 
+/** @param {{ status?: string }} [filter] */
 export function listLeads({ status } = {}) {
   const rows = status
     ? db.prepare("SELECT data FROM investigation_leads WHERE status = ? ORDER BY signal_score DESC").all(status)
@@ -209,6 +211,7 @@ export function getStory(idOrSlug) {
   return J(db.prepare("SELECT data FROM stories WHERE id = ? OR slug = ? LIMIT 1").get(idOrSlug, idOrSlug));
 }
 
+/** @param {{ status?: string }} [filter] */
 export function listStories({ status } = {}) {
   const rows = status
     ? db.prepare("SELECT data FROM stories WHERE status = ? ORDER BY generated_at DESC").all(status)

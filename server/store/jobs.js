@@ -12,6 +12,7 @@ const safeParse = (s) => { try { return JSON.parse(s); } catch { return {}; } };
 
 // Enqueue a job. Dedup: skip if an IDENTICAL type+payload job is already queued
 // or running (so a re-run of the scheduler/fan-out never piles up duplicates).
+/** @param {{ type?: string, payload?: object, runAt?: number, priority?: number, maxAttempts?: number }} job — `type` is required at runtime; optional here only for the `= {}` default */
 export function enqueueJob({ type, payload = {}, runAt = Date.now(), priority = 0, maxAttempts = 3 } = {}) {
   const payloadJson = JSON.stringify(payload ?? {});
   const dupe = db.prepare(
@@ -94,6 +95,7 @@ export function getJob(idOrNull) {
   return row ? { ...row, payload: safeParse(row.payload) } : null;
 }
 
+/** @param {{ status?: string }} [filter] */
 export function listJobs({ status } = {}) {
   const rows = status
     ? db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY priority DESC, run_at ASC").all(status)
@@ -115,6 +117,10 @@ export function cancelJob(id) {
 // Patch a QUEUED job's priority / run_at / payload — nothing else is editable
 // (a running/done/dead job is history). `payload`, when supplied, fully replaces
 // the old one. Returns { ok, job? } / { ok:false, reason }.
+/**
+ * @param {string} id
+ * @param {{ priority?: number, payload?: object, runAt?: number }} [patch]
+ */
 export function updateJob(id, { priority, payload, runAt } = {}) {
   const job = db.prepare("SELECT status FROM jobs WHERE id = ?").get(id);
   if (!job) return { ok: false, reason: "not found" };
@@ -158,6 +164,7 @@ export function reclaimRunningJobs({ olderThanMs = 0 } = {}) {
 
 // Bulk-trim jobs. Filter by status and/or type; olderThanMs drops only jobs
 // created before the cutoff. RUNNING jobs are NEVER trimmed. Returns count deleted.
+/** @param {{ status?: string, type?: string, olderThanMs?: number }} [filter] */
 export function trimJobs({ status, type, olderThanMs } = {}) {
   const where = ["status != 'running'"], vals = {};
   if (status) { where.push("status = @status"); vals.status = status; }
