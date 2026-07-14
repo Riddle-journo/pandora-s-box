@@ -33,6 +33,7 @@ import { fetchWikidata } from "./fetchers/wikidata.js";
 import { fetchCompanyRegistry } from "./fetchers/company-registry.js";
 import { fetchPIBProjects } from "./fetchers/pib-projects.js";
 import { fetchSECEdgar } from "./fetchers/sec-edgar.js";
+import { writeFileAtomic } from "./util/fs-atomic.js";
 
 // We ONLY ingest sources that return real, readable content (or news leads,
 // whose headline IS the content). The old navigational "pointer" sources
@@ -158,7 +159,7 @@ const L1_TTL_MS = 7 * 24 * 3600 * 1000;
 
 const l1Path = (id) => { fs.mkdirSync(L1_CACHE_DIR, { recursive: true }); return path.join(L1_CACHE_DIR, `${id}.json`); };
 function l1Read(id) { try { return JSON.parse(fs.readFileSync(l1Path(id), "utf8")); } catch { return null; } }
-function l1Write(id, rows, meta = {}) { fs.writeFileSync(l1Path(id), JSON.stringify({ fetched_at: new Date().toISOString(), count: rows.length, ...meta, rows })); }
+function l1Write(id, rows, meta = {}) { writeFileAtomic(l1Path(id), JSON.stringify({ fetched_at: new Date().toISOString(), count: rows.length, ...meta, rows })); }
 
 // Insecure buffer fetch for gov sites with broken TLS chains.
 function l1FetchInsecure(url, timeoutMs = 30000) {

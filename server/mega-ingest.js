@@ -17,6 +17,7 @@ import { renderPageText, closeBrowser } from "./fetchers/playwright-portal.js";
 import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "./fetchers/opendata.js";
 import { buildTranslitNeedles, textMatchesTranslit } from "./fetchers/translit.js";
 import { consoleStyle } from "./util/log.js";
+import { writeFileAtomic } from "./util/fs-atomic.js";
 const clog = consoleStyle("mega-ingest");
 
 const MEGA_DIR = path.join(process.cwd(), "server", "data", "mega");
@@ -473,7 +474,7 @@ function writeMegaCache(cfg, rows, totalScanned) {
     meta: { id: `mega-${cfg.id}`, title: cfg.title, summary: cfg.summary, match: cfg.match, tier: cfg.tier, url: cfg.url || cfg.urls?.[0] || null },
     rows,
   };
-  fs.writeFileSync(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify(out));
+  writeFileAtomic(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify(out));
   clog.log(`[mega] ${cfg.id}: ${rows.length} politician-matching rows kept (of ${totalScanned} scanned)`);
   // Single funnel every successful refreshOne() branch returns through — record
   // it here so mega sources show up in the SAME Source Health ledger/Ops Console
@@ -525,7 +526,7 @@ function writeLedgerFacts(cfg, rows, meta = {}) {
   // Reuse the mega cache shape (count/total/fetched_at) so the status listing +
   // Ops Console read it uniformly; store the snapshot freshness for the caveat.
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify({
+  writeFileAtomic(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify({
     fetched_at: new Date().toISOString(), count: facts, total: rows.length,
     meta: { id: `mega-${cfg.id}`, title: cfg.title, summary: cfg.summary, match: "none", tier: cfg.tier,
       ledger: true, subjects: subjects.size, source_updated: meta.updated ?? null, extractor_version: LEDGER_VERSION },
@@ -749,7 +750,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       finally { if (page) await page.close().catch(() => {}); await closeBrowser().catch(() => {}); }
       const seen = new Set();
       const uniq = captured.filter((c) => !seen.has(c.url) && seen.add(c.url));
-      fs.writeFileSync(path.join(rawDir, "endpoints.json"), JSON.stringify(uniq, null, 2));
+      writeFileAtomic(path.join(rawDir, "endpoints.json"), JSON.stringify(uniq, null, 2));
       clog.log(`[mega] ${cfg.id}: captured ${uniq.length} JSON endpoint(s) → server/data/mega/${cfg.id}/endpoints.json`);
       for (const c of uniq.slice(0, 8)) clog.log(`  [${c.status}] ${c.url}`);
       if (!uniq.length) clog.log(`  (none — page may need a click/interaction; set cfg.clicks or cfg.settleMs, or the app renders server-side)`);

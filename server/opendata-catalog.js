@@ -17,6 +17,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { CKAN_PORTALS, ckanPackageSearch, ogdListSearch } from "./fetchers/opendata.js";
 import { sleep } from "./fetchers/http.js";
+import { writeFileAtomic } from "./util/fs-atomic.js";
 
 const OUT = path.join(process.cwd(), "server", "data", "opendata-catalog.json");
 
@@ -145,7 +146,7 @@ async function main() {
     datasets,
   };
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, JSON.stringify(catalog, null, 2));
+  writeFileAtomic(OUT, JSON.stringify(catalog, null, 2));
   console.log(`\n[opendata-catalog] ${datasets.length} unique datasets → ${path.relative(process.cwd(), OUT)}`);
 
   if (!quiet) {
