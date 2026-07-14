@@ -68,6 +68,30 @@ describe("privacy pins", () => {
   });
 });
 
+describe("admin lead decisions (empty DB)", () => {
+  it("POST /api/admin/investigation-leads/xyz/approve -> 404 no such proposal", async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/investigation-leads/xyz/approve", {
+      method: "POST",
+      headers: { "x-admin-token": srv.adminToken },
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: "no such proposal" });
+  });
+
+  it('POST /api/admin/ops/leads/xyz/action {"action":"approve"} -> 404 no such lead', async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/ops/leads/xyz/action", {
+      method: "POST",
+      headers: {
+        "x-admin-token": srv.adminToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ action: "approve" }),
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: "no such lead" });
+  });
+});
+
 describe("admin ops jobs", () => {
   it('POST /api/admin/ops/jobs with correct token and {"type":"nonsense_type"} -> observed non-2xx (400)', async () => {
     const res = await fetch(srv.baseUrl + "/api/admin/ops/jobs", {

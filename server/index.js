@@ -499,19 +499,33 @@ app.get("/api/admin/politicians/:id/directorship-network", requireAdmin, (req, r
   res.json(directorshipNetworkForGraph(req.params.id));
 });
 
+// Shared approve/reject mutation for a lead, used by both the #/admin lead
+// routes and the ops-console action route. The caller fetches `lead` and
+// enforces its own existence/status guards (which differ between routes);
+// this performs the common state change and feedback record. On "approve" it
+// returns the published lead; on "reject" it deletes and returns null.
+function decideLeadShared(lead, decision, source) {
+  if (decision === "approve") {
+    const published = upsertLead({ ...lead, status: "published", published_at: new Date().toISOString() });
+    recordLeadFeedback(lead, "approved", { source });
+    return published;
+  }
+  recordLeadFeedback(lead, "rejected", { source });
+  deleteLead(lead.id);
+  return null;
+}
+
 app.post("/api/admin/investigation-leads/:id/approve", requireAdmin, (req, res) => {
   const lead = getLead(req.params.id);
   if (!lead || lead.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  const published = upsertLead({ ...lead, status: "published", published_at: new Date().toISOString() });
-  recordLeadFeedback(lead, "approved", { source: "admin" });
+  const published = decideLeadShared(lead, "approve", "admin");
   res.json({ ok: true, id: published.id, vector: published.vector, actor_name: published.actor_name });
 });
 
 app.post("/api/admin/investigation-leads/:id/reject", requireAdmin, (req, res) => {
   const lead = getLead(req.params.id);
   if (!lead || lead.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  recordLeadFeedback(lead, "rejected", { source: "admin" });
-  deleteLead(req.params.id);
+  decideLeadShared(lead, "reject", "admin");
   res.json({ ok: true, rejected: req.params.id });
 });
 
@@ -734,14 +748,12 @@ app.post("/api/admin/ops/leads/:id/action", requireAdmin, (req, res) => {
   if (!lead) return res.status(404).json({ error: "no such lead" });
   if (action === "approve") {
     if (lead.status !== "proposed") return res.status(409).json({ error: "only proposed leads can be approved" });
-    const published = upsertLead({ ...lead, status: "published", published_at: new Date().toISOString() });
-    recordLeadFeedback(lead, "approved", { source: "ops" });
+    const published = decideLeadShared(lead, "approve", "ops");
     return res.json({ ok: true, status: published.status });
   }
   if (action === "reject") {
     if (lead.status !== "proposed") return res.status(409).json({ error: "only proposed leads can be rejected" });
-    recordLeadFeedback(lead, "rejected", { source: "ops" });
-    deleteLead(req.params.id);
+    decideLeadShared(lead, "reject", "ops");
     return res.json({ ok: true, rejected: true });
   }
   if (action === "dismiss") {
