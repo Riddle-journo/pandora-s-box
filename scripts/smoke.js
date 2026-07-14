@@ -98,6 +98,44 @@ async function main() {
         `GET /api/admin/tips with no token returned HTTP ${tipsRes.status}, expected 401`
       );
     }
+
+    // GET / must serve the SPA shell as HTML.
+    const rootRes = await fetch(`${BASE_URL}/`);
+    if (rootRes.status !== 200) {
+      throw new Error(`GET / returned HTTP ${rootRes.status}, expected 200`);
+    }
+    const rootType = rootRes.headers.get("content-type") || "";
+    if (!rootType.includes("text/html")) {
+      throw new Error(`GET / content-type is "${rootType}", expected text/html`);
+    }
+    const rootHtml = await rootRes.text();
+
+    // Every <script src> referenced by index.html must be fetchable — catches
+    // a broken module path the instant the frontend split renames anything.
+    const scriptSrcs = [...rootHtml.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+    if (scriptSrcs.length === 0) {
+      throw new Error("index.html references no <script src> — unexpected");
+    }
+    for (const src of scriptSrcs) {
+      const assetRes = await fetch(`${BASE_URL}/${src.replace(/^\//, "")}`);
+      if (assetRes.status !== 200) {
+        throw new Error(`script asset ${src} returned HTTP ${assetRes.status}, expected 200`);
+      }
+    }
+
+    // Public list endpoints must return 200 + parseable JSON (pins the
+    // pre-pagination default shapes before Phase 7 touches them).
+    for (const p of ["/api/scandals", "/api/issues", "/api/leaderboard"]) {
+      const res = await fetch(`${BASE_URL}${p}`);
+      if (res.status !== 200) {
+        throw new Error(`GET ${p} returned HTTP ${res.status}, expected 200`);
+      }
+      try {
+        JSON.parse(await res.text());
+      } catch (err) {
+        throw new Error(`GET ${p} returned unparseable JSON: ${err.message}`);
+      }
+    }
   } catch (err) {
     failureReason = err.message;
   } finally {
