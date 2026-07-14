@@ -6,8 +6,8 @@
 //
 //   node server/backfill-entities.js
 import "dotenv/config";
-import { listPoliticians } from "./store.js";
-import { ensureEntity, recordAssertion, normName } from "./entities.js";
+import { listPoliticians } from "../server/store.js";
+import { ensureEntity, recordAssertion, normName } from "../server/entities.js";
 
 // Fields on a politician row that may carry an alternate spelling of the name.
 const ALIAS_FIELDS = ["name", "full_name", "fullName", "display_name", "displayName", "aka", "alias"];

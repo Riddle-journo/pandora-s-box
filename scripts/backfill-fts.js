@@ -7,7 +7,7 @@
 //
 // Idempotent: it clears and repopulates, so re-running always yields a clean
 // index. Run:  node server/backfill-fts.js
-import { db } from "./store.js";
+import { db } from "../server/store.js";
 
 db.pragma("busy_timeout = 5000"); // tolerate a running app/ops console briefly
 

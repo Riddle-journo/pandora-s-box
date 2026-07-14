@@ -288,7 +288,7 @@ Edit the issue list in `server/data/issues.js`; new issues are analysed automati
 node server/reset-data.js                # DRY RUN — preview what would be deleted
 node server/reset-data.js --apply        # delete ALL reports + remove demo reps
 node server/reset-data.js --reports --apply    # only wipe reports
-node server/migrate-to-sqlite.js         # one-time db.json → SQLite (already done)
+node scripts/migrate-to-sqlite.js         # one-time db.json → SQLite (already done)
 ```
 
 ---

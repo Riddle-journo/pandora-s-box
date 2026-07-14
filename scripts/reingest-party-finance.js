@@ -17,8 +17,8 @@
 // caches per party id in-process), so ~1.5k rows cost only ~one scrape per party.
 //   Run: node server/reingest-party-finance.js
 import "dotenv/config";
-import { db, listPoliticians } from "./store.js";
-import { fetchPartyFunding } from "./fetchers/party-funding.js";
+import { db, listPoliticians } from "../server/store.js";
+import { fetchPartyFunding } from "../server/fetchers/party-funding.js";
 
 const rows = db.prepare(
   "SELECT id, politician_id, data FROM evidence WHERE json_extract(data,'$.source_type')='party_finance'"
