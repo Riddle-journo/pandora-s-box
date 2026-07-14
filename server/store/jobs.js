@@ -47,6 +47,7 @@ const claimStmt = db.prepare(`
     ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1
   )
   RETURNING *`);
+/** @param {number | {now?: number, excludeTypes?: string[]}} [arg] @returns {import("./types.js").Job | null} */
 export function claimNextJob(arg) {
   const { now = Date.now(), excludeTypes = [] } =
     typeof arg === "number" ? { now: arg } : (arg ?? {});
@@ -90,6 +91,7 @@ export function failJob(id, err) {
   return { id, status: "queued", attempts: job.attempts, run_at: runAt };
 }
 
+/** @param {string | null} idOrNull @returns {import("./types.js").Job | null} */
 export function getJob(idOrNull) {
   const row = db.prepare("SELECT * FROM jobs WHERE id = ?").get(idOrNull);
   return row ? { ...row, payload: safeParse(row.payload) } : null;

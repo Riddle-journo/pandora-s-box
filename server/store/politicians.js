@@ -7,10 +7,12 @@ import { db } from "./db.js";
 import { id, J, lc } from "./shared.js";
 
 // ---- Politicians ----
+/** @returns {import("./types.js").Politician[]} */
 export function listPoliticians() {
   return db.prepare("SELECT data FROM politicians").all().map(J);
 }
 
+/** @param {string} pid @returns {import("./types.js").Politician | null} */
 export function getPolitician(pid) {
   return J(db.prepare("SELECT data FROM politicians WHERE id = ?").get(pid));
 }
@@ -48,6 +50,7 @@ export function polRow(p) {
   };
 }
 
+/** @param {import("./types.js").Politician} p @returns {import("./types.js").Politician} */
 export function upsertPolitician(p) {
   const existing = p.id ? getPolitician(p.id) : null;
   const row = { ...(existing ?? {}), ...p };
@@ -78,6 +81,7 @@ export function batchUpsertPoliticians(politicians) {
 }
 
 // ---- Evidence ----
+/** @param {string} pid @returns {import("./types.js").Evidence[]} */
 export function listEvidence(pid) {
   return db.prepare("SELECT data FROM evidence WHERE politician_id = ? ORDER BY date DESC").all(pid).map(J);
 }
@@ -99,6 +103,7 @@ export function evRow(e) {
 // and the UNIQUE idx_ev_uniq (see store/db.js) is the schema-level backstop:
 // even a code path that skips this merge resolves via INSERT OR REPLACE
 // instead of silently creating a duplicate.
+/** @param {import("./types.js").Evidence[]} items @returns {import("./types.js").Evidence[]} the rows actually inserted or upgraded (dupes skipped) */
 export function addEvidence(items) {
   const added = [];
   const findByUrl = db.prepare("SELECT id, has_content, data FROM evidence WHERE politician_id = ? AND url = ? LIMIT 1");
@@ -164,6 +169,7 @@ export function repRow(r) {
 }
 
 // One report per politician (the T1/T2 split was removed). Returns the latest.
+/** @param {string} pid @returns {import("./types.js").Report | null} */
 export function latestReport(pid) {
   return J(db.prepare("SELECT data FROM reports WHERE politician_id = ? ORDER BY generated_at DESC LIMIT 1").get(pid));
 }
@@ -195,6 +201,7 @@ export function addCard(card) {
   return row;
 }
 
+/** @param {"politician"|"ministry"|"party"} kind @param {string} subjectKey @param {string|null} [scope] @returns {import("./types.js").Card | null} */
 export function latestCard(kind, subjectKey, scope = null) {
   const sql = scope
     ? "SELECT data FROM cards WHERE kind = ? AND subject_key = ? AND scope = ? ORDER BY generated_at DESC LIMIT 1"
