@@ -9,7 +9,10 @@
 // document text before being accepted).
 //
 // Lead only — a mention in a filing is not an adjudicated finding.
-import { fetchText, UA, contextAround } from "./http.js";
+import { fetchText, fetchJsonEx, UA, contextAround } from "./http.js";
+import { logger } from "../util/log.js";
+
+const log = logger("sec-edgar");
 
 const SEARCH_API = "https://efts.sec.gov/LATEST/search-index";
 
@@ -18,17 +21,13 @@ export async function fetchSECEdgar(p) {
   if (!p.name || p.name.split(/\s+/).length < 2) return []; // full-name phrase match only
   if (process.env.SEC_EDGAR_DISABLE === "1") return [];
 
-  let hits;
-  try {
-    const url = `${SEARCH_API}?q=${encodeURIComponent(`"${p.name}"`)}`;
-    const res = await fetch(url, {
-      headers: { ...UA, Accept: "application/json" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    hits = data?.hits?.hits ?? [];
-  } catch { return []; }
+  const url = `${SEARCH_API}?q=${encodeURIComponent(`"${p.name}"`)}`;
+  const r = await fetchJsonEx(url, { headers: UA });
+  if (!r.ok) {
+    log.warn({ url, status: r.status, err: r.error?.message }, "sec-edgar search failed");
+    return [];
+  }
+  const hits = r.data?.hits?.hits ?? [];
   if (!hits.length) return [];
 
   const items = [];

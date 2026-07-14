@@ -59,11 +59,11 @@ function retryAfterMs(res) {
 // >=500, and 429 (honouring Retry-After, capped); never other 4xx. Jittered
 // exponential backoff so a burst of failed fetchers doesn't retry in lockstep.
 // Returns { res, error, attempts } — res may be non-ok (caller decides).
-async function requestWithRetry(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+async function requestWithRetry(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, method = "GET", body = undefined, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   for (let attempt = 0; ; attempt++) {
     let res = null;
     try {
-      res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      res = await fetchImpl(url, { method, body, headers, signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return { res, error: null, attempts: attempt + 1 };
       const retryable = res.status >= 500 || res.status === 429;
       if (!retryable || attempt >= retries) return { res, error: null, attempts: attempt + 1 };
@@ -78,14 +78,14 @@ async function requestWithRetry(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}
 // Status-aware text fetch: { ok, status, text, error, attempts }. Use this when
 // the caller needs to tell "empty page" from "timeout/blocked/500" — the plain
 // fetchText below flattens both to "".
-export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, insecure = false, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, method = "GET", body = undefined, insecure = false, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   if (insecure) {
     const buf = await fetchInsecureBuffer(url, timeoutMs);
     return buf
       ? { ok: true, status: 200, text: buf.toString("utf8"), error: null, attempts: 1 }
       : { ok: false, status: 0, text: "", error: new Error("insecure fetch failed"), attempts: 1 };
   }
-  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, ...headers }, retries, retryDelayMs, fetchImpl });
+  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, ...headers }, method, body, retries, retryDelayMs, fetchImpl });
   if (!res) return { ok: false, status: 0, text: "", error, attempts };
   if (!res.ok) return { ok: false, status: res.status, text: "", error: null, attempts };
   try {
@@ -96,8 +96,8 @@ export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = 
 }
 
 // Status-aware JSON fetch: { ok, status, data, error, attempts }.
-export async function fetchJsonEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
-  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, Accept: "application/json", ...headers }, retries, retryDelayMs, fetchImpl });
+export async function fetchJsonEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, method = "GET", body = undefined, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, Accept: "application/json", ...headers }, method, body, retries, retryDelayMs, fetchImpl });
   if (!res) return { ok: false, status: 0, data: null, error, attempts };
   if (!res.ok) return { ok: false, status: res.status, data: null, error: null, attempts };
   try {

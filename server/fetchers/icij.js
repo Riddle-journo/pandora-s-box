@@ -13,7 +13,10 @@
 //
 // Lead only — a match means the name appears in leaked data; it does not
 // prove wrongdoing, and common names can collide with unrelated people.
-import { htmlToText } from "./http.js";
+import { htmlToText, fetchTextEx, fetchJsonEx } from "./http.js";
+import { logger } from "../util/log.js";
+
+const log = logger("icij");
 
 const RECONCILE = "https://offshoreleaks.icij.org/api/v1/reconcile";
 const NODE_PAGE = (id) => `https://offshoreleaks.icij.org/nodes/${id}`;
@@ -30,30 +33,28 @@ function sharesDistinctiveToken(candidateName, politicianName) {
 }
 
 async function reconcile(name) {
-  try {
-    const body = new URLSearchParams({ queries: JSON.stringify({ q0: { query: name } }) });
-    const res = await fetch(RECONCILE, {
-      method: "POST",
-      headers: { "User-Agent": "PandorosBox/0.1 (public-accountability research)", "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data?.q0?.result ?? [];
-  } catch { return []; }
+  const body = new URLSearchParams({ queries: JSON.stringify({ q0: { query: name } }) });
+  const r = await fetchJsonEx(RECONCILE, {
+    method: "POST",
+    headers: { "User-Agent": "PandorosBox/0.1 (public-accountability research)", "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!r.ok) {
+    log.warn({ url: RECONCILE, status: r.status, err: r.error?.message }, "icij reconcile failed");
+    return [];
+  }
+  return r.data?.q0?.result ?? [];
 }
 
 async function fetchConnections(id) {
-  let html;
-  try {
-    const res = await fetch(NODE_PAGE(id), {
-      headers: { "User-Agent": "PandorosBox/0.1 (public-accountability research)" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return null;
-    html = await res.text();
-  } catch { return null; }
+  const r = await fetchTextEx(NODE_PAGE(id), {
+    headers: { "User-Agent": "PandorosBox/0.1 (public-accountability research)" },
+  });
+  if (!r.ok) {
+    log.warn({ url: NODE_PAGE(id), status: r.status, err: r.error?.message }, "icij node page failed");
+    return null;
+  }
+  const html = r.text;
 
   const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();

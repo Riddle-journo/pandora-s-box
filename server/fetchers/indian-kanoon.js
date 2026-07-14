@@ -16,7 +16,10 @@
 // effort: any failure silently falls back to the snippet-only line, and a total
 // failure reproduces the original search-only output exactly.
 
-import { fetchText, htmlToText, mapLimit, sleep } from "./http.js";
+import { fetchText, fetchJsonEx, htmlToText, mapLimit, sleep } from "./http.js";
+import { logger } from "../util/log.js";
+
+const log = logger("indian-kanoon");
 
 const IK_API = "https://api.indiankanoon.org/search/";
 const IK_WEB = "https://indiankanoon.org/search/";
@@ -36,22 +39,21 @@ export async function fetchIndianKanoon(p) {
 }
 
 async function fetchViaApi(p, key) {
-  let data;
-  try {
-    const body = new URLSearchParams({ formInput: `"${p.name}" doctypes:judgments`, pagenum: "0" });
-    const res = await fetch(IK_API, {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${key}`,
-        "User-Agent": UA,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body.toString(),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return [];
-    data = await res.json();
-  } catch { return []; }
+  const body = new URLSearchParams({ formInput: `"${p.name}" doctypes:judgments`, pagenum: "0" });
+  const r = await fetchJsonEx(IK_API, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${key}`,
+      "User-Agent": UA,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+  if (!r.ok) {
+    log.warn({ url: IK_API, status: r.status, err: r.error?.message }, "kanoon search failed");
+    return [];
+  }
+  const data = r.data;
 
   const docs = data?.docs ?? [];
   if (!docs.length) return [];
@@ -159,21 +161,20 @@ async function fetchBodies(targets, limit, fetchOne) {
 // judgment HTML in `doc`. Returns readable body text, "" on any failure.
 async function fetchDocApi(tid, key) {
   if (tid === undefined || tid === null || tid === "") return "";
-  try {
-    const res = await fetch(`${IK_DOC_API}${tid}/`, {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${key}`,
-        "User-Agent": UA,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return "";
-    const doc = await res.json();
-    const rawHtml = doc?.doc ?? doc?.content ?? "";
-    return htmlToText(rawHtml, 6000);
-  } catch { return ""; }
+  const r = await fetchJsonEx(`${IK_DOC_API}${tid}/`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${key}`,
+      "User-Agent": UA,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+  });
+  if (!r.ok) {
+    log.warn({ tid, status: r.status, err: r.error?.message }, "kanoon doc fetch failed");
+    return "";
+  }
+  const rawHtml = r.data?.doc ?? r.data?.content ?? "";
+  return htmlToText(rawHtml, 6000);
 }
 
 // Web mode: fetch the judgment page and reduce it to plain body text. Returns
