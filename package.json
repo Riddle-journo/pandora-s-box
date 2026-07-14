@@ -26,7 +26,8 @@
     "db:doctor": "node server/db-maintenance.js doctor",
     "db:vacuum": "node server/db-maintenance.js vacuum",
     "db:maintain": "node server/db-maintenance.js all",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "smoke": "node scripts/smoke.js"
   },
   "engines": {
     "node": ">=18"
