@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env") });
 
 import express from "express";
+import compression from "compression";
 import { requireAdmin } from "./auth.js";
 import {
   listPoliticians, listPoliticiansWithLatest, listPoliticiansWithCard, getPolitician, listEvidence,
@@ -40,6 +41,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Currency-string parser shared by report/leaderboard summarization helpers below.
 const num = (s) => { const m = String(s ?? "").replace(/,/g, "").match(/[\d.]+/); return m ? Number(m[0]) : null; };
 const app = express();
+// gzip every compressible response (JSON payloads here reach hundreds of KB);
+// must be registered before static so assets compress too.
+app.use(compression());
 app.use(express.json({ limit: "16kb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
