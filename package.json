@@ -29,7 +29,11 @@
     "test": "node --test test/*.test.js",
     "smoke": "node scripts/smoke.js",
     "lint": "eslint .",
-    "check": "npm run lint && npm test && npm run smoke"
+    "check": "npm run lint && npm test && npm run smoke",
+    "prod:start": "pm2 start ecosystem.config.cjs",
+    "prod:stop": "pm2 stop pandoros",
+    "prod:status": "pm2 status",
+    "prod:logs": "pm2 logs pandoros --lines 100 --nostream"
   },
   "engines": {
     "node": ">=18"
@@ -51,6 +55,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
-    "eslint": "^9.39.5"
+    "eslint": "^9.39.5",
+    "pm2": "^7.0.3"
   }
 }
