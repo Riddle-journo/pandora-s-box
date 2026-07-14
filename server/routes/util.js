@@ -6,6 +6,17 @@ import { upsertLead, recordLeadFeedback, deleteLead } from "../store.js";
 // error middleware instead of hanging the request.
 export const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// OPT-IN pagination for public list endpoints. No page/pageSize in the query →
+// the exact legacy payload (a bare array), so existing clients, the SPA, and
+// the golden-master tests see zero change. Either param present → the list
+// envelope { items, page, pageSize, total }.
+export function maybePaginate(items, query, { defLimit = 25, maxLimit = 100 } = {}) {
+  if (query.page === undefined && query.pageSize === undefined) return items;
+  const { page, pageSize } = pageParams(query, { defLimit, maxLimit });
+  const start = (page - 1) * pageSize;
+  return { items: items.slice(start, start + pageSize), page, pageSize, total: items.length };
+}
+
 // Clamped ?page/?pageSize parsing shared by every paginated list endpoint
 // (ops-console lists and the opt-in public pagination).
 export function pageParams(query, { defLimit, maxLimit }) {

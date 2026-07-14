@@ -37,7 +37,7 @@ import { setSetting, coerceValue } from "./engine-settings.js";
 import adminOpsRouter from "./routes/admin-ops.js";
 import adminRouter from "./routes/admin.js";
 import contentRouter from "./routes/content.js";
-import { decideLeadShared, asyncH } from "./routes/util.js";
+import { decideLeadShared, asyncH, maybePaginate } from "./routes/util.js";
 
 process.on("unhandledRejection", (err) => log.error({ err }, "unhandledRejection"));
 process.on("uncaughtException", (err) => { log.fatal({ err }, "uncaughtException"); process.exit(1); });
@@ -121,10 +121,11 @@ app.get("/api/tip-categories", (_req, res) => res.json(TIP_CATEGORIES));
 
 // Browse list. `latest` (grade/score/headline) now comes from the Summarizer
 // card when one exists, falling back to the legacy dossier during transition.
-app.get("/api/politicians", (_req, res) => {
+app.get("/api/politicians", (req, res) => {
   const withCard = listPoliticiansWithCard();
   const repFallback = new Map(listPoliticiansWithLatest().map((p) => [p.id, p.latest]));
-  res.json(withCard.map((p) => ({ ...p, latest: p.card ?? repFallback.get(p.id) ?? null })));
+  const items = withCard.map((p) => ({ ...p, latest: p.card ?? repFallback.get(p.id) ?? null }));
+  res.json(maybePaginate(items, req.query));
 });
 
 app.get("/api/politicians/:id", (req, res) => {

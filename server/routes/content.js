@@ -7,7 +7,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 import express from "express";
 import { listScandals, getScandal, getPolitician, listPoliticians } from "../store.js";
-import { asyncH } from "./util.js";
+import { asyncH, maybePaginate } from "./util.js";
 
 const router = express.Router();
 
@@ -25,12 +25,13 @@ router.get("/api/scandals", (req, res) => {
   const level = req.query.level, sector = req.query.sector;
   const state = (req.query.state || "").toLowerCase(), party = (req.query.party || "").toLowerCase();
   const q = (req.query.q || "").toLowerCase();
-  res.json(items.filter((s) =>
+  const filtered = items.filter((s) =>
     (!level  || s.govt_level === level) &&
     (!sector || s.sector === sector) &&
     (!state  || (s.state || "").toLowerCase() === state) &&
     (!party  || (s.party || "").toLowerCase().includes(party)) &&
-    (!q      || `${s.title} ${s.headline} ${s.minister} ${s.ministry} ${s.party}`.toLowerCase().includes(q))));
+    (!q      || `${s.title} ${s.headline} ${s.minister} ${s.ministry} ${s.party}`.toLowerCase().includes(q)));
+  res.json(maybePaginate(filtered, req.query));
 });
 
 // Distinct filter values for the scandal search UI.
@@ -55,17 +56,18 @@ router.get("/api/scandals/:slug", (req, res) => {
 // reviewed at #/admin and shared externally by the owner — see the admin routes.
 
 // ---- Issues: "Where India Stands" (task #5) ----
-router.get("/api/issues", asyncH(async (_req, res) => {
+router.get("/api/issues", asyncH(async (req, res) => {
   const { listIssues } = await import("../store.js");
   const { ISSUE_SEEDS } = await import("../data/issues.js");
   const done = listIssues();
   const bySlug = {}; for (const i of done) bySlug[i.slug] = i;
   // Return all seeds (so the page shows the full set) annotated with whether
   // an analysis has been generated yet.
-  res.json(ISSUE_SEEDS.map((seed) => {
+  const items = ISSUE_SEEDS.map((seed) => {
     const i = bySlug[seed.slug];
     return { slug: seed.slug, title: seed.title, icon: seed.icon ?? "", description: seed.description, generated: !!i };
-  }));
+  });
+  res.json(maybePaginate(items, req.query));
 }));
 router.get("/api/issues/:slug", asyncH(async (req, res) => {
   const { getIssue } = await import("../store.js");
