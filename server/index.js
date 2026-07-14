@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env") });
 
 import express from "express";
-import crypto from "node:crypto";
+import { requireAdmin } from "./auth.js";
 import {
   listPoliticians, listPoliticiansWithLatest, listPoliticiansWithCard, getPolitician, listEvidence,
   latestReport, reportHistory, latestCard, cardLeaderboardRows, addTip, listTips, reviewTip,
@@ -432,16 +432,6 @@ app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) 
 }));
 
 // ---- Moderation (token-protected) ----
-function requireAdmin(req, res, next) {
-  const token = req.headers["x-admin-token"] || "";
-  const expected = process.env.ADMIN_TOKEN || "";
-  const ok =
-    expected.length > 0 &&
-    token.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
-  if (!ok) return res.status(401).json({ error: "unauthorized" });
-  next();
-}
 
 app.get("/api/admin/tips", requireAdmin, (req, res) => {
   res.json(listTips({ status: req.query.status }));
