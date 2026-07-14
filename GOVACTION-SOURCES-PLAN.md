@@ -29,6 +29,33 @@ HARD (JS/CAPTCHA/login). Fit = which existing plumbing it reuses.
 
 ---
 
+## BUILD STATUS (2026-07-14)
+
+Constraint: this build ran from a datacenter IP where only data.gov.in (OGD) is
+reachable; most Indian gov portals WAF-block or don't resolve. So VERIFIED work is
+the OGD/OCDS surface; scrape/browser sources are REGISTERED (correct kind + research
+URL, owner runs `--refresh` from an India route). What shipped:
+
+- **Plumbing (Phase 0): ✅ VERIFIED.** `opendata.js` (CKAN + OGD clients + `/lists`
+  catalog search + pure ledger mappers), `opendata-catalog.js` discovery, 13 tests.
+- **Discovery catalog: ✅ 364 verified data.gov.in datasets** (with field schemas) →
+  `server/data/opendata-catalog.json`. CKAN portals blocked from here.
+- **Ledger denominators (Phases 1/4): ✅ 3 VERIFIED live + wired** to the facts
+  ledger — `ogd-mandi-prices` (price baseline), `ogd-mgnrega-glance` (415k-row
+  district×month MGNREGA MIS, monthly-fresh — the Phase-2 crown jewel via API), and
+  `ogd-scheme-expenditure` (scheme allocation-vs-actual). 1 CKAN template
+  (`obi-scheme-allocations`) awaits an India-route catalog run.
+- **Oversight/allocation/procurement (Phases 1/3/6): 📋 REGISTERED owner-run** —
+  `cci-cartel-orders`, `cvc-reports`, `ed-press`, `cppp-debarment`,
+  `coal-block-allotment`, `sez-approvals`, `ibm-mining-leases` (existing pdf-archive/
+  browser-capture kinds; not sandbox-verifiable).
+- **Orders/gazette/transfers (Phase 2): ⏭ DEFERRED** — need dedicated fetchers
+  (`orgpedia/mahGRs` via Internet Archive API, `sushant354/egazette`, AP/TS/TN GO
+  registers, DoPT IAS Civil List). Half-baked pdf-archive stubs would be low quality;
+  left as the next dedicated-fetcher batch.
+
+---
+
 ## PHASE 0 — Free plumbing (do first: EASY, unblocks denominators)  — ✅ BUILT 2026-07-14
 
 Connector + discovery shipped. Files:
