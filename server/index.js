@@ -30,6 +30,7 @@ import { listFlags, flagCounts, getFlag } from "./flags.js";
 import { setSetting, coerceValue } from "./engine-settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const app = express();
 app.use(express.json({ limit: "16kb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -207,7 +208,7 @@ app.get("/api/scandals/:slug", (req, res) => {
 // reviewed at #/admin and shared externally by the owner — see the admin routes.
 
 // ---- Issues: "Where India Stands" (task #5) ----
-app.get("/api/issues", async (_req, res) => {
+app.get("/api/issues", asyncH(async (_req, res) => {
   const { listIssues } = await import("./store.js");
   const { ISSUE_SEEDS } = await import("./data/issues.js");
   const done = listIssues();
@@ -218,13 +219,13 @@ app.get("/api/issues", async (_req, res) => {
     const i = bySlug[seed.slug];
     return { slug: seed.slug, title: seed.title, icon: seed.icon ?? "", description: seed.description, generated: !!i };
   }));
-});
-app.get("/api/issues/:slug", async (req, res) => {
+}));
+app.get("/api/issues/:slug", asyncH(async (req, res) => {
   const { getIssue } = await import("./store.js");
   const i = getIssue(req.params.slug);
   if (!i) return res.status(404).json({ error: "not generated yet" });
   res.json(i);
-});
+}));
 
 // ---- Stories: ADMIN-ONLY (Investigator branch) ----
 // Incident narratives are drafted for journalists, never published on-site.
@@ -278,37 +279,37 @@ app.get("/api/leaderboard", (req, res) => {
 });
 
 // ---- Follow the money: electoral-bond funding (party-level) ----
-app.get("/api/funding/overview", async (_req, res) => {
+app.get("/api/funding/overview", asyncH(async (_req, res) => {
   const { fundingOverview } = await import("./data/electoral-bonds.js");
   res.json(fundingOverview());
-});
-app.get("/api/funding/party/:party", async (req, res) => {
+}));
+app.get("/api/funding/party/:party", asyncH(async (req, res) => {
   const { fundingForParty } = await import("./data/electoral-bonds.js");
   const f = fundingForParty(req.params.party);
   if (!f) return res.status(404).json({ error: "party not in disclosed electoral-bond data" });
   res.json(f);
-});
-app.get("/api/politicians/:id/funding", async (req, res) => {
+}));
+app.get("/api/politicians/:id/funding", asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   const { fundingForParty } = await import("./data/electoral-bonds.js");
   res.json(fundingForParty(p.party) ?? { party: p.party, unavailable: true });
-});
+}));
 
 // Government / ministry / party / government-term accountability scorecards.
 // Ministry/party buckets are annotated with their canonical card key (when one
 // resolves) so the UI can link each row to its report card.
-app.get("/api/scorecards", async (_req, res) => {
+app.get("/api/scorecards", asyncH(async (_req, res) => {
   const [{ buildScorecards }, { resolveMinistry, resolveParty }] =
     await Promise.all([import("./scorecard.js"), import("./data/ministries.js")]);
   const sc = buildScorecards();
   for (const b of sc.byMinistry) b.card_key = resolveMinistry(b.label)?.key ?? null;
   for (const b of sc.byParty) b.card_key = resolveParty(b.label)?.key ?? null;
   res.json(sc);
-});
+}));
 
 // ---- Ministry & party report cards (Summarizer, computed on request) ----
-app.get("/api/ministries", async (_req, res) => {
+app.get("/api/ministries", asyncH(async (_req, res) => {
   const [{ MINISTRIES, resolveMinistry }] = await Promise.all([import("./data/ministries.js")]);
   const counts = {};
   for (const s of listScandals()) {
@@ -316,18 +317,19 @@ app.get("/api/ministries", async (_req, res) => {
     if (k) counts[k] = (counts[k] ?? 0) + 1;
   }
   res.json(MINISTRIES.map((m) => ({ key: m.key, name: m.name, scope: m.scope, sectors: m.sectors ?? [], failures: counts[m.key] ?? 0 })));
-});
+}));
 
-app.get("/api/ministries/:key(*)/card", async (req, res) => {
+app.get("/api/ministries/:key(*)/card", asyncH(async (req, res) => {
   try {
     const { buildMinistryCard } = await import("./cards.js");
     res.json(buildMinistryCard(req.params.key));
   } catch (err) {
-    res.status(404).json({ error: err.message });
+    console.error(err);
+    res.status(404).json({ error: "not found" });
   }
-});
+}));
 
-app.get("/api/parties", async (_req, res) => {
+app.get("/api/parties", asyncH(async (_req, res) => {
   const { PARTIES, resolveParty } = await import("./data/ministries.js");
   const rosterCounts = {};
   for (const p of listPoliticians()) {
@@ -336,21 +338,22 @@ app.get("/api/parties", async (_req, res) => {
     if (k) rosterCounts[k] = (rosterCounts[k] ?? 0) + 1;
   }
   res.json(PARTIES.map((p) => ({ key: p.key, name: p.name, reps: rosterCounts[p.key] ?? 0 })));
-});
+}));
 
-app.get("/api/parties/:key/card", async (req, res) => {
+app.get("/api/parties/:key/card", asyncH(async (req, res) => {
   try {
     const { buildPartyCard } = await import("./cards.js");
     res.json(buildPartyCard(req.params.key, req.query.scope || "union"));
   } catch (err) {
-    res.status(404).json({ error: err.message });
+    console.error(err);
+    res.status(404).json({ error: "not found" });
   }
-});
+}));
 
 // Failures on a given politician's watch (links scandals → minister dossier).
 // Matches both the stored minister_politician_id and a live name-token match,
 // so it works for historical ministers added before linking existed.
-app.get("/api/politicians/:id/scandals", async (req, res) => {
+app.get("/api/politicians/:id/scandals", asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   const { resolveMinisterPolitician } = await import("./scandal-generator.js");
@@ -362,7 +365,7 @@ app.get("/api/politicians/:id/scandals", async (req, res) => {
     portfolio: s.minister_in_charge?.portfolio ?? "", ministry: s.ministry,
     verdict: s.accountability?.verdict ?? null, headline: s.headline,
   })));
-});
+}));
 
 // ---- Anonymous tips ----
 app.get("/api/pow-challenge", (_req, res) => res.json(issueChallenge()));
@@ -394,7 +397,7 @@ app.post("/api/politicians/:id/tips", (req, res) => {
 });
 
 // ---- Admin: trigger report generation ----
-app.post("/api/politicians/:id/generate", requireAdmin, async (req, res) => {
+app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   const mode = ["incremental", "full", "recheck"].includes(req.body?.mode) ? req.body.mode : "incremental";
@@ -403,10 +406,10 @@ app.post("/api/politicians/:id/generate", requireAdmin, async (req, res) => {
     const report = await generateReport(p.id, { mode });
     res.json({ ok: true, overall_grade: report.overall_grade, overall_score: report.overall_score, headline: report.headline });
   } catch (err) {
-    console.error("[generate-endpoint]", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("[generate-endpoint]", err);
+    res.status(500).json({ error: "internal error" });
   }
-});
+}));
 
 // ---- Moderation (token-protected) ----
 function requireAdmin(req, res, next) {
@@ -436,7 +439,7 @@ app.post("/api/admin/tips/:id/review", requireAdmin, (req, res) => {
 // ---- Admin: auto-discovered scandal proposals (human neutrality gate) ----
 app.get("/api/admin/scandal-proposals", requireAdmin, (_req, res) => res.json(listProposals()));
 
-app.post("/api/admin/scandal-proposals/:slug/approve", requireAdmin, async (req, res) => {
+app.post("/api/admin/scandal-proposals/:slug/approve", requireAdmin, asyncH(async (req, res) => {
   const p = getScandal(req.params.slug);
   if (!p || p.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
   try {
@@ -445,9 +448,10 @@ app.post("/api/admin/scandal-proposals/:slug/approve", requireAdmin, async (req,
     const s = await generateScandal(p);
     res.json({ ok: true, slug: s.slug, verdict: s.accountability?.verdict, signal: s.signal });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "internal error" });
   }
-});
+}));
 
 app.post("/api/admin/scandal-proposals/:slug/reject", requireAdmin, (req, res) => {
   const p = getScandal(req.params.slug);
@@ -542,7 +546,7 @@ app.get("/api/admin/ops/summary", requireAdmin, (_req, res) => {
 });
 
 // Source health over N days (fetch_runs ledger) classified into rotted/stale.
-app.get("/api/admin/ops/health", requireAdmin, async (req, res) => {
+app.get("/api/admin/ops/health", requireAdmin, asyncH(async (req, res) => {
   const days = Math.max(1, Math.min(365, Number(req.query.days) || 14));
   const rows = sourceHealth(days);
   try {
@@ -551,7 +555,7 @@ app.get("/api/admin/ops/health", requireAdmin, async (req, res) => {
   } catch (err) {
     res.json({ days, rows, rotted: [], stale: [], warn: err.message });
   }
-});
+}));
 
 // Filtered roster rows (pre-pagination). Shared by the roster grid AND the
 // "run on a set" batch endpoint, so the set a filter enqueues is byte-identical
@@ -640,7 +644,7 @@ app.put("/api/admin/ops/engine/settings", requireAdmin, (req, res) => {
 // Synchronous dry run for threshold tuning: computes candidate flags under the
 // CURRENT settings and returns counts + sample headlines — writes nothing.
 // Scope with ?detector=<id> (recommended: the full sweep takes ~20s inline).
-app.post("/api/admin/ops/engine/dryrun", requireAdmin, async (req, res) => {
+app.post("/api/admin/ops/engine/dryrun", requireAdmin, asyncH(async (req, res) => {
   try {
     const { detector, politicianId } = req.body ?? {};
     const r = await runEngine({
@@ -650,8 +654,8 @@ app.post("/api/admin/ops/engine/dryrun", requireAdmin, async (req, res) => {
       log: () => {},
     });
     res.json(r);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+  } catch (err) { console.error(err); res.status(500).json({ error: "internal error" }); }
+}));
 
 // Per-detector precision from the human-decision ledger — the feedback loop's
 // report. Suggestion-only; the console shows it, nothing auto-tunes.
@@ -829,6 +833,11 @@ app.patch("/api/admin/ops/jobs/:id", requireAdmin, (req, res) => {
     return res.status(400).json({ ok: false, error: `cannot edit payload of danger job ${job.type}` });
   const r = updateJob(req.params.id, { priority, payload, runAt });
   res.status(r.ok ? 200 : 409).json(r);
+});
+
+app.use((err, req, res, next) => {
+  console.error("[http]", req.method, req.path, err);
+  res.status(500).json({ ok: false, error: "internal error" });
 });
 
 const PORT = process.env.PORT || 3000;
