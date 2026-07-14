@@ -29,6 +29,7 @@ import { engineStatus, detectorById, runEngine } from "./engine.js";
 import { listFlags, flagCounts, getFlag } from "./flags.js";
 import { setSetting, coerceValue } from "./engine-settings.js";
 import adminOpsRouter from "./routes/admin-ops.js";
+import adminRouter from "./routes/admin.js";
 import { decideLeadShared } from "./routes/util.js";
 
 process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
@@ -96,15 +97,12 @@ app.get("/api/politicians/:id/card", (req, res) => {
   res.json(c);
 });
 
-// Legacy GLM dossiers are a frozen archive (retired in favour of the card).
-// Kept admin-only for journalist context; not part of the public surface.
-app.get("/api/politicians/:id/report", requireAdmin, (req, res) => {
-  const r = latestReport(req.params.id);
-  if (!r) return res.status(404).json({ error: "no report yet" });
-  res.json(r);
-});
-
-app.get("/api/politicians/:id/reports", requireAdmin, (req, res) => res.json(reportHistory(req.params.id)));
+// Admin moderation + Investigator work-queue routes (incl. the admin-gated
+// legacy report routes) split out to ./routes/admin.js (Task 5.4). Mounted here
+// — where the first moved route (GET /api/politicians/:id/report) used to
+// register — so route order is preserved. The router keeps the full original
+// path strings, so no mount prefix.
+app.use(adminRouter);
 app.get("/api/politicians/:id/evidence", (req, res) => res.json(listEvidence(req.params.id)));
 
 // ---- Head-to-head comparison ----
@@ -432,99 +430,6 @@ app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) 
     res.status(500).json({ error: "internal error" });
   }
 }));
-
-// ---- Moderation (token-protected) ----
-
-app.get("/api/admin/tips", requireAdmin, (req, res) => {
-  res.json(listTips({ status: req.query.status }));
-});
-
-app.post("/api/admin/tips/:id/review", requireAdmin, (req, res) => {
-  const { status, corroborated } = req.body ?? {};
-  if (status && !["approved", "rejected", "pending"].includes(status))
-    return res.status(400).json({ error: "bad status" });
-  const tip = reviewTip(req.params.id, { status, corroborated });
-  if (!tip) return res.status(404).json({ error: "not found" });
-  res.json(tip);
-});
-
-// ---- Admin: auto-discovered scandal proposals (human neutrality gate) ----
-app.get("/api/admin/scandal-proposals", requireAdmin, (_req, res) => res.json(listProposals()));
-
-app.post("/api/admin/scandal-proposals/:slug/approve", requireAdmin, asyncH(async (req, res) => {
-  const p = getScandal(req.params.slug);
-  if (!p || p.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  try {
-    const { generateScandal } = await import("./scandal-generator.js");
-    // The proposal already carries the seed fields; generate the full analysis.
-    const s = await generateScandal(p);
-    res.json({ ok: true, slug: s.slug, verdict: s.accountability?.verdict, signal: s.signal });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "internal error" });
-  }
-}));
-
-app.post("/api/admin/scandal-proposals/:slug/reject", requireAdmin, (req, res) => {
-  const p = getScandal(req.params.slug);
-  if (!p || p.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  deleteScandal(req.params.slug);
-  res.json({ ok: true, rejected: req.params.slug });
-});
-
-// ---- Admin: conflict-of-interest investigation leads (Investigator branch) ----
-// A lead that survived the L2 Investigator + L3 Referee lands here as
-// status:"proposed". NOTHING in this branch is ever public: "approve" now
-// means "cleared — shared externally" (with a journalist, off-platform). The
-// status enum (detected → proposed → published | dismissed) is unchanged to
-// avoid a data migration; 'published' is relabelled in the admin UI.
-app.get("/api/admin/investigation-leads", requireAdmin, (_req, res) => res.json(listLeadProposals()));
-
-// All leads regardless of status (the admin's full Investigator work-queue).
-app.get("/api/admin/conflicts", requireAdmin, (req, res) => {
-  res.json(listLeads(req.query.status ? { status: req.query.status } : {}));
-});
-
-// Admin-only directorship network for one politician (Phase 6 / Plans C1+C2). Includes
-// Tofler-derived (private) edges, so it is NEVER on the public report — admin route only.
-app.get("/api/admin/politicians/:id/directorship-network", requireAdmin, (req, res) => {
-  res.json(directorshipNetworkForGraph(req.params.id));
-});
-
-// decideLeadShared moved to ./routes/util.js (shared by these #/admin lead
-// routes and the ops-console action route, now in ./routes/admin-ops.js).
-
-app.post("/api/admin/investigation-leads/:id/approve", requireAdmin, (req, res) => {
-  const lead = getLead(req.params.id);
-  if (!lead || lead.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  const published = decideLeadShared(lead, "approve", "admin");
-  res.json({ ok: true, id: published.id, vector: published.vector, actor_name: published.actor_name });
-});
-
-app.post("/api/admin/investigation-leads/:id/reject", requireAdmin, (req, res) => {
-  const lead = getLead(req.params.id);
-  if (!lead || lead.status !== "proposed") return res.status(404).json({ error: "no such proposal" });
-  decideLeadShared(lead, "reject", "admin");
-  res.json({ ok: true, rejected: req.params.id });
-});
-
-// ---- Admin: incident-centric story drafts (human publish gate) ----
-// Stories are generated as status:'draft' and advance draft → proposed →
-// published | rejected. They are invisible to /api/stories until published.
-app.get("/api/admin/stories", requireAdmin, (req, res) => {
-  res.json(listStories({ status: req.query.status ?? "draft" }));
-});
-
-app.post("/api/admin/stories/:id/status", requireAdmin, (req, res) => {
-  const to = req.body?.status;
-  if (!STORY_STATUSES.includes(to)) return res.status(400).json({ error: "bad status" });
-  const story = getStory(req.params.id);
-  if (!story) return res.status(404).json({ error: "not found" });
-  if (!canTransition(story.status, to))
-    return res.status(409).json({ error: `illegal transition ${story.status} → ${to}` });
-  const updated = upsertStory({ ...story, status: to });
-  res.json({ ok: true, id: updated.id, slug: updated.slug, status: updated.status });
-});
 
 // ════════════════════════════════════════════════════════════════════════════
 // Admin: Ops Console — DB monitoring + command control (all requireAdmin)
