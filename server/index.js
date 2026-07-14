@@ -34,6 +34,8 @@ process.on("uncaughtException", (err) => { console.error("[uncaughtException]", 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Currency-string parser shared by report/leaderboard summarization helpers below.
+const num = (s) => { const m = String(s ?? "").replace(/,/g, "").match(/[\d.]+/); return m ? Number(m[0]) : null; };
 const app = express();
 app.use(express.json({ limit: "16kb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -154,7 +156,6 @@ function cardCompareSummary(c) {
 // small and the frontend dumb — every comparable metric is pre-extracted here.
 // (Transition fallback only — retired with the dossier.)
 function compareSummary(r) {
-  const num = (s) => { const m = String(s ?? "").replace(/,/g, "").match(/[\d.]+/); return m ? Number(m[0]) : null; };
   const params = {};
   for (const pm of r.parameters ?? []) params[pm.key] = { score: pm.score, label: pm.label, verdict: pm.verdict };
   const signals = {};
@@ -254,7 +255,6 @@ app.get("/api/issues/:slug", asyncH(async (req, res) => {
 // ---- Leaderboard: rank reps by various metrics (task #19) ----
 app.get("/api/leaderboard", (req, res) => {
   const metric = req.query.metric || "worst";
-  const num = (s) => { const m = String(s ?? "").replace(/,/g, "").match(/[\d.]+/); return m ? Number(m[0]) : null; };
   // Card-first: one indexed sweep over the latest cards (computed facts), with
   // a legacy-dossier fallback per un-carded rep during the transition.
   const cardRows = new Map(cardLeaderboardRows().map((r) => [r.id, r]));
