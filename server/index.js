@@ -7,8 +7,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env") });
 
+import { createRequire } from "node:module";
 import express from "express";
 import compression from "compression";
+const pkgVersion = createRequire(import.meta.url)("../package.json").version;
 import { requireAdmin } from "./auth.js";
 import {
   listPoliticians, listPoliticiansWithLatest, listPoliticiansWithCard, getPolitician, listEvidence,
@@ -70,7 +72,12 @@ app.use((req, res, next) => {
 // ---- Public API ----
 app.get("/healthz", (_req, res) => {
   try {
-    res.json({ ok: pingDb(), uptime: Math.round(process.uptime()) });
+    res.json({
+      ok: pingDb(),
+      uptime: Math.round(process.uptime()),
+      version: pkgVersion,
+      queue: jobCounts(),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false });
