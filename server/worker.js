@@ -26,6 +26,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { jobLogContext } from "./util/job-context.js";
+import { logger } from "./util/log.js";
 import {
   claimNextJob, peekNextJob, completeJob, failJob, enqueueJob,
   listPoliticians, getPolitician, sourceHealth, pruneFetchRuns,
@@ -43,6 +44,12 @@ import { getSetting, listOverrides } from "./engine-settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
+
+const wlog = logger("worker");
+// Handlers accept an injectable {log} line-writer; route it through the
+// structured logger — which mirrors into the job's ring buffer, exactly
+// like the console patch used to.
+const jobLine = (...a) => wlog.info(a.map(String).join(" "));
 
 // Spawn `node server/<script> <args…>` as a child and stream its stdout/stderr,
 // line by line, into the job's live-log ring buffer. Resolves on exit code 0,
@@ -210,7 +217,7 @@ export const HANDLERS = {
     }
     const scope = (Array.isArray(politicianIds) && politicianIds.length) ? "set"
       : incremental ? `incremental(${staleDays}d)` : "all";
-    console.log(`[ingest_all] scope=${scope} → enqueued ${enqueued} rep(s)`);
+    wlog.info(`[ingest_all] scope=${scope} → enqueued ${enqueued} rep(s)`);
     return { enqueued, scope };
   },
   // Summarizer (Branch 1): build one public report card. Free — no paid LLM.
@@ -283,18 +290,18 @@ export const HANDLERS = {
   async cppp_scan(payload = {}) {
     if (payload.rebuild) {
       const { buildCpppIndex } = await import("./cppp-index.js");
-      const idx = await buildCpppIndex({ log: console.log });
+      const idx = await buildCpppIndex({ log: jobLine });
       if (!idx.ok) return { indexed: false, reason: idx.reason };
     }
     const { runEngine } = await import("./engine.js");
     const { CPPP_DETECTORS } = await import("./cppp-detectors.js");
-    const r = await runEngine({ detectors: CPPP_DETECTORS.map((d) => d.id), procurement: true, log: console.log });
+    const r = await runEngine({ detectors: CPPP_DETECTORS.map((d) => d.id), procurement: true, log: jobLine });
     return { runId: r.runId, tookMs: r.tookMs, synthesis: r.synthesis };
   },
   // Re-run flags → leads synthesis alone (after tuning thresholds, no re-detect).
   async engine_synthesis() {
     const { runLeadSynthesis } = await import("./lead-synthesis.js");
-    return await runLeadSynthesis({ log: console.log });
+    return await runLeadSynthesis({ log: jobLine });
   },
   // GLM investigation of ONE lead by id — the ops console's precision trigger.
   async investigate_lead({ leadId } = {}) {
@@ -331,7 +338,7 @@ export const HANDLERS = {
     const health = sourceHealth(days);
     const { rotted, quiet, stale } = classifyHealth(health, FETCHER_NAMES);
     for (const r of rotted) {
-      console.warn(`[health] ROTTED ${r.source}: ${Math.round(r.ok_rate * 100)}% ok, ${r.total_items} items over ${days}d — ${r.last_error ?? "no error logged"}`);
+      wlog.warn(`[health] ROTTED ${r.source}: ${Math.round(r.ok_rate * 100)}% ok, ${r.total_items} items over ${days}d — ${r.last_error ?? "no error logged"}`);
     }
     const pruned = pruneFetchRuns(90);
     return { sources: health.length, rotted: rotted.length, quiet: quiet.length, stale: stale.length, pruned };
@@ -346,7 +353,7 @@ export const HANDLERS = {
   // evidence immediately becomes candidate leads. Pure code, no network, no LLM.
   async extract_all() {
     const { runExtractAndDetect } = await import("./extract-all.js");
-    const r = runExtractAndDetect({ log: console.log });
+    const r = runExtractAndDetect({ log: jobLine });
     return { extraction: r.extraction.totals, detectors: r.detectors?.counts ?? null };
   },
   // Prose LLM extractors (news/fact-check/CBI/wikipedia) over the FREE chain only.
@@ -356,8 +363,8 @@ export const HANDLERS = {
   async extract_prose({ limit = 25, source = null, all = false } = {}) {
     const { runAllProseExtractors, runProseExtractor } = await import("./extractors/prose-llm.js");
     const lim = all ? null : Number(limit);
-    if (source) return await runProseExtractor(source, { limit: lim, log: console.log });
-    const results = await runAllProseExtractors({ limit: lim, log: console.log });
+    if (source) return await runProseExtractor(source, { limit: lim, log: jobLine });
+    const results = await runAllProseExtractors({ limit: lim, log: jobLine });
     return Object.fromEntries(results.map((r) => [r.source_type, { written: r.written, evidence: r.evidence, model_null: r.model_null }]));
   },
   // Built-in health/verification job: does nothing but echo its payload. Safe to
@@ -371,8 +378,8 @@ export const HANDLERS = {
   // a maintenance_log row. Free: SQLite PRAGMAs + better-sqlite3 backup, no network.
   async db_maintenance(payload = {}, job) {
     const { runMaintenance, runMaintenanceTask } = await import("./db-maintenance.js");
-    if (payload.tier) return await runMaintenance(payload.tier, { log: console.log });
-    if (payload.task) return await runMaintenanceTask(payload.task, payload, { log: console.log });
+    if (payload.tier) return await runMaintenance(payload.tier, { log: jobLine });
+    if (payload.task) return await runMaintenanceTask(payload.task, payload, { log: jobLine });
     throw new Error("db_maintenance: need a tier or task in the payload");
   },
   // DB maintenance (DESTRUCTIVE): the tasks that rewrite/rebuild — full VACUUM and
@@ -385,7 +392,7 @@ export const HANDLERS = {
     const allowed = new Set(["vacuum", "drift_heal"]);
     if (!allowed.has(payload.task)) throw new Error(`db_maintenance_danger: task "${payload.task}" is not a danger task`);
     const { runMaintenanceTask } = await import("./db-maintenance.js");
-    return await runMaintenanceTask(payload.task, payload, { log: console.log });
+    return await runMaintenanceTask(payload.task, payload, { log: jobLine });
   },
 
   // ---- Spawn-based maintenance CLIs (no exported worker fn; run as subprocess) ----
@@ -419,7 +426,7 @@ export const HANDLERS = {
   // whole roster; scope with office/state/limit. In-process so it streams progress.
   async cppp_ingest({ office = null, state = null, limit = null, force = false } = {}) {
     const { runCpppIngest } = await import("./cppp-ingest.js");
-    return await runCpppIngest({ office, state, limit, force, log: console.log });
+    return await runCpppIngest({ office, state, limit, force, log: jobLine });
   },
   // DANGER ZONE — wipe reports/evidence/demo. Guarded: requires confirm:true.
   // (The HTTP layer additionally checks a typed confirmPhrase before enqueue;
@@ -471,7 +478,7 @@ export async function runJob(job, handlers = HANDLERS) {
   const handler = handlers[job.type];
   if (!handler) {
     const outcome = failJob(job.id, new Error(`No handler for job type: ${job.type}`));
-    console.error(`[worker] failed ${job.type} ${job.id} (0ms) → ${outcome?.status}: no handler`);
+    wlog.error(`[worker] failed ${job.type} ${job.id} (0ms) → ${outcome?.status}: no handler`);
     return { ok: false, error: "no handler", outcome };
   }
   patchConsoleForJobs(); // idempotent — ensures routing even when runJob is called directly (tests)
@@ -480,12 +487,12 @@ export async function runJob(job, handlers = HANDLERS) {
       const result = await handler(job.payload ?? {}, job);
       completeJob(job.id);
       const ms = Date.now() - t0;
-      console.log(`[worker] done ${job.type} ${job.id} (${ms}ms)`);
+      wlog.info(`[worker] done ${job.type} ${job.id} (${ms}ms)`);
       return { ok: true, result, ms };
     } catch (err) {
       const ms = Date.now() - t0;
       const outcome = failJob(job.id, err);
-      console.error(`[worker] failed ${job.type} ${job.id} (${ms}ms) → ${outcome?.status}: ${err.message}`);
+      wlog.error(`[worker] failed ${job.type} ${job.id} (${ms}ms) → ${outcome?.status}: ${err.message}`);
       return { ok: false, error: err, outcome, ms };
     }
   });
@@ -589,11 +596,11 @@ export function startInProcessWorker({ pollMs = 1000, scheduler = true } = {}) {
   // This process hosts the ONLY consumer pool, so any 'running' job at boot is
   // a zombie orphaned by a prior crash/restart — requeue it before we start.
   const reclaimed = reclaimRunningJobs();
-  if (reclaimed) console.log(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
+  if (reclaimed) wlog.info(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
   if (scheduler) startScheduler();
   let stopped = false;
   runPool({ pollMs, isStopped: () => stopped })
-    .catch((err) => console.error(`[worker] pool crashed: ${err.stack ?? err}`));
+    .catch((err) => wlog.error(`[worker] pool crashed: ${err.stack ?? err}`));
   return () => { stopped = true; };
 }
 
@@ -602,26 +609,26 @@ async function main() {
 
   let stopping = false;
   process.on("SIGINT", () => {
-    if (stopping) { console.log("\n[worker] second SIGINT — force exit."); process.exit(130); }
+    if (stopping) { wlog.info("[worker] second SIGINT — force exit."); process.exit(130); }
     stopping = true;
-    console.log("\n[worker] SIGINT — finishing the in-flight job(s), then exiting…");
+    wlog.info("[worker] SIGINT — finishing the in-flight job(s), then exiting…");
   });
 
   // Sole consumer pool: recover any job left 'running' by a previous crash.
   const reclaimed = reclaimRunningJobs();
-  if (reclaimed) console.log(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
+  if (reclaimed) wlog.info(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
 
   if (once) {
-    console.log("[worker] --once: draining queue…");
+    wlog.info("[worker] --once: draining queue…");
     const n = await drain();
-    console.log(`[worker] drained ${n} job(s). Exiting.`);
+    wlog.info(`[worker] drained ${n} job(s). Exiting.`);
     process.exit(0);
   }
 
-  console.log("[worker] starting (long-running, pooled). Ctrl-C to stop after in-flight jobs.");
+  wlog.info("[worker] starting (long-running, pooled). Ctrl-C to stop after in-flight jobs.");
   startScheduler();
   await runPool({ isStopped: () => stopping });
-  console.log("[worker] stopped.");
+  wlog.info("[worker] stopped.");
   process.exit(0);
 }
 
