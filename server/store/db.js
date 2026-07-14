@@ -17,6 +17,16 @@ db.pragma("synchronous = NORMAL");
 // background ingest running alongside the Ops worker) throws SQLITE_BUSY instantly.
 // Wait-and-retry for up to 15s so concurrent writers serialise instead of failing.
 db.pragma("busy_timeout = 15000");
+// Read-path tuning: 32 MB page cache (negative = KB), memory-map the first
+// 256 MB of the file so hot reads skip syscalls, and keep temp b-trees for
+// sorts/group-bys in RAM. All per-connection; safe alongside WAL.
+db.pragma("cache_size = -32000");
+db.pragma("mmap_size = 268435456");
+db.pragma("temp_store = MEMORY");
+// No table in this schema declares REFERENCES today, so this is a no-op —
+// enabled now so any future FK column is enforced from day one instead of
+// silently ignored (SQLite defaults foreign_keys OFF per connection).
+db.pragma("foreign_keys = ON");
 
 // ── Ledger-shape migration ───────────────────────────────────────────────
 // The facts/claims analysis ledgers moved to universal entity subjects
@@ -265,3 +275,10 @@ db.exec(`
 // Shared connection for the entity layer (server/entities.js) — one DB handle,
 // one schema init, honouring PANDOROS_DB_PATH exactly like every other table here.
 export { db };
+
+// Close the shared handle (graceful shutdown). better-sqlite3 is synchronous,
+// so once this returns the WAL is checkpointed and the file is consistent.
+// Idempotent: closing an already-closed handle is a no-op.
+export function closeDb() {
+  try { if (db.open) db.close(); } catch { /* already closed */ }
+}

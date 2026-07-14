@@ -112,7 +112,16 @@ export function check() {
     catch (e) { return { name: chk.name, count: -1, error: e.message }; }
   });
   const totalOrphans = orphans.reduce((s, o) => s + Math.max(0, o.count), 0);
-  return { integrityOk, integrity, orphans, totalOrphans, ok: integrityOk && totalOrphans === 0 };
+
+  // PRAGMA foreign_key_check returns one row per violated FK reference.
+  // The schema declares no REFERENCES today, so this must come back empty;
+  // it's here so any future FK column gets checked by the nightly routine.
+  const fkViolations = db.prepare("PRAGMA foreign_key_check").all();
+
+  return {
+    integrityOk, integrity, orphans, totalOrphans, fkViolations,
+    ok: integrityOk && totalOrphans === 0 && fkViolations.length === 0,
+  };
 }
 
 // ── Doctor: config/health preflight ───────────────────────────────────────────
