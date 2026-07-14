@@ -18,14 +18,14 @@
 // asserts the Phase-1 fix actually mints a FRESH entity for each split (if it ever
 // returned the shared entity again, the run aborts and rolls back).
 //
-//   node server/split-shared-entities.js            # dry run — prints the plan, writes nothing
-//   node server/split-shared-entities.js --apply     # back up + apply in a transaction
+//   node scripts/split-shared-entities.js            # dry run — prints the plan, writes nothing
+//   node scripts/split-shared-entities.js --apply     # back up + apply in a transaction
 import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { db, listPoliticians } from "./store.js";
-import { ensureEntity, getEntity, resolveEntityIdForPolitician, findEntityByStrongId } from "./entities.js";
-import { upsertRelationship } from "./relations.js";
+import { db, listPoliticians } from "../server/store.js";
+import { ensureEntity, getEntity, resolveEntityIdForPolitician, findEntityByStrongId } from "../server/entities.js";
+import { upsertRelationship } from "../server/relations.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

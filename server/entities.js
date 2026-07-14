@@ -125,7 +125,7 @@ export function ensureEntity({ kind, name, strongIds = {}, source = null } = {})
   // name-matched entity already belongs to a different subject (a conflicting strong
   // id), it is a namesake, not the same person — fall through and mint a fresh entity
   // so two real people are never glued onto one shared entity. (The two guards share
-  // strongIdsConflict; server/split-shared-entities.js is the one-time repair for the
+  // strongIdsConflict; scripts/split-shared-entities.js is the one-time repair for the
   // rows the old, un-gated behaviour already created.)
   if (!ent) {
     const byAlias = findEntityByAlias(kind, name);

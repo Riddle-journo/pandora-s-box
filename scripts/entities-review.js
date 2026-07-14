@@ -1,12 +1,12 @@
 // Review CLI for proposed entity assertions (the gray-zone identity matches that
 // weren't auto-accepted). argv-only, no interactive prompts — safe for scripts.
 //
-//   node server/entities-review.js --list [--source mca_directors]
-//   node server/entities-review.js --accept <assertionId> [--entity <entityId>]
-//   node server/entities-review.js --reject <assertionId>
+//   node scripts/entities-review.js --list [--source mca_directors]
+//   node scripts/entities-review.js --accept <assertionId> [--entity <entityId>]
+//   node scripts/entities-review.js --reject <assertionId>
 import "dotenv/config";
-import { listProposed, decideAssertion } from "./entities.js";
-import { getPolitician } from "./store.js";
+import { listProposed, decideAssertion } from "../server/entities.js";
+import { getPolitician } from "../server/store.js";
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? true) : undefined; };

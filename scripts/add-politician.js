@@ -1,8 +1,8 @@
-// Run: node add-politician.js
+// Run: node scripts/add-politician.js
 // Adds a real politician, pulls all evidence, generates the first AI report.
-import { upsertPolitician, listPoliticians } from "./server/store.js";
-import { ingestFor } from "./server/ingest.js";
-import { generateReport } from "./server/report-generator.js";
+import { upsertPolitician, listPoliticians } from "../server/store.js";
+import { ingestFor } from "../server/ingest.js";
+import { generateReport } from "../server/report-generator.js";
 
 // ---- ADD YOUR POLITICIANS HERE ----
 // Find the myneta_url by searching https://www.myneta.info for the person's name.
