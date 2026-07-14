@@ -5,7 +5,10 @@
 export const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountability research)" };
 
 import { sleep } from "../util/timing.js";
+import { logger } from "../util/log.js";
 export { sleep };
+
+const hlog = logger("fetchers");
 
 export const isPdf = (url) => /\.pdf($|\?)/i.test(url);
 
@@ -35,44 +38,87 @@ async function fetchInsecureBuffer(url, timeoutMs = 30000) {
   });
 }
 
-// Fetch raw text with timeout + polite UA. Returns "" on any failure.
-// `insecure: true` routes through fetchInsecureBuffer for sites with a broken
-// TLS chain (see above) — off by default, since almost no site needs it.
-export async function fetchText(url, { timeoutMs = 15000, headers = {}, insecure = false, retries = 0, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
-  if (insecure) {
-    const buf = await fetchInsecureBuffer(url, timeoutMs);
-    return buf ? buf.toString("utf8") : "";
-  }
+// Named timeout tiers — pick the nearest tier instead of inventing a number.
+export const TIMEOUT_FAST = 10_000;    // small JSON APIs
+export const TIMEOUT_DEFAULT = 15_000; // typical HTML/JSON page
+export const TIMEOUT_SLOW = 30_000;    // slow government portals / big payloads
+export const TIMEOUT_PDF = 60_000;     // PDF downloads
+
+// How long a 429's Retry-After header may push the delay (seconds or HTTP-date).
+const RETRY_AFTER_CAP_MS = 30_000;
+
+function retryAfterMs(res) {
+  const h = res?.headers?.get?.("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  const ms = Number.isFinite(secs) ? secs * 1000 : new Date(h).getTime() - Date.now();
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, RETRY_AFTER_CAP_MS) : null;
+}
+
+// One retry loop for every fetch in the app. Retries network errors/timeouts,
+// >=500, and 429 (honouring Retry-After, capped); never other 4xx. Jittered
+// exponential backoff so a burst of failed fetchers doesn't retry in lockstep.
+// Returns { res, error, attempts } — res may be non-ok (caller decides).
+async function requestWithRetry(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   for (let attempt = 0; ; attempt++) {
+    let res = null;
     try {
-      const res = await fetchImpl(url, { headers: { ...UA, ...headers }, signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) {
-        if (res.status >= 500 && attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
-        return "";
-      }
-      return await res.text();
-    } catch {
-      if (attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
-      return "";
+      res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) return { res, error: null, attempts: attempt + 1 };
+      const retryable = res.status >= 500 || res.status === 429;
+      if (!retryable || attempt >= retries) return { res, error: null, attempts: attempt + 1 };
+    } catch (err) {
+      if (attempt >= retries) return { res: null, error: err, attempts: attempt + 1 };
     }
+    const backoff = retryDelayMs * 2 ** attempt * (0.5 + Math.random() * 0.5);
+    await sleep((res && retryAfterMs(res)) ?? backoff);
   }
 }
 
-// Fetch + parse JSON. Returns null on any failure.
-export async function fetchJson(url, { timeoutMs = 15000, headers = {}, retries = 0, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const res = await fetchImpl(url, { headers: { ...UA, Accept: "application/json", ...headers }, signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) {
-        if (res.status >= 500 && attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
-        return null;
-      }
-      return await res.json();
-    } catch {
-      if (attempt < retries) { await sleep(retryDelayMs * 2 ** attempt); continue; }
-      return null;
-    }
+// Status-aware text fetch: { ok, status, text, error, attempts }. Use this when
+// the caller needs to tell "empty page" from "timeout/blocked/500" — the plain
+// fetchText below flattens both to "".
+export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, insecure = false, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+  if (insecure) {
+    const buf = await fetchInsecureBuffer(url, timeoutMs);
+    return buf
+      ? { ok: true, status: 200, text: buf.toString("utf8"), error: null, attempts: 1 }
+      : { ok: false, status: 0, text: "", error: new Error("insecure fetch failed"), attempts: 1 };
   }
+  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, ...headers }, retries, retryDelayMs, fetchImpl });
+  if (!res) return { ok: false, status: 0, text: "", error, attempts };
+  if (!res.ok) return { ok: false, status: res.status, text: "", error: null, attempts };
+  try {
+    return { ok: true, status: res.status, text: await res.text(), error: null, attempts };
+  } catch (err) {
+    return { ok: false, status: res.status, text: "", error: err, attempts };
+  }
+}
+
+// Status-aware JSON fetch: { ok, status, data, error, attempts }.
+export async function fetchJsonEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
+  const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, Accept: "application/json", ...headers }, retries, retryDelayMs, fetchImpl });
+  if (!res) return { ok: false, status: 0, data: null, error, attempts };
+  if (!res.ok) return { ok: false, status: res.status, data: null, error: null, attempts };
+  try {
+    return { ok: true, status: res.status, data: await res.json(), error: null, attempts };
+  } catch (err) {
+    return { ok: false, status: res.status, data: null, error: err, attempts };
+  }
+}
+
+// Fetch raw text with timeout + polite UA. Returns "" on any failure.
+// `insecure: true` routes through fetchInsecureBuffer for sites with a broken
+// TLS chain (see above) — off by default, since almost no site needs it.
+// Retries (network/5xx/429) are ON by default now — pass retries:0 to opt out.
+export async function fetchText(url, opts = {}) {
+  return (await fetchTextEx(url, opts)).text;
+}
+
+// Fetch + parse JSON. Returns null on any failure. Retries on by default.
+export async function fetchJson(url, opts = {}) {
+  const r = await fetchJsonEx(url, opts);
+  return r.ok ? r.data : null;
 }
 
 const ENTITIES = { "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&#39;": "'", "&quot;": '"', "&rsquo;": "'", "&lsquo;": "'", "&rdquo;": '"', "&ldquo;": '"', "&mdash;": "—", "&ndash;": "–" };
@@ -107,7 +153,7 @@ export async function fetchPdfText(url, { timeoutMs = 30000, maxLen = 4000, inse
     ({ PDFParse } = await import("pdf-parse"));
     if (typeof PDFParse !== "function") throw new Error("unexpected pdf-parse API");
   } catch {
-    if (!pdfWarned) { console.warn("[fetchers] pdf-parse v2 not available — PDF sources skipped. Run: npm install pdf-parse"); pdfWarned = true; }
+    if (!pdfWarned) { hlog.warn("[fetchers] pdf-parse v2 not available — PDF sources skipped. Run: npm install pdf-parse"); pdfWarned = true; }
     return "";
   }
   try {
@@ -117,8 +163,8 @@ export async function fetchPdfText(url, { timeoutMs = 30000, maxLen = 4000, inse
       if (!b) return "";
       buf = new Uint8Array(b);
     } else {
-      const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) return "";
+      const { res } = await requestWithRetry(url, { timeoutMs, headers: UA });
+      if (!res?.ok) return "";
       buf = new Uint8Array(await res.arrayBuffer());
     }
     const parser = new PDFParse({ data: buf });
