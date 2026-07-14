@@ -29,38 +29,36 @@ const BROWSER_UA =
 
 const NSE = "https://www.nseindia.com";
 
+import { fetchRaw } from "./http.js";
+import { logger } from "../util/log.js";
+const log = logger("sebi-disclosures");
+
 // ── NSE cookie handshake (mirrors nse-deals.js) ──────────────────────────────
 // GET the homepage with a browser UA to collect the anti-bot cookies, return a
 // Cookie header string, or "" on any failure.
 async function nseCookies(timeoutMs = 12000) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(`${NSE}/`, {
-      headers: { "User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
-      signal: ac.signal,
-    });
-    const raw = typeof r.headers.getSetCookie === "function" ? r.headers.getSetCookie() : [];
-    return raw.map((c) => c.split(";")[0]).join("; ");
-  } catch { return ""; }
-  finally { clearTimeout(t); }
+  const { res } = await fetchRaw(`${NSE}/`, {
+    headers: { "User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+    timeoutMs,
+  });
+  if (!res) return "";
+  const raw = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+  return raw.map((c) => c.split(";")[0]).join("; ");
 }
 
 // GET a warmed NSE JSON endpoint. Returns the parsed JSON, or null on any failure.
 async function nseJson(url, { cookie, referer, timeoutMs = 12000 } = {}) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, {
-      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": referer ?? `${NSE}/`, "Cookie": cookie ?? "" },
-      signal: ac.signal,
-    });
-    if (!r.ok) return null;
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.includes("json")) return null;
-    return await r.json().catch(() => null);
-  } catch { return null; }
-  finally { clearTimeout(t); }
+  const { res, error } = await fetchRaw(url, {
+    headers: { "User-Agent": BROWSER_UA, "Accept": "application/json,*/*", "Accept-Language": "en-US,en;q=0.9", "Referer": referer ?? `${NSE}/`, "Cookie": cookie ?? "" },
+    timeoutMs,
+  });
+  if (!res?.ok) {
+    if (res || error) log.warn({ url, status: res?.status ?? 0, err: error?.message }, "nse json failed");
+    return null;
+  }
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("json")) return null;
+  return await res.json().catch(() => null);
 }
 
 // ── Symbol resolution ────────────────────────────────────────────────────────

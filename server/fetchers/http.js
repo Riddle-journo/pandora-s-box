@@ -75,6 +75,13 @@ async function requestWithRetry(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}
   }
 }
 
+// Raw variant for callers that need the Response itself (Set-Cookie handshakes,
+// content-type branching): same retry/429/timeout core, no body consumption.
+// Returns { res, error, attempts } — res may be null (network failure) or non-ok.
+export async function fetchRaw(url, opts = {}) {
+  return requestWithRetry(url, opts);
+}
+
 // Status-aware text fetch: { ok, status, text, error, attempts }. Use this when
 // the caller needs to tell "empty page" from "timeout/blocked/500" — the plain
 // fetchText below flattens both to "".

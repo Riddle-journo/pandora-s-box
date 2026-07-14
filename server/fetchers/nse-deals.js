@@ -11,20 +11,20 @@
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36";
 
+import { fetchRaw } from "./http.js";
+import { logger } from "../util/log.js";
+const log = logger("nse-deals");
+
 // Perform the NSE cookie handshake and return a Cookie header string, or "".
 async function nseCookies(timeoutMs = 12000) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const r = await fetch("https://www.nseindia.com/", {
-      headers: { "User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
-      signal: ac.signal,
-    });
-    // Node's fetch exposes multiple Set-Cookie via getSetCookie() (undici ≥18.14).
-    const raw = typeof r.headers.getSetCookie === "function" ? r.headers.getSetCookie() : [];
-    return raw.map((c) => c.split(";")[0]).join("; ");
-  } catch { return ""; }
-  finally { clearTimeout(t); }
+  const { res } = await fetchRaw("https://www.nseindia.com/", {
+    headers: { "User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+    timeoutMs,
+  });
+  if (!res) return "";
+  // Node's fetch exposes multiple Set-Cookie via getSetCookie() (undici ≥18.14).
+  const raw = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+  return raw.map((c) => c.split(";")[0]).join("; ");
 }
 
 // Parse an NSE deals CSV into rows; keep only rows whose client name matches.
@@ -68,29 +68,28 @@ export async function searchDeals(name, { timeoutMs = 12000 } = {}) {
   ];
   const matches = [];
   for (const url of endpoints) {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
-    try {
-      const r = await fetch(url, {
-        headers: { "User-Agent": BROWSER_UA, "Accept": "application/json,text/csv,*/*", "Referer": "https://www.nseindia.com/report-detail/display-bulk-and-block-deals", "Cookie": cookie },
-        signal: ac.signal,
-      });
-      const ct = r.headers.get("content-type") || "";
-      if (ct.includes("json")) {
-        const j = await r.json().catch(() => null);
-        const rows = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
-        for (const row of rows) {
-          const client = String(row.clientName ?? row.CLIENT_NAME ?? row.client ?? "").toLowerCase();
-          if (client.includes(needle.toLowerCase())) {
-            matches.push({ client: row.clientName ?? row.CLIENT_NAME ?? row.client ?? "", symbol: row.symbol ?? row.SYMBOL ?? "", date: row.date ?? row.BD_DT_DATE ?? "", quantity: row.quantityTraded ?? row.qty ?? "", type: row.buySell ?? row.dealType ?? "" });
-          }
+    const { res, error } = await fetchRaw(url, {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json,text/csv,*/*", "Referer": "https://www.nseindia.com/report-detail/display-bulk-and-block-deals", "Cookie": cookie },
+      timeoutMs,
+    });
+    if (!res) {
+      if (error) log.warn({ url, err: error.message }, "nse deals endpoint failed");
+      continue;
+    }
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("json")) {
+      const j = await res.json().catch(() => null);
+      const rows = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+      for (const row of rows) {
+        const client = String(row.clientName ?? row.CLIENT_NAME ?? row.client ?? "").toLowerCase();
+        if (client.includes(needle.toLowerCase())) {
+          matches.push({ client: row.clientName ?? row.CLIENT_NAME ?? row.client ?? "", symbol: row.symbol ?? row.SYMBOL ?? "", date: row.date ?? row.BD_DT_DATE ?? "", quantity: row.quantityTraded ?? row.qty ?? "", type: row.buySell ?? row.dealType ?? "" });
         }
-      } else {
-        const csv = await r.text().catch(() => "");
-        matches.push(...parseDealsCsv(csv, needle));
       }
-    } catch { /* ignore this endpoint */ }
-    finally { clearTimeout(t); }
+    } else {
+      const csv = await res.text().catch(() => "");
+      matches.push(...parseDealsCsv(csv, needle));
+    }
   }
   return matches;
 }
