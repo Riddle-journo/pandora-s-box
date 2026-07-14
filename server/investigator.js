@@ -19,7 +19,7 @@
 // both. Nothing is published here — this only sets status. Two independent
 // adversarial passes are what make surfacing an unproven claim defensible.
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, callWithRetry } from "./llm.js";
 import { db, listEvidence, upsertLead, addEvidence } from "./store.js";
 import { searchDeals } from "./fetchers/nse-deals.js";
 import { lookupDirectorCompaniesByName as lookupDirectorCompanies } from "./store.js";
@@ -50,10 +50,12 @@ function parseJson(raw) {
 async function callRaw(system, user, { maxTokens = 6000, temperature = 0.15 } = {}) {
   if (!AI_KEY) throw new Error("AI_API_KEY is not set in your .env file.");
   const client = makeClient();
-  const r = await client.chat.completions.create({
+  // Transport retries + usage ledger in callWithRetry; askJson layers its own
+  // lower-temperature retry for malformed JSON on top.
+  const r = await callWithRetry(client, {
     model: MODEL, messages: [{ role: "system", content: system }, { role: "user", content: user }],
     temperature, max_tokens: maxTokens, reasoning: { effort: "high" },
-  });
+  }, { module: "investigator", attempts: 2 });
   const msg = r.choices?.[0]?.message;
   return String(msg?.content ?? msg?.reasoning ?? "");
 }

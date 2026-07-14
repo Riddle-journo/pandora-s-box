@@ -20,7 +20,7 @@
 //   node server/scandal-generator.js seed --force  # regenerate even if present
 //   node server/scandal-generator.js <slug>        # (re)generate one seed by slug
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
 import { listScandals, getScandal, upsertScandal, listPoliticians } from "./store.js";
 import { fetchNews } from "./sources/news.js";
 import { freedomFor } from "./data/freedom-index.js";
@@ -170,11 +170,13 @@ export async function generateScandal(seed) {
   let analysis = null, lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const r = await client.chat.completions.create({
+      // Transport retries + usage ledger in callWithRetry; this loop handles
+      // validate() failures (malformed JSON) with a lower retry temperature.
+      const r = await callWithRetry(client, {
         model: MODEL, messages: [{ role: "user", content: prompt }],
         temperature: attempt === 1 ? 0.3 : 0.15, max_tokens: 9000,
         reasoning: { effort: "high" }, // task #15: max GLM effort
-      });
+      }, { module: "scandal-generator", attempts: 2 });
       const raw = r.choices?.[0]?.message?.content ?? r.choices?.[0]?.message?.reasoning ?? "";
       if (!raw) throw new Error("empty content");
       analysis = validate(raw, seed);

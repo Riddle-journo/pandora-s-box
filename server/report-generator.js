@@ -18,7 +18,7 @@
 // then mechanically attaches the matching numbered source to each section,
 // so every [n] in the UI is a correct, clickable, verifiable link.
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
 import { listPoliticians, getPolitician, listEvidence, listTips, addReport, latestReport } from "./store.js";
 import { ingestFor } from "./ingest.js";
 import { computeFlags, scoreFromFlags } from "./analyzer.js";
@@ -716,7 +716,9 @@ export async function generateReport(politicianId, { mode = "incremental", force
   for (let attempt = 1; attempt <= 2; attempt++) {
     let raw = "";
     try {
-      const response = await client.chat.completions.create({
+      // Transport retries (429 Retry-After, 5xx backoff) + llm_usage ledger row
+      // live in callWithRetry; the outer loop is for malformed-JSON retries.
+      const response = await callWithRetry(client, {
         model: MODEL,
         // Static system prefix is identical across reps → cached by OpenRouter
         // at ~0.25–0.5× input cost (task #16). Per-rep data is the user message.
@@ -727,7 +729,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
         // normalises this and ignores it for models that don't support it.
         reasoning: { effort: "high" },
         usage: { include: true }, // surface cache hit metrics in the response
-      });
+      }, { module: "report-generator", attempts: 2 });
       const msg = response.choices?.[0]?.message;
       raw = msg?.content ?? msg?.reasoning ?? "";
       if (!raw) throw new Error("Model returned empty content.");
