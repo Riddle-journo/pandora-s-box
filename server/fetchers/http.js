@@ -82,9 +82,27 @@ export async function fetchRaw(url, opts = {}) {
   return requestWithRetry(url, opts);
 }
 
+/**
+ * @typedef {object} FetchTextResult
+ * @property {boolean} ok        true only for a 2xx whose body was read
+ * @property {number} status     HTTP status; 0 = network/timeout failure
+ * @property {string} text       "" unless ok
+ * @property {Error|null} error  set when the transport (not HTTP) failed
+ * @property {number} attempts   total tries incl. retries
+ */
+/**
+ * @typedef {object} FetchJsonResult
+ * @property {boolean} ok
+ * @property {number} status
+ * @property {any} data          null unless ok
+ * @property {Error|null} error  transport OR JSON-parse failure
+ * @property {number} attempts
+ */
+
 // Status-aware text fetch: { ok, status, text, error, attempts }. Use this when
 // the caller needs to tell "empty page" from "timeout/blocked/500" — the plain
 // fetchText below flattens both to "".
+/** @returns {Promise<FetchTextResult>} */
 export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, method = "GET", body = undefined, insecure = false, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   if (insecure) {
     const buf = await fetchInsecureBuffer(url, timeoutMs);
@@ -103,6 +121,7 @@ export async function fetchTextEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = 
 }
 
 // Status-aware JSON fetch: { ok, status, data, error, attempts }.
+/** @returns {Promise<FetchJsonResult>} */
 export async function fetchJsonEx(url, { timeoutMs = TIMEOUT_DEFAULT, headers = {}, method = "GET", body = undefined, retries = 2, retryDelayMs = 1000, fetchImpl = fetch } = {}) {
   const { res, error, attempts } = await requestWithRetry(url, { timeoutMs, headers: { ...UA, Accept: "application/json", ...headers }, method, body, retries, retryDelayMs, fetchImpl });
   if (!res) return { ok: false, status: 0, data: null, error, attempts };
