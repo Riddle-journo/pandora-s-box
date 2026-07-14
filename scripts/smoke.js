@@ -50,15 +50,18 @@ async function main() {
   let failureReason = null;
 
   try {
-    // Poll /api/parameters until it returns HTTP 200, up to 30s.
+    // Poll /healthz until it returns HTTP 200 with ok:true, up to 30s.
     const deadline = Date.now() + 30000;
     let ready = false;
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(`${BASE_URL}/api/parameters`);
+        const res = await fetch(`${BASE_URL}/healthz`);
         if (res.status === 200) {
-          ready = true;
-          break;
+          const body = await res.json();
+          if (body.ok === true) {
+            ready = true;
+            break;
+          }
         }
       } catch {
         // server not up yet; keep polling
@@ -68,7 +71,7 @@ async function main() {
 
     if (!ready) {
       throw new Error(
-        `server did not respond with HTTP 200 on /api/parameters within 30s. Child output:\n${childOutput}`
+        `server did not respond with HTTP 200 and "ok":true on /healthz within 30s. Child output:\n${childOutput}`
       );
     }
 

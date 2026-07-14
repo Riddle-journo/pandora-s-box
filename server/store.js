@@ -1154,3 +1154,5 @@ export function evidenceCounts() {
   }
   return m;
 }
+
+export function pingDb() { return db.prepare("SELECT 1 AS ok").get().ok === 1; }

@@ -18,7 +18,7 @@ import {
   statsSummary, evidenceCoverage, politiciansMissing, jobCounts, evidenceCounts,
   sourceHealth, listJobs, getJob, enqueueJob,
   cancelJob, updateJob, requeueJob, trimJobs, reclaimRunningJobs, isQueuePaused, setQueuePaused,
-  recordLeadFeedback, detectorPrecision,
+  recordLeadFeedback, detectorPrecision, pingDb,
 } from "./store.js";
 import { tail as opsLogTail } from "./ops-log.js";
 import { directorshipNetworkForGraph } from "./directorship-network.js";
@@ -28,6 +28,9 @@ import { PARAMETERS, SCORING } from "./scoring.js";
 import { engineStatus, detectorById, runEngine } from "./engine.js";
 import { listFlags, flagCounts, getFlag } from "./flags.js";
 import { setSetting, coerceValue } from "./engine-settings.js";
+
+process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
+process.on("uncaughtException", (err) => { console.error("[uncaughtException]", err); process.exit(1); });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -47,6 +50,14 @@ app.use((req, res, next) => {
 });
 
 // ---- Public API ----
+app.get("/healthz", (_req, res) => {
+  try {
+    res.json({ ok: pingDb(), uptime: Math.round(process.uptime()) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
 app.get("/api/parameters", (_req, res) => res.json(PARAMETERS));
 app.get("/api/methodology", (_req, res) => res.json({ parameters: PARAMETERS, scoring: SCORING }));
 app.get("/api/tip-categories", (_req, res) => res.json(TIP_CATEGORIES));
