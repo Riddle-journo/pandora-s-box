@@ -46,4 +46,12 @@ describe("public API", () => {
     const res = await fetch(srv.baseUrl + "/api/parameters");
     assert.equal(res.status, 200);
   });
+
+  it("GET /api/openapi.json -> parseable OpenAPI doc", async () => {
+    const res = await fetch(srv.baseUrl + "/api/openapi.json");
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.openapi, /^3\./);
+    assert.ok(body.paths["/api/politicians"]);
+  });
 });

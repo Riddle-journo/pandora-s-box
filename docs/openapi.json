@@ -1,0 +1,138 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Pandoro's Box public API",
+    "description": "Citation-backed accountability report cards on India's elected representatives. Public read surface only; admin/ops routes (x-admin-token) are documented in docs/api.md.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Liveness + queue snapshot",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "uptime": { "type": "integer" }, "version": { "type": "string" }, "queue": { "type": "object" } } } } } } }
+      }
+    },
+    "/api/politicians": {
+      "get": {
+        "summary": "Browse list of politicians with latest card/grade",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 }, "description": "Opt-in pagination; omit for the full legacy array" },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }
+        ],
+        "responses": { "200": { "description": "Bare array (default) or list envelope (paginated)", "content": { "application/json": { "schema": { "oneOf": [ { "type": "array", "items": { "$ref": "#/components/schemas/PoliticianSummary" } }, { "$ref": "#/components/schemas/PaginatedList" } ] } } } } }
+      }
+    },
+    "/api/politicians/{id}": {
+      "get": {
+        "summary": "One politician",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Politician object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/api/politicians/{id}/card": {
+      "get": {
+        "summary": "Latest Summarizer report card",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Card object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/api/politicians/{id}/evidence": {
+      "get": {
+        "summary": "Evidence rows backing a politician's card",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Array of evidence rows" } }
+      }
+    },
+    "/api/compare": {
+      "get": {
+        "summary": "Head-to-head comparison (2-4 politicians)",
+        "parameters": [ { "name": "ids", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Comma-separated politician ids, max 4" } ],
+        "responses": { "200": { "description": "Comparison rows" }, "400": { "$ref": "#/components/responses/BadRequest" } }
+      }
+    },
+    "/api/leaderboard": {
+      "get": {
+        "summary": "Top-50 leaderboard by metric",
+        "parameters": [ { "name": "metric", "in": "query", "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Array of leaderboard rows (max 50)" } }
+      }
+    },
+    "/api/scandals": {
+      "get": {
+        "summary": "Government Watch scandal list",
+        "parameters": [
+          { "name": "level", "in": "query", "schema": { "type": "string" } },
+          { "name": "sector", "in": "query", "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "schema": { "type": "string" } },
+          { "name": "party", "in": "query", "schema": { "type": "string" } },
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }
+        ],
+        "responses": { "200": { "description": "Bare array (default) or list envelope (paginated)" } }
+      }
+    },
+    "/api/scandals/{slug}": {
+      "get": {
+        "summary": "One scandal analysis",
+        "parameters": [ { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Scandal object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/api/issues": {
+      "get": {
+        "summary": "Issue explainers",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }
+        ],
+        "responses": { "200": { "description": "Bare array (default) or list envelope (paginated)" } }
+      }
+    },
+    "/api/funding/overview": {
+      "get": { "summary": "Electoral-bond funding overview", "responses": { "200": { "description": "Funding aggregates" } } }
+    },
+    "/api/politicians/{id}/tips": {
+      "post": {
+        "summary": "Submit an anonymous tip (requires proof-of-work)",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": { "200": { "description": "Accepted" }, "400": { "$ref": "#/components/responses/BadRequest" }, "429": { "description": "Rate limited" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PoliticianSummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "office": { "type": "string" },
+          "state": { "type": "string" },
+          "constituency": { "type": "string" },
+          "party": { "type": "string" },
+          "latest": { "type": "object", "nullable": true, "description": "Latest card or legacy report summary (grade/score/headline)" }
+        }
+      },
+      "PaginatedList": {
+        "type": "object",
+        "required": ["items", "page", "pageSize", "total"],
+        "properties": {
+          "items": { "type": "array", "items": {} },
+          "page": { "type": "integer" },
+          "pageSize": { "type": "integer" },
+          "total": { "type": "integer" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    },
+    "responses": {
+      "NotFound": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "BadRequest": { "description": "Bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    }
+  }
+}

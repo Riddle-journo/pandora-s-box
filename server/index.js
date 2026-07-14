@@ -115,6 +115,10 @@ app.get("/healthz", (_req, res) => {
     res.status(500).json({ ok: false });
   }
 });
+// Hand-maintained OpenAPI spec for the public surface (docs/openapi.json).
+app.get("/api/openapi.json", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "docs", "openapi.json"));
+});
 app.get("/api/parameters", (_req, res) => res.json(PARAMETERS));
 app.get("/api/methodology", (_req, res) => res.json({ parameters: PARAMETERS, scoring: SCORING }));
 app.get("/api/tip-categories", (_req, res) => res.json(TIP_CATEGORIES));
