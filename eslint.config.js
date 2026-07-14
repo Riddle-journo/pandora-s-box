@@ -76,6 +76,7 @@ export default [
       "node_modules/",
       "graphify-out/",
       "data/",
+      "coverage/",
       "UsersDELLAppDataLocalTemp/",
     ],
   },
