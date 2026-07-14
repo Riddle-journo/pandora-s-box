@@ -317,7 +317,8 @@ if (process.env.PB_NO_LISTEN !== "1") {
     process.exit(1);
   }
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, async () => {
+  let stopWorker = null;
+  const server = app.listen(PORT, async () => {
     console.log(`Pandoro's Box running at http://localhost:${PORT}`);
     // One-launch ops console: run the job worker IN-PROCESS so button-clicks in the
     // console actually execute. The recurring SCHEDULER stays OFF by default (this
@@ -326,13 +327,38 @@ if (process.env.PB_NO_LISTEN !== "1") {
     if (process.env.OPS_INPROC_WORKER !== "0") {
       try {
         const { startInProcessWorker } = await import("./worker.js");
-        startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
+        stopWorker = startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
         console.log(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
       } catch (err) {
         console.error("[ops] failed to start in-process worker:", err.message);
       }
     }
   });
+
+  // Graceful shutdown: stop claiming jobs (in-flight ones drain), stop accepting
+  // connections, checkpoint + close the DB, then exit. A second signal — or a
+  // drain that takes >10s — force-exits. (worker.js's own SIGINT handler only
+  // runs when worker.js is the entrypoint, so there's no double handling here.)
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) { console.error(`[shutdown] second ${signal} — forcing exit`); process.exit(130); }
+    shuttingDown = true;
+    console.log(`[shutdown] ${signal} received — draining…`);
+    setTimeout(() => { console.error("[shutdown] drain timed out after 10s — forcing exit"); process.exit(1); }, 10_000).unref();
+    try { if (typeof stopWorker === "function") stopWorker(); } catch (err) { console.error("[shutdown] stopWorker:", err.message); }
+    server.close(async () => {
+      try {
+        const { closeDb } = await import("./store/db.js");
+        closeDb();
+      } catch (err) {
+        console.error("[shutdown] closeDb:", err.message);
+      }
+      console.log("[shutdown] clean exit");
+      process.exit(0);
+    });
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 export { app };
