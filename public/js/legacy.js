@@ -24,105 +24,10 @@ import {
   loadAllLeads, loadStories, setLeadStatusFilter, setStoryStatusFilter,
   decideLead, decideProposal,
 } from "./admin.js";
+import { showLeaderboard, renderLeaderboard, setLbMetric } from "./leaderboard.js";
+import { showIssues, showIssue } from "./issues.js";
+import { showTips, wireTipPicker, submitPageTip, submitReportTip } from "./tips.js";
 import { attachAutocomplete, fuzzyScore, repSuggestions, scandalSuggestions } from "./search.js";
-
-// ================= LEADERBOARD =================
-let lbMetric = "worst";
-async function showLeaderboard() {
-  hideAllViews();
-  $("#leaderboard-view").hidden = false;
-  window.scrollTo(0, 0);
-  await renderLeaderboard();
-}
-async function renderLeaderboard() {
-  const data = await api(`/api/leaderboard?metric=${encodeURIComponent(lbMetric)}`);
-  if (!data) { $("#lb-body").innerHTML = `<p class="muted center">No reports yet.</p>`; return; }
-  $("#lb-tabs").innerHTML = data.metrics.map((m) =>
-    `<button class="lb-tab${m.key === lbMetric ? " active" : ""}" data-lb="${m.key}">${esc(m.label)}</button>`).join("");
-  const fmt = (r) => {
-    switch (data.metric) {
-      case "most_cases": return `${r.cases} case${r.cases !== 1 ? "s" : ""} declared`;
-      case "richest": return r.net_worth ?? "—";
-      case "asset_growth": return r.asset_growth_x ? `${Number(r.asset_growth_x).toFixed(1)}×` : "—";
-      default: return `${r.score}/100 (${r.grade})`;
-    }
-  };
-  $("#lb-body").innerHTML = `<h3 class="lb-h">${esc(data.label)}</h3>` + (data.rows.length
-    ? `<ol class="lb-list">` + data.rows.map((r, i) => `
-        <li class="lb-row">
-          <span class="lb-rank">${i + 1}</span>
-          <a class="lb-name" href="#/rep/${r.id}">${esc(r.name)}</a>
-          <span class="lb-meta">${esc(r.party ?? "")} · ${esc(r.office ?? "")}${r.state ? " · " + esc(r.state) : ""}</span>
-          <span class="lb-fig">${esc(fmt(r))}</span>
-        </li>`).join("") + `</ol>`
-    : `<p class="muted center">Not enough data for this ranking yet.</p>`);
-}
-
-// ================= ISSUES (Where India Stands) =================
-async function showIssues() {
-  hideAllViews();
-  $("#issues-view").hidden = false;
-  window.scrollTo(0, 0);
-  const list = (await api("/api/issues")) ?? [];
-  $("#issue-grid").innerHTML = list.map((i) => `
-    <a class="issue-card${i.generated ? "" : " issue-pending"}" href="${i.generated ? `#/issue/${esc(i.slug)}` : "#/issues"}">
-      <span class="issue-icon">${esc(i.icon || "📌")}</span>
-      <span class="issue-name">${esc(i.title)}</span>
-      <span class="issue-desc">${esc(i.description)}</span>
-      ${i.generated ? `<span class="issue-go">Read analysis →</span>` : `<span class="issue-soon">Analysis pending</span>`}
-    </a>`).join("");
-}
-async function showIssue(slug) {
-  hideAllViews();
-  $("#issue-detail-view").hidden = false;
-  window.scrollTo(0, 0);
-  const box = $("#issue-detail-body");
-  box.innerHTML = `<p class="muted center">Loading…</p>`;
-  const i = await api(`/api/issues/${encodeURIComponent(slug)}`);
-  if (!i) { box.innerHTML = `<p class="muted center">This issue hasn't been analysed yet. Run <code>node server/issue-analyzer.js seed</code>.</p>`; return; }
-  box.innerHTML = renderIssue(i);
-}
-const ASSESS_CLS = { STRONG: "vd-full", MIXED: "vd-partial", WEAK: "vd-none", UNCLEAR: "" };
-function renderIssue(i) {
-  const ivw = i.india_vs_world ?? {};
-  const best = (ivw.best_performers ?? []).map((b) => `<li><strong>${esc(b.country)}</strong>${b.freedom ? ` <span class="muted small">(${esc(b.freedom.status)})</span>` : ""} — ${esc(b.what_they_do)}</li>`).join("");
-  const govs = (i.by_government ?? []).map((g) => `
-    <div class="issue-gov">
-      <div class="issue-gov-head"><strong>${esc(g.government || g.period)}</strong> <span class="muted small">${esc(g.period)}</span>
-        <span class="gw-verdict ${ASSESS_CLS[g.assessment] ?? ""}">${esc(g.assessment)}</span></div>
-      ${g.stance ? `<p class="small"><em>Stance:</em> ${esc(g.stance)}</p>` : ""}
-      ${(g.key_measures ?? []).length ? `<ul class="issue-measures">${g.key_measures.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
-      ${g.record ? `<p class="small">${esc(g.record)}</p>` : ""}
-    </div>`).join("");
-  const parties = (i.by_party ?? []).map((pp) => `
-    <div class="issue-party"><strong>${esc(pp.party)}</strong>${pp.stance ? ` — ${esc(pp.stance)}` : ""}
-      ${(pp.notable_actions ?? []).length ? `<ul class="issue-measures">${pp.notable_actions.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}</div>`).join("");
-  return `
-    <div class="issue-head"><span class="issue-icon-lg">${esc(i.icon || "📌")}</span><h2>${esc(i.title)}</h2></div>
-    <div class="card"><h3>What this means for India</h3><p>${esc(i.what_it_means)}</p></div>
-    <div class="card"><h3>Where India stands today</h3><p>${esc(i.india_state)}</p></div>
-    <div class="card"><h3>India vs the world</h3>
-      <p>${esc(ivw.summary ?? "")}</p>
-      ${ivw.rank_note ? `<p class="issue-rank">${esc(ivw.rank_note)}</p>` : ""}
-      ${best ? `<h4>Best performers</h4><ul class="issue-best">${best}</ul>` : ""}
-    </div>
-    ${govs ? `<section class="issue-section"><h3>What governments have done</h3>${govs}</section>` : ""}
-    ${parties ? `<section class="issue-section"><h3>Where the parties stand</h3>${parties}</section>` : ""}
-    ${(i.key_facts ?? []).length ? `<div class="card"><h3>Key facts</h3><ul>${i.key_facts.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
-    ${(i.sources ?? []).length ? `<p class="muted small">Sources: ${i.sources.map(esc).join(" · ")}</p>` : ""}
-    <p class="muted small">Generated by ${esc(i.model ?? "GLM")} · ${i.generated_at ? new Date(i.generated_at).toLocaleDateString() : ""} · neutral analysis of the public record.</p>`;
-}
-
-// ================= TIPS PAGE =================
-let tipRep = null;
-function showTips() {
-  hideAllViews();
-  $("#tips-view").hidden = false;
-  window.scrollTo(0, 0);
-  $("#tip-page-category").innerHTML = ($("#tip-category")?.innerHTML) || "";
-  $("#tip-rep-search").value = ""; $("#tip-rep-chosen").textContent = ""; tipRep = null;
-  $("#tip-page-form").hidden = true;
-}
 
 // ================= OPS CONSOLE =================
 // One-click chains. The worker is serial, so enqueue order = run order.
@@ -955,49 +860,7 @@ function cmdkPaint() {
   });
 }
 
-// ================= TIPS =================
-async function sha256Bytes(str) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return [...new Uint8Array(buf)];
-}
-function leadingZeroBits(bytes) {
-  let bits = 0;
-  for (const byte of bytes) {
-    if (byte === 0) { bits += 8; continue; }
-    bits += Math.clz32(byte) - 24; break;
-  }
-  return bits;
-}
-async function solvePow(challenge, difficulty, onProgress) {
-  let nonce = 0;
-  for (;;) {
-    const hash = await sha256Bytes(`${challenge}:${nonce}`);
-    if (leadingZeroBits(hash) >= difficulty) return nonce;
-    nonce++;
-    if (nonce % 2000 === 0) { onProgress?.(nonce); await new Promise(r => setTimeout(r)); }
-  }
-}
-
-$("#tip-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const btn = $("#tip-submit"), status = $("#tip-status");
-  btn.disabled = true;
-  try {
-    status.textContent = "Solving anti-spam puzzle…";
-    const { challenge, difficulty_bits } = await api("/api/pow-challenge");
-    const nonce = await solvePow(challenge, difficulty_bits, (n) => (status.textContent = `Solving… (${n.toLocaleString()} attempts)`));
-    status.textContent = "Submitting…";
-    const res = await fetch(`/api/politicians/${state.currentId}/tips`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challenge, nonce, category: $("#tip-category").value, text: $("#tip-text").value, website: document.querySelector(".hp").value }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) { status.textContent = "✓ " + (data.note ?? "Received."); $("#tip-text").value = ""; }
-    else           status.textContent = "✗ " + (data.error ?? "Something went wrong.");
-  } catch { status.textContent = "✗ Network error — try again."; }
-  finally { btn.disabled = false; }
-});
+$("#tip-form").addEventListener("submit", submitReportTip);
 
 // ================= INIT =================
 // Browse-page filters re-render the directory (reset pagination each change).
@@ -1116,7 +979,7 @@ $("#landing-search")?.addEventListener("submit", (e) => {
       return;
     }
     const lb = e.target.closest(".lb-tab");
-    if (lb) { lbMetric = lb.dataset.lb; renderLeaderboard(); return; }
+    if (lb) { setLbMetric(lb.dataset.lb); renderLeaderboard(); return; }
     const hs = e.target.closest("#how-scored");
     if (hs) {
       e.preventDefault();
@@ -1161,46 +1024,3 @@ $("#landing-search")?.addEventListener("submit", (e) => {
   route();
   syncNav();
 })();
-
-// ---- Tips page: rep picker + submit (reuses the POW solver) ----
-function wireTipPicker() {
-  const input = $("#tip-rep-search"), box = $("#tip-rep-results");
-  if (!input) return;
-  input.addEventListener("input", () => {
-    const q = input.value.toLowerCase().trim();
-    if (q.length < 2) { box.hidden = true; return; }
-    const hits = state.reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
-    box.innerHTML = hits.map((p) => `<div class="cmp-hit" data-tip-id="${p.id}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></div>`).join("");
-    box.hidden = hits.length === 0;
-  });
-  box.addEventListener("click", (e) => {
-    const hit = e.target.closest("[data-tip-id]");
-    if (!hit) return;
-    tipRep = state.reps.find((p) => p.id === hit.dataset.tipId);
-    $("#tip-rep-chosen").textContent = tipRep ? `Tip about: ${tipRep.name}` : "";
-    input.value = tipRep?.name ?? "";
-    box.hidden = true;
-    $("#tip-page-form").hidden = !tipRep;
-  });
-}
-
-async function submitPageTip(ev) {
-  ev.preventDefault();
-  if (!tipRep) return;
-  const btn = $("#tip-page-submit"), status = $("#tip-page-status");
-  btn.disabled = true;
-  try {
-    status.textContent = "Solving anti-spam puzzle…";
-    const { challenge, difficulty_bits } = await api("/api/pow-challenge");
-    const nonce = await solvePow(challenge, difficulty_bits, (n) => (status.textContent = `Solving… (${n.toLocaleString()} attempts)`));
-    status.textContent = "Submitting…";
-    const res = await fetch(`/api/politicians/${tipRep.id}/tips`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challenge, nonce, category: $("#tip-page-category").value, text: $("#tip-page-text").value, website: $("#tips-view .hp").value }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) { status.textContent = "✓ " + (data.note ?? "Received."); $("#tip-page-text").value = ""; }
-    else           status.textContent = "✗ " + (data.error ?? "Something went wrong.");
-  } catch { status.textContent = "✗ Network error — try again."; }
-  finally { btn.disabled = false; }
-}
