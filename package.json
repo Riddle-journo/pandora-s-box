@@ -16,6 +16,7 @@
     "extract:financial-links": "node server/extractors/financial-links.js",
     "extract:prose": "node server/extractors/prose-llm.js",
     "extract:all": "node server/extract-all.js",
+    "opendata:catalog": "node server/opendata-catalog.js",
     "detect:ledger": "node server/ledger-detectors.js",
     "reingest:party-finance": "node server/reingest-party-finance.js",
     "worker": "node server/worker.js",

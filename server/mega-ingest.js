@@ -9,9 +9,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import readline from "node:readline";
-import { listPoliticians, recordFetchRun } from "./store.js";
+import { listPoliticians, recordFetchRun, db } from "./store.js";
+import { ensureEntity } from "./entities.js";
+import { upsertFact } from "./ledger.js";
 import { UA, htmlToText, fetchPdfText, fetchText } from "./fetchers/http.js";
 import { renderPageText, closeBrowser } from "./fetchers/playwright-portal.js";
+import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "./fetchers/opendata.js";
 
 const MEGA_DIR = path.join(process.cwd(), "server", "data", "mega");
 const CACHE_DIR = path.join(process.cwd(), "server", "data", "l1-cache");
@@ -306,6 +309,67 @@ const MEGA_SOURCES = [
     kind: "browser-render", waitFor: "table", url: "https://enam.gov.in/web/",
     note: "Refuses connection (ECONNREFUSED) from non-Indian IPs — owner runs from an Indian-IP host/proxy or it skips cleanly.",
     summary: "Mandi trade volumes/prices (aggregate)." },
+
+  // ==== Phase 0 — open-data LEDGER DENOMINATORS (match:"none" → facts, not roster
+  // caches). These write baseline facts the anomaly engine divides against. Each
+  // carries a `ledger` mapping (subject entity + numeric metrics + period). Add new
+  // ones from `npm run opendata:catalog` output. See GOVACTION-SOURCES-PLAN.md P0. ====
+  { id: "ogd-mandi-prices", title: "Agmarknet daily mandi commodity prices (OGD)", tier: 4, match: "none",
+    kind: "ogd-resource", resourceId: "9ef84268-d588-465a-a308-a864a43d0070", maxRows: 4000,
+    ledger: {
+      subject: { fields: ["state", "district", "market", "commodity", "variety", "grade"], kind: "market_commodity" },
+      periodField: "arrival_date", periodFormat: "dmy",
+      metrics: [
+        { field: "modal_price", metric: "mandi_modal_price", unit: "INR/quintal" },
+        { field: "min_price", metric: "mandi_min_price", unit: "INR/quintal" },
+        { field: "max_price", metric: "mandi_max_price", unit: "INR/quintal" },
+      ],
+    },
+    summary: "Daily min/max/modal mandi prices per commodity — price baseline to flag government purchases above prevailing market rate (VERIFIED live via api.data.gov.in)." },
+  // District×month MGNREGA MIS at-a-glance — 415k rows, refreshed monthly (the Phase-2
+  // 'crown jewel' via a clean API instead of scraping nrega.nic.in). Denominators for
+  // ghost-workers (active job cards vs workers), wage-rate outliers, delayed payments.
+  { id: "ogd-mgnrega-glance", title: "District-wise MGNREGA data at a glance (OGD)", tier: 4, match: "none",
+    kind: "ogd-resource", resourceId: "ee03643a-ee4c-48c2-ac30-9f2ff26ab722", maxRows: 20000,
+    ledger: {
+      subject: { fields: ["state_name", "district_name"], kind: "district" },
+      periodFields: ["fin_year", "month"],
+      metrics: [
+        { field: "Total_Exp", metric: "mgnrega_total_expenditure", unit: "INR lakh" },
+        { field: "Average_Wage_rate_per_day_per_person", metric: "mgnrega_avg_wage_rate", unit: "INR/day" },
+        { field: "Persondays_of_Central_Liability_so_far", metric: "mgnrega_persondays", unit: "days" },
+        { field: "Number_of_Completed_Works", metric: "mgnrega_completed_works", unit: "count" },
+        { field: "Total_No_of_Active_Job_Cards", metric: "mgnrega_active_job_cards", unit: "count" },
+        { field: "Total_No_of_Active_Workers", metric: "mgnrega_active_workers", unit: "count" },
+        { field: "percentage_payments_gererated_within_15_days", metric: "mgnrega_pct_paid_15d", unit: "%" },
+      ],
+    },
+    summary: "MGNREGA district-month MIS (expenditure, wage rate, persondays, works, job cards, payment timeliness) — ghost-worker + wage-skim denominators (VERIFIED live, ~monthly)." },
+  // Central scheme allocation vs actual expenditure — the budget-vs-actual gap per scheme.
+  { id: "ogd-scheme-expenditure", title: "Scheme-wise allocated fund and expenditure (OGD)", tier: 4, match: "none",
+    kind: "ogd-resource", resourceId: "d28b5212-c833-4331-ae9a-5726a397ffaa", maxRows: 5000,
+    ledger: {
+      subject: { fields: ["programme_schemes"], kind: "scheme" }, period: "2020-21",
+      metrics: [
+        { field: "allocated_fund", metric: "scheme_allocated_fund", unit: "INR crore" },
+        { field: "expenditure_", metric: "scheme_expenditure", unit: "INR crore" },
+      ],
+    },
+    summary: "Per-scheme allocation vs actual spend — over/under-spend gap denominator (VERIFIED live)." },
+
+  // TEMPLATES — fill resourceId/portal from the discovery catalog, then --refresh.
+  // Open Budgets India WAF-403s datacenter IPs; run from an India/residential route.
+  { id: "obi-scheme-allocations", title: "Open Budgets India — scheme allocation vs expenditure (CKAN)", tier: 4, match: "none",
+    kind: "ckan-datastore", portal: "openbudgetsindia", resourceId: null, maxRows: 20000,
+    ledger: {
+      subject: { fields: ["scheme"], kind: "scheme" }, periodField: "year",
+      metrics: [
+        { field: "budget_estimate", metric: "scheme_budget_estimate", unit: "INR" },
+        { field: "actuals", metric: "scheme_actual_expenditure", unit: "INR" },
+      ],
+    },
+    note: "Pick a datastore_active resource id from `npm run opendata:catalog` (openbudgetsindia) and set resourceId + confirm the real column names (subject.fields / periodField / metrics[].field) against ckanDatastoreSearch fields[].",
+    summary: "Union/state scheme budget-estimate vs actuals per year — the budget-vs-actual gap denominator." },
 ];
 
 // --- roster needles ---------------------------------------------------------
@@ -341,6 +405,60 @@ function writeMegaCache(cfg, rows, totalScanned) {
   // as the 22 per-politician fetchers (they previously had zero visibility there).
   recordFetchRun({ source: `mega:${cfg.id}`, ok: 1, items: rows.length, ms: Date.now() - (cfg.__t0 ?? Date.now()) });
 }
+// --- Phase-0 open-data LEDGER writer (denominators, match:"none") ------------
+// The open-data kinds (ogd-resource / ckan-datastore) don't produce per-politician
+// evidence rows — they produce BASELINE FACTS the anomaly engine divides against
+// (per-district spend, per-market price, scheme allocation). So instead of a roster
+// cache they write straight into the facts ledger, one fact per numeric metric per
+// subject per period, keyed on a resolved subject-entity (universal-subjects rule:
+// the district/market/scheme IS the named entity). Idempotent — upsertFact dedupes
+// on (metric, entity, as_of_date, extractor_version), so a re-refresh is a no-op.
+const LEDGER_VERSION = "opendata-ledger@1";
+
+// Turn fetched rows into facts per the source's `ledger` mapping (rowToFactSpecs is
+// the pure, unit-tested core). Wrapped in one better-sqlite3 transaction (thousands
+// of tiny writes → one commit). Returns via the same recordFetchRun funnel as
+// writeMegaCache so it shows in Source Health. as_of_date carries the period — it's
+// the field in idx_facts_uniq, so a time series (one value per date) doesn't
+// collapse to a single row; `period` keeps the human label too.
+function writeLedgerFacts(cfg, rows, meta = {}) {
+  const L = cfg.ledger;
+  if (!L?.subject || !L.metrics?.length) {
+    console.log(`[mega] ${cfg.id}: no ledger mapping — nothing to write`);
+    return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "missing cfg.ledger", ms: Date.now() - (cfg.__t0 ?? Date.now()) });
+  }
+  let facts = 0, skipped = 0;
+  const subjects = new Set();
+  const run = db.transaction((batch) => {
+    for (const row of batch) {
+      const specs = rowToFactSpecs(row, L);
+      if (!specs.length) { skipped++; continue; }
+      for (const sp of specs) {
+        const entity_id = ensureEntity({ kind: sp.kind, name: sp.name, source: `mega:${cfg.id}` });
+        subjects.add(entity_id);
+        const res = upsertFact({
+          entity_id, subject_kind: sp.kind, metric: sp.metric, value: sp.value, unit: sp.unit,
+          as_of_date: sp.period, period: sp.period, source_type: `mega:${cfg.id}`, tier: cfg.tier,
+          extractor_version: LEDGER_VERSION,
+          data: { resource: cfg.resourceId ?? cfg.dataset ?? null, subject: sp.name },
+        });
+        if (res.inserted) facts++;
+      }
+    }
+  });
+  run(rows);
+  // Reuse the mega cache shape (count/total/fetched_at) so the status listing +
+  // Ops Console read it uniformly; store the snapshot freshness for the caveat.
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify({
+    fetched_at: new Date().toISOString(), count: facts, total: rows.length,
+    meta: { id: `mega-${cfg.id}`, title: cfg.title, summary: cfg.summary, match: "none", tier: cfg.tier,
+      ledger: true, subjects: subjects.size, source_updated: meta.updated ?? null, extractor_version: LEDGER_VERSION },
+  }));
+  console.log(`[mega] ${cfg.id}: ${facts} facts written across ${subjects.size} subjects (of ${rows.length} rows, ${skipped} cells skipped)${meta.updated ? `  [source updated ${meta.updated}]` : ""}`);
+  recordFetchRun({ source: `mega:${cfg.id}`, ok: 1, items: facts, ms: Date.now() - (cfg.__t0 ?? Date.now()) });
+}
+
 // Same minimal CSV parser as ingest.js (kept local: this file must stand alone).
 function parseCsv(text, maxRows = 2000000) {
   const rows = []; let row = [], field = "", q = false;
@@ -616,6 +734,33 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         if (rows.length >= CAP) break;
       }
       return writeMegaCache(cfg, rows, total);
+    }
+    if (cfg.kind === "ogd-resource") {
+      // data.gov.in OGD resource → ledger denominators. No roster filter (match:
+      // "none"): every row is a baseline fact. Freshness probed first (the snapshot
+      // caveat — an OGD resource updates on its own cadence, not live).
+      if (!cfg.resourceId) return notConfigured(cfg);
+      const meta = await ogdResourceMeta(cfg.resourceId);
+      const rows = await ogdResourceAll(cfg.resourceId, { maxRows: cfg.maxRows ?? 20000, pageSize: cfg.pageSize ?? 1000 });
+      if (!rows.length) { console.log(`[mega] ${cfg.id}: 0 rows (blocked or empty) — check OGD_API_KEY / resource id`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from OGD", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
+      return writeLedgerFacts(cfg, rows, meta);
+    }
+    if (cfg.kind === "ckan-datastore") {
+      // CKAN datastore-active resource (Open Budgets India / Justice Hub) → ledger
+      // denominators. Pages via datastore_search. baseUrl from cfg.portal key or an
+      // explicit cfg.baseUrl.
+      const baseUrl = cfg.baseUrl ?? CKAN_PORTALS[cfg.portal];
+      if (!baseUrl || !cfg.resourceId) return notConfigured(cfg);
+      const rows = []; const pageSize = cfg.pageSize ?? 1000;
+      for (let offset = 0; offset < (cfg.maxRows ?? 20000); offset += pageSize) {
+        const { records, total } = await ckanDatastoreSearch(baseUrl, { resourceId: cfg.resourceId, limit: pageSize, offset });
+        if (!records.length) break;
+        rows.push(...records);
+        if (rows.length >= total) break;
+        await new Promise((r) => setTimeout(r, cfg.delayMs ?? 400)); // polite pacing
+      }
+      if (!rows.length) { console.log(`[mega] ${cfg.id}: 0 rows (portal blocked/empty — WAF or bad resource id)`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from CKAN", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
+      return writeLedgerFacts(cfg, rows, {});
     }
     console.log(`[mega] ${cfg.id}: unknown kind ${cfg.kind}`);
   } catch (e) {
