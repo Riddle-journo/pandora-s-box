@@ -38,6 +38,15 @@ const app = express();
 app.use(express.json({ limit: "16kb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  res.on("finish", () => {
+    if (req.path === "/healthz" || !req.path.startsWith("/api")) return;
+    console.log(`[req] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - t0}ms`);
+  });
+  next();
+});
+
 // Basic security headers (no extra deps)
 app.use((req, res, next) => {
   res.set({
