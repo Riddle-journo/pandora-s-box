@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import https from "node:https";
 import { listPoliticians, addEvidence, recordFetchRun } from "./store.js";
+import { dataGovKey } from "./config.js";
 import { fetchText, htmlToText, fetchPdfText, UA, fetchJson, sleep, mapLimit, isPdf } from "./fetchers/http.js";
 import { fetchMyNetaProfile } from "./sources/myneta-full.js";
 import { fetchWikipedia } from "./sources/wikipedia.js";
@@ -278,7 +279,10 @@ async function l1Refresh(cfg) {
     if (cfg.format === "json-api") {
       let u = cfg.url;
       if (cfg.apiKeyEnv) {
-        const k = process.env[cfg.apiKeyEnv];
+        let k = process.env[cfg.apiKeyEnv];
+        if (!k && ["DATA_GOV_API_KEY", "DATA_GOV_KEY", "DATA_GOV_IN_KEY", "OGD_API_KEY"].includes(cfg.apiKeyEnv)) {
+          k = dataGovKey();
+        }
         if (!k) return { id: cfg.id, ok: false, why: `env ${cfg.apiKeyEnv} not set — skipped` };
         u = u.replaceAll("{key}", encodeURIComponent(k));
       }
