@@ -41,6 +41,18 @@ const CONF = {
 };
 const AVATAR_COLORS = ["#1f3a93","#c2255c","#0b7285","#5f3dc4","#a61e4d","#2b8a3e","#d9480f"];
 
+// Lower rank = more "consequential" (worst documented record first); no report last.
+const GRADE_RANK = { F: 0, E: 1, D: 2, C: 3, B: 4, A: 5, INSUFFICIENT_DATA: 6 };
+function consequenceRank(p) { return p.latest ? (GRADE_RANK[p.latest.grade] ?? 6) : 9; }
+
+// Shared across the report, compare, govwatch and scorecard views.
+const SIGNAL_DOT = { RED: "🔴", AMBER: "🟠", GREEN: "🟢", GREY: "⚪" };
+const VERDICT_LABEL = {
+  NONE: { txt: "No accountability", cls: "vd-none" },
+  PARTIAL: { txt: "Partial accountability", cls: "vd-partial" },
+  FULL: { txt: "Full accountability", cls: "vd-full" },
+};
+
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const avatarColor = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; };
@@ -73,4 +85,5 @@ export {
   $, currentTheme, toggleTheme, syncThemeToggle,
   GRADE_COLORS, GRADE_TEXT, CONF, AVATAR_COLORS,
   esc, avatarColor, initials, barColor, confChip, withCites,
+  consequenceRank, SIGNAL_DOT, VERDICT_LABEL,
 };
