@@ -860,22 +860,26 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, error: "internal error" });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`Pandoro's Box running at http://localhost:${PORT}`);
-  // One-launch ops console: run the job worker IN-PROCESS so button-clicks in the
-  // console actually execute. The recurring SCHEDULER stays OFF by default (this
-  // is a manual-control tool — nothing auto-runs unless OPS_SCHEDULER=1). Disable
-  // the worker entirely with OPS_INPROC_WORKER=0 (e.g. to run worker.js separately).
-  if (process.env.OPS_INPROC_WORKER !== "0") {
-    try {
-      const { startInProcessWorker } = await import("./worker.js");
-      startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
-      console.log(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
-    } catch (err) {
-      console.error("[ops] failed to start in-process worker:", err.message);
+if (process.env.PB_NO_LISTEN !== "1") {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, async () => {
+    console.log(`Pandoro's Box running at http://localhost:${PORT}`);
+    // One-launch ops console: run the job worker IN-PROCESS so button-clicks in the
+    // console actually execute. The recurring SCHEDULER stays OFF by default (this
+    // is a manual-control tool — nothing auto-runs unless OPS_SCHEDULER=1). Disable
+    // the worker entirely with OPS_INPROC_WORKER=0 (e.g. to run worker.js separately).
+    if (process.env.OPS_INPROC_WORKER !== "0") {
+      try {
+        const { startInProcessWorker } = await import("./worker.js");
+        startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
+        console.log(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
+      } catch (err) {
+        console.error("[ops] failed to start in-process worker:", err.message);
+      }
     }
-  }
-});
+  });
+}
+
+export { app };
 
 
