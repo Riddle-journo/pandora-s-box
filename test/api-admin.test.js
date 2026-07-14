@@ -1,0 +1,83 @@
+// Admin auth + privacy HTTP tests against the real Express app via the
+// integration harness. Starts the server once (before) and closes it once
+// (after).
+import { before, after, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { startTestServer } from "./helpers/server.js";
+
+let srv;
+
+before(async () => {
+  srv = await startTestServer();
+});
+
+after(async () => {
+  await srv.close();
+});
+
+describe("admin auth", () => {
+  it("GET /api/admin/tips: no x-admin-token header -> 401", async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/tips");
+    assert.equal(res.status, 401);
+  });
+
+  it('GET /api/admin/tips: header "wrong-token" -> 401', async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/tips", {
+      headers: { "x-admin-token": "wrong-token" },
+    });
+    assert.equal(res.status, 401);
+  });
+
+  it("GET /api/admin/tips: correct header -> 200", async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/tips", {
+      headers: { "x-admin-token": srv.adminToken },
+    });
+    assert.equal(res.status, 200);
+  });
+
+  const protectedPaths = [
+    "/api/admin/ops/summary",
+    "/api/admin/stories",
+    "/api/admin/investigation-leads",
+    "/api/admin/conflicts",
+    "/api/admin/ops/leads",
+  ];
+
+  for (const p of protectedPaths) {
+    it(`GET ${p}: no x-admin-token header -> 401`, async () => {
+      const res = await fetch(srv.baseUrl + p);
+      assert.equal(res.status, 401);
+    });
+  }
+});
+
+describe("privacy pins", () => {
+  it("GET /api/conflicts -> 404 (not a public route)", async () => {
+    const res = await fetch(srv.baseUrl + "/api/conflicts");
+    assert.equal(res.status, 404);
+  });
+
+  it("GET /api/stories -> 404 (not a public route)", async () => {
+    const res = await fetch(srv.baseUrl + "/api/stories");
+    assert.equal(res.status, 404);
+  });
+
+  it("GET /api/politicians/some-id/conflicts -> 404 (not a public route)", async () => {
+    const res = await fetch(srv.baseUrl + "/api/politicians/some-id/conflicts");
+    assert.equal(res.status, 404);
+  });
+});
+
+describe("admin ops jobs", () => {
+  it('POST /api/admin/ops/jobs with correct token and {"type":"nonsense_type"} -> observed non-2xx (400)', async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/ops/jobs", {
+      method: "POST",
+      headers: {
+        "x-admin-token": srv.adminToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ type: "nonsense_type" }),
+    });
+    assert.equal(res.status, 400);
+  });
+});
