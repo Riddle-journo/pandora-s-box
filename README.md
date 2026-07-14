@@ -28,6 +28,11 @@ ingest.js/fetchers ──┤   cards.js → report cards for politicians/ministr
 - **Store:** SQLite (`data/pandoros.db`, better-sqlite3) — indexed, row-level.
 - **Server:** Express, serves `public/` + a JSON API. Local only (not hosted yet).
 
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the request/job/detector/fetcher
+flow and the facade rules to keep in mind when editing, and
+**[RUNBOOK.md](RUNBOOK.md)** for operating the running site (start/stop,
+backups, health checks, incident response).
+
 ---
 
 ## 1. Setup (one time)
@@ -58,6 +63,20 @@ DATA_GOV_IN_KEY=...               # for MCA directorship download (optional)
 ```
 
 > Windows / PowerShell: if `npm.ps1` is blocked, run `node …` directly (every command below is `node`).
+
+### `npm run` scripts
+
+| Script | Effect |
+|---|---|
+| `npm start` / `npm run ops` | `node server/index.js` — website (`ops` also runs the job worker in-process, see §8b) |
+| `npm test` | `node --test test/*.test.js` |
+| `npm run smoke` | `node scripts/smoke.js` — post-start smoke check |
+| `npm run lint` | `eslint .` |
+| `npm run check` | lint + test + smoke, in order — the one command to run before shipping a change |
+| `npm run prod:start` / `prod:stop` / `prod:status` / `prod:logs` | PM2 process control (`ecosystem.config.cjs`) — see `RUNBOOK.md` |
+| `npm run db:backup` / `db:check` / `db:doctor` / `db:vacuum` / `db:maintain` | `server/db-maintenance.js` subcommands — see `RUNBOOK.md` |
+| `npm run worker` / `worker:once` | `node server/worker.js` standalone (long-running / drain-and-exit) |
+| `npm run reingest:party-finance` | `node scripts/reingest-party-finance.js` |
 
 ---
 
@@ -290,6 +309,25 @@ node server/reset-data.js --apply        # delete ALL reports + remove demo reps
 node server/reset-data.js --reports --apply    # only wipe reports
 node scripts/migrate-to-sqlite.js         # one-time db.json → SQLite (already done)
 ```
+
+One-off / occasional scripts live in **`scripts/`** (moved out of `server/` in
+Task 5.13 so `server/` holds only code the running app imports):
+
+```bash
+node scripts/add-politician.js            # add a single politician by hand
+node scripts/backfill-entities.js         # backfill the entities table from existing evidence
+node scripts/backfill-fts.js              # rebuild the FTS5 full-text index
+node scripts/backfill-relations.js        # backfill the relationships graph
+node scripts/entities-review.js           # review/inspect entity dedup candidates
+node scripts/split-shared-entities.js     # split politicians wrongly sharing one entity
+node scripts/fix-rs-myneta-mismatch.js    # fix Rajya Sabha ↔ MyNeta ID mismatches
+node scripts/reingest-party-finance.js    # re-run the party-finance extractor (npm run reingest:party-finance)
+node scripts/smoke.js                     # post-deploy smoke check (npm run smoke)
+```
+
+`node server/db-maintenance.js {backup|check|doctor|vacuum|all}` (or the
+`npm run db:*` scripts below) covers DB-file-level maintenance and is
+documented in `RUNBOOK.md`.
 
 ---
 
