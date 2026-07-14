@@ -103,3 +103,46 @@ describe("content/list API golden master", () => {
     assert.ok("error" in body);
   });
 });
+
+describe("pagination edge cases (pinned before clamp-helper refactor)", () => {
+  const admin = { headers: { "x-admin-token": "test-admin-token" } };
+
+  // /api/leaderboard does not read limit/offset params (hardcoded slice(0,50)),
+  // so edge params are ignored: always 200 + object with a rows array.
+  for (const qs of ["limit=0", "limit=99999", "limit=-5", "offset=-1"]) {
+    it(`GET /api/leaderboard?${qs} -> 200 object with rows array`, async () => {
+      const res = await fetch(srv.baseUrl + "/api/leaderboard?" + qs);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(typeof body, "object");
+      assert.ok(!Array.isArray(body));
+      assert.ok(Array.isArray(body.rows));
+      assert.ok(body.rows.length <= 50);
+    });
+  }
+
+  // /api/scandals filters but does not paginate: edge params ignored -> 200 array.
+  for (const qs of ["limit=0", "limit=99999", "limit=-5", "offset=-1"]) {
+    it(`GET /api/scandals?${qs} -> 200 array`, async () => {
+      const res = await fetch(srv.baseUrl + "/api/scandals?" + qs);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.ok(Array.isArray(body));
+    });
+  }
+
+  // /api/admin/ops/jobs ignores limit/offset (hardcoded slice(0,200)); requires
+  // the admin token -> 200 object with counts + jobs array.
+  for (const qs of ["limit=0", "limit=99999", "limit=-5", "offset=-1"]) {
+    it(`GET /api/admin/ops/jobs?${qs} -> 200 object with jobs array`, async () => {
+      const res = await fetch(srv.baseUrl + "/api/admin/ops/jobs?" + qs, admin);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(typeof body, "object");
+      assert.ok(!Array.isArray(body));
+      assert.ok("counts" in body);
+      assert.ok(Array.isArray(body.jobs));
+      assert.ok(body.jobs.length <= 200);
+    });
+  }
+});

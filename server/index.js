@@ -619,10 +619,17 @@ function rosterRows({ office, state, hasReport, hasEvidence, q } = {}) {
   return rows;
 }
 
+// Clamp copy-pasted page/pageSize query params into a safe range and derive the
+// row offset. Preserves the previous inline Math.max/Math.min behavior exactly.
+function pageParams(query, { defLimit, maxLimit }) {
+  const page = Math.max(1, Number(query.page) || 1);
+  const pageSize = Math.max(1, Math.min(maxLimit, Number(query.pageSize) || defLimit));
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
 // Roster explorer: filter/paginate reps + per-rep evidence count and latest grade.
 app.get("/api/admin/ops/roster", requireAdmin, (req, res) => {
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const pageSize = Math.max(1, Math.min(500, Number(req.query.pageSize) || 50));
+  const { page, pageSize } = pageParams(req.query, { defLimit: 50, maxLimit: 500 });
   const rows = rosterRows(req.query);
   const total = rows.length;
   const start = (page - 1) * pageSize;
@@ -700,15 +707,14 @@ app.get("/api/admin/ops/precision", requireAdmin, (req, res) => {
 
 // Flags browser: filter by detector/severity/status/subject, paginated.
 app.get("/api/admin/ops/flags", requireAdmin, (req, res) => {
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const pageSize = Math.max(1, Math.min(200, Number(req.query.pageSize) || 50));
+  const { page, pageSize, offset } = pageParams(req.query, { defLimit: 50, maxLimit: 200 });
   const { total, rows } = listFlags({
     detector: req.query.detector || undefined,
     severity: req.query.severity || undefined,
     status: req.query.status || "active",
     politicianId: req.query.politicianId || undefined,
     q: req.query.q || undefined,
-    limit: pageSize, offset: (page - 1) * pageSize,
+    limit: pageSize, offset,
   });
   res.json({ total, page, pageSize, counts: flagCounts(), rows });
 });
@@ -722,8 +728,7 @@ app.get("/api/admin/ops/flags/:id", requireAdmin, (req, res) => {
 // Lead pipeline browser — every status (detected → proposed → published /
 // dismissed), searchable, with the full evidence citations in each row.
 app.get("/api/admin/ops/leads", requireAdmin, (req, res) => {
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const pageSize = Math.max(1, Math.min(200, Number(req.query.pageSize) || 50));
+  const { page, pageSize } = pageParams(req.query, { defLimit: 50, maxLimit: 200 });
   let rows = listLeads({ status: req.query.status || undefined });
   if (req.query.vector) rows = rows.filter((l) => l.vector === req.query.vector);
   if (req.query.q) {
