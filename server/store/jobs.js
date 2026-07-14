@@ -1,12 +1,9 @@
 // Jobs domain extracted from store.js. Owns the SQLite-backed job queue table
 // and its queue-control helpers. Re-exported through the store.js facade.
-// NOTE: `id` is imported from ../store.js. It is only ever CALLED at runtime
-// (inside enqueueJob), never at module-init, so the store.js↔jobs.js cycle is
-// safe (live binding is assigned before any job is enqueued). Meta-dependent
-// helpers (isQueuePaused/setQueuePaused) and jobCounts (needs the shared `tally`
-// helper) stay in store.js to avoid a load-time dependency cycle.
+// Meta-dependent helpers (isQueuePaused/setQueuePaused) and jobCounts (needs
+// the shared `tally` helper) stay in store.js.
 import { db } from "./db.js";
-import { id } from "../store.js";
+import { id } from "./shared.js";
 
 // ---- Jobs (minimal SQLite-backed job queue) ----
 // Sequential, single-process worker consumes these. No new deps: claim/complete
