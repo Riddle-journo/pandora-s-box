@@ -12,6 +12,7 @@ export async function startTestServer() {
   process.env.PB_NO_LISTEN = "1";
   process.env.PANDOROS_DB_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pb-api-")), "test.db");
   process.env.ADMIN_TOKEN = "test-admin-token";
+  process.env.RATE_LIMIT = "0"; // whole suite hits the app from one IP
 
   const mod = await import("../../server/index.js");
   const server = mod.app.listen(0);

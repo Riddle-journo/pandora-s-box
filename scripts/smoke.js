@@ -35,6 +35,7 @@ async function main() {
       PANDOROS_DB_PATH: dbPath,
       OPS_INPROC_WORKER: "0",
       ADMIN_TOKEN: "smoke-test-token",
+      RATE_LIMIT: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

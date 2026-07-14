@@ -10,6 +10,7 @@ dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), ".
 import { createRequire } from "node:module";
 import express from "express";
 import compression from "compression";
+import rateLimit from "express-rate-limit";
 const pkgVersion = createRequire(import.meta.url)("../package.json").version;
 import { requireAdmin } from "./auth.js";
 import {
@@ -68,6 +69,35 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// ---- Rate limiting ----
+// RATE_LIMIT=0 disables both limiters (the test suite and smoke scripts hammer
+// the app from one IP; they set it). Window/max are env-tunable so the rate-limit
+// test can force tiny windows without waiting minutes.
+// Behind a reverse proxy in production, trust the first hop so limits key on the
+// real client IP, not the proxy's. NOT enabled in dev — anyone could spoof XFF.
+if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
+if (process.env.RATE_LIMIT !== "0") {
+  // Global /api limiter: generous — it exists to stop runaway scripts/scrapes,
+  // not to inconvenience the SPA (which makes a handful of calls per view).
+  app.use("/api", rateLimit({
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+    max: Number(process.env.RATE_LIMIT_MAX) || 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "rate limited" },
+  }));
+  // Admin brute-force limiter: counts ONLY failed requests (401s), so real
+  // admin traffic is never throttled while token guessing dies fast.
+  app.use("/api/admin", rateLimit({
+    windowMs: Number(process.env.RATE_LIMIT_ADMIN_WINDOW_MS) || 15 * 60_000,
+    max: Number(process.env.RATE_LIMIT_ADMIN_MAX) || 20,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "rate limited" },
+  }));
+}
 
 // ---- Public API ----
 app.get("/healthz", (_req, res) => {
