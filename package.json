@@ -28,7 +28,8 @@
     "db:maintain": "node server/db-maintenance.js all",
     "test": "node --test test/*.test.js",
     "smoke": "node scripts/smoke.js",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check": "npm run lint && npm test && npm run smoke"
   },
   "engines": {
     "node": ">=18"
