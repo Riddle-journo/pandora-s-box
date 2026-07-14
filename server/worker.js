@@ -25,7 +25,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AsyncLocalStorage } from "node:async_hooks";
+import { jobLogContext } from "./util/job-context.js";
 import {
   claimNextJob, peekNextJob, completeJob, failJob, enqueueJob,
   listPoliticians, getPolitician, sourceHealth, pruneFetchRuns,
@@ -441,7 +441,10 @@ export const HANDLERS = {
 // timers/mapLimit automatically. Output from code running inside job A lands in
 // A's live-log buffer; output outside any job (boot, HTTP, scheduler) passes
 // straight through to the real console.
-export const jobLogContext = new AsyncLocalStorage(); // store = jobId string
+// jobLogContext itself lives in util/job-context.js (dependency-free) so the
+// structured logger can import it without pulling in the whole worker;
+// re-exported here so existing importers keep working.
+export { jobLogContext } from "./util/job-context.js";
 
 let consolePatched = false;
 export function patchConsoleForJobs() {
