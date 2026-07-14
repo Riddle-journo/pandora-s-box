@@ -1,32 +1,63 @@
-// Investigator-privacy invariants, enforced at the source level (no server
-// boot needed): the public API surface in server/index.js must not expose
-// conflicts or stories, and every /api/admin route must be requireAdmin-gated.
+// Investigator-privacy invariants, enforced at the HTTP level against a real
+// running server: conflicts and stories must never be public, and the entire
+// /api/admin surface must be token-gated (no x-admin-token -> 401).
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { startTestServer } from "./helpers/server.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const src = fs.readFileSync(path.join(__dirname, "..", "server", "index.js"), "utf8");
+let server;
 
-test("no public conflicts or stories routes exist", () => {
-  assert.ok(!/app\.get\("\/api\/conflicts"/.test(src), "no GET /api/conflicts");
-  assert.ok(!/app\.get\("\/api\/politicians\/:id\/conflicts"/.test(src), "no per-rep conflicts route");
-  assert.ok(!/app\.get\("\/api\/stories"/.test(src), "no GET /api/stories");
-  assert.ok(!/app\.get\("\/api\/stories\/:slug"/.test(src), "no GET /api/stories/:slug");
+test.before(async () => {
+  server = await startTestServer();
 });
 
-test("every /api/admin route is requireAdmin-gated", () => {
-  const adminRoutes = [...src.matchAll(/app\.(get|post)\("(\/api\/admin[^"]*)",\s*([A-Za-z]+)/g)];
-  assert.ok(adminRoutes.length >= 10, "admin routes found");
-  for (const [, , route, middleware] of adminRoutes) {
-    assert.equal(middleware, "requireAdmin", `${route} is gated`);
+test.after(async () => {
+  await server.close();
+});
+
+test("no public conflicts or stories routes exist", async () => {
+  const paths = [
+    "/api/conflicts",
+    "/api/politicians/x/conflicts",
+    "/api/stories",
+    "/api/stories/some-slug",
+  ];
+  for (const p of paths) {
+    const res = await fetch(server.baseUrl + p);
+    assert.equal(res.status, 404, `${p} is not public`);
   }
 });
 
-test("investigation leads are only reachable under /api/admin", () => {
-  const leadRoutes = [...src.matchAll(/app\.(get|post)\("([^"]*(?:conflicts|investigation-leads|stories)[^"]*)"/g)]
-    .map((m) => m[2]);
-  for (const r of leadRoutes) assert.ok(r.startsWith("/api/admin/"), `${r} is admin-only`);
+test("every /api/admin route is requireAdmin-gated", async () => {
+  const adminRoutes = [
+    "/api/admin/tips",
+    "/api/admin/scandal-proposals",
+    "/api/admin/investigation-leads",
+    "/api/admin/conflicts",
+    "/api/admin/stories",
+    "/api/admin/ops/summary",
+    "/api/admin/ops/roster",
+    "/api/admin/ops/jobs",
+    "/api/admin/ops/engine",
+    "/api/admin/ops/flags",
+    "/api/admin/ops/leads",
+    "/api/admin/ops/queue",
+    "/api/admin/ops/precision",
+  ];
+  for (const route of adminRoutes) {
+    const res = await fetch(server.baseUrl + route);
+    assert.equal(res.status, 401, `${route} requires admin token`);
+  }
+});
+
+test("investigation leads are only reachable under /api/admin", async () => {
+  const paths = [
+    "/api/investigation-leads",
+    "/api/conflicts",
+    "/api/stories",
+  ];
+  for (const p of paths) {
+    const res = await fetch(server.baseUrl + p);
+    assert.equal(res.status, 404, `${p} is not reachable outside /api/admin`);
+  }
 });
