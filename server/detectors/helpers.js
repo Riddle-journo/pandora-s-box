@@ -9,6 +9,7 @@ const CR = 1e7, L = 1e5;
 export { CR, L };
 
 // ── Shared statistics helpers ────────────────────────────────────────────────
+/** @param {number[]} xs @returns {{ mean: number, std: number, n: number }} */
 export function meanStd(xs) {
   const n = xs.length;
   if (!n) return { mean: 0, std: 0, n: 0 };
@@ -21,6 +22,7 @@ export function meanStd(xs) {
 // Deviation, so a deviation must clear BOTH a significance test and an effect-
 // size band before it flags. Returns null when there are too few numbers.
 const BENFORD_P = Array.from({ length: 9 }, (_, i) => Math.log10(1 + 1 / (i + 1)));
+/** First-digit Benford deviation. @param {number[]} values @param {{ minN?: number }} [opts] @returns {{ n: number, chi2: number, maxDev: number, digits: number[] } | null} null when the sample is below minN */
 export function benfordStats(values, { minN = 40 } = {}) {
   const digits = [];
   for (const v of values) {
@@ -46,6 +48,7 @@ export function benfordStats(values, { minN = 40 } = {}) {
 // says what the row shows, so the lead (and later GLM) can cite it directly.
 let _evStmt = null;
 const evUrlStmt = () => (_evStmt ??= db.prepare("SELECT url, data FROM evidence WHERE id = ?"));
+/** Citation stub every flag must carry. @param {string} evidence_id @param {string} note @returns {{ evidence_id: string, note: string }} */
 export function evidenceRef(evidence_id, note) {
   if (!evidence_id) return { note };
   try {
@@ -85,6 +88,7 @@ export function fromLegacy(candidates, ctx) {
 
 // Stable identity for a declared property across affidavits: type + district +
 // owner (value is intentionally excluded — a revaluation must not read as a new item).
+/** Stable dedupe key for a flagged item. @param {object} it @returns {string} */
 export function propKey(it) {
   return [it.property_type, it.district, it.owner].map((x) => String(x ?? "").toLowerCase().trim()).join("|");
 }
@@ -117,6 +121,7 @@ export function gatherNexusLegs(ctx, p, awardees, selfEnt, interestEdges) {
 }
 
 // Longest control chain INTO a company (how many holder-hops deep), bounded.
+/** Depth of an ownership chain (shell-company laddering). @param {string} node @param {Map<string,string[]>} controlledBy @param {Set<string>} seen @param {number} depth @param {number} cap @returns {number} */
 export function chainDepth(node, controlledBy, seen, depth, cap) {
   if (depth >= cap || seen.has(node)) return depth;
   seen.add(node);
@@ -132,6 +137,7 @@ export function chainDepth(node, controlledBy, seen, depth, cap) {
 }
 
 // Compact value formatter for the generic detector's prose (rupee scale-aware).
+/** Human-format a rupee amount for flag notes. @param {number|null|undefined} v @returns {string} */
 export function fmtVal(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return String(v);
