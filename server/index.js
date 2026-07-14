@@ -11,8 +11,10 @@ import { createRequire } from "node:module";
 import express from "express";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
-const pkgVersion = createRequire(import.meta.url)("../package.json").version;
 import { requireAdmin } from "./auth.js";
+import { logger } from "./util/log.js";
+const pkgVersion = createRequire(import.meta.url)("../package.json").version;
+const log = logger("http");
 import {
   listPoliticians, listPoliticiansWithLatest, listPoliticiansWithCard, getPolitician, listEvidence,
   latestReport, reportHistory, latestCard, cardLeaderboardRows, addTip, listTips, reviewTip,
@@ -37,8 +39,8 @@ import adminRouter from "./routes/admin.js";
 import contentRouter from "./routes/content.js";
 import { decideLeadShared, asyncH } from "./routes/util.js";
 
-process.on("unhandledRejection", (err) => console.error("[unhandledRejection]", err));
-process.on("uncaughtException", (err) => { console.error("[uncaughtException]", err); process.exit(1); });
+process.on("unhandledRejection", (err) => log.error({ err }, "unhandledRejection"));
+process.on("uncaughtException", (err) => { log.fatal({ err }, "uncaughtException"); process.exit(1); });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Currency-string parser shared by report/leaderboard summarization helpers below.
@@ -54,7 +56,7 @@ app.use((req, res, next) => {
   const t0 = Date.now();
   res.on("finish", () => {
     if (req.path === "/healthz" || !req.path.startsWith("/api")) return;
-    console.log(`[req] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - t0}ms`);
+    log.info({ method: req.method, url: req.originalUrl, status: res.statusCode, ms: Date.now() - t0 }, "req");
   });
   next();
 });
@@ -109,7 +111,7 @@ app.get("/healthz", (_req, res) => {
       queue: jobCounts(),
     });
   } catch (err) {
-    console.error(err);
+    log.error({ err }, "healthz failed");
     res.status(500).json({ ok: false });
   }
 });
@@ -323,7 +325,7 @@ app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) 
     const report = await generateReport(p.id, { mode });
     res.json({ ok: true, overall_grade: report.overall_grade, overall_score: report.overall_score, headline: report.headline });
   } catch (err) {
-    console.error("[generate-endpoint]", err);
+    log.error({ err }, "generate-endpoint failed");
     res.status(500).json({ error: "internal error" });
   }
 }));
@@ -341,22 +343,22 @@ app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) 
 app.use(adminOpsRouter);
 
 app.use((err, req, res, next) => {
-  console.error("[http]", req.method, req.path, err);
+  log.error({ method: req.method, path: req.path, err }, "unhandled route error");
   res.status(500).json({ ok: false, error: "internal error" });
 });
 
 if (process.env.PB_NO_LISTEN !== "1") {
   const { validateStartupConfig } = await import("./config.js");
   const { fatal, warnings } = validateStartupConfig();
-  for (const w of warnings) console.warn(`[config] WARNING: ${w}`);
+  for (const w of warnings) log.warn(`[config] WARNING: ${w}`);
   if (fatal.length > 0) {
-    for (const f of fatal) console.error(`[config] FATAL: ${f}`);
+    for (const f of fatal) log.error(`[config] FATAL: ${f}`);
     process.exit(1);
   }
   const PORT = process.env.PORT || 3000;
   let stopWorker = null;
   const server = app.listen(PORT, async () => {
-    console.log(`Pandoro's Box running at http://localhost:${PORT}`);
+    log.info(`Pandoro's Box running at http://localhost:${PORT}`);
     // One-launch ops console: run the job worker IN-PROCESS so button-clicks in the
     // console actually execute. The recurring SCHEDULER stays OFF by default (this
     // is a manual-control tool — nothing auto-runs unless OPS_SCHEDULER=1). Disable
@@ -365,9 +367,9 @@ if (process.env.PB_NO_LISTEN !== "1") {
       try {
         const { startInProcessWorker } = await import("./worker.js");
         stopWorker = startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
-        console.log(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
+        log.info(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
       } catch (err) {
-        console.error("[ops] failed to start in-process worker:", err.message);
+        log.error({ err }, "[ops] failed to start in-process worker");
       }
     }
   });
@@ -378,19 +380,19 @@ if (process.env.PB_NO_LISTEN !== "1") {
   // runs when worker.js is the entrypoint, so there's no double handling here.)
   let shuttingDown = false;
   const shutdown = (signal) => {
-    if (shuttingDown) { console.error(`[shutdown] second ${signal} — forcing exit`); process.exit(130); }
+    if (shuttingDown) { log.error(`[shutdown] second ${signal} — forcing exit`); process.exit(130); }
     shuttingDown = true;
-    console.log(`[shutdown] ${signal} received — draining…`);
-    setTimeout(() => { console.error("[shutdown] drain timed out after 10s — forcing exit"); process.exit(1); }, 10_000).unref();
-    try { if (typeof stopWorker === "function") stopWorker(); } catch (err) { console.error("[shutdown] stopWorker:", err.message); }
+    log.info(`[shutdown] ${signal} received — draining…`);
+    setTimeout(() => { log.error("[shutdown] drain timed out after 10s — forcing exit"); process.exit(1); }, 10_000).unref();
+    try { if (typeof stopWorker === "function") stopWorker(); } catch (err) { log.error({ err }, "[shutdown] stopWorker failed"); }
     server.close(async () => {
       try {
         const { closeDb } = await import("./store/db.js");
         closeDb();
       } catch (err) {
-        console.error("[shutdown] closeDb:", err.message);
+        log.error({ err }, "[shutdown] closeDb failed");
       }
-      console.log("[shutdown] clean exit");
+      log.info("[shutdown] clean exit");
       process.exit(0);
     });
   };
