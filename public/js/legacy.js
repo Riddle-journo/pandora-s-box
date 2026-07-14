@@ -8,6 +8,7 @@ import {
 } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
+import { hideAllViews } from "./views.js";
 
 // ================= HOME =================
 // ================= SEARCH AUTOCOMPLETE =================
@@ -1399,15 +1400,6 @@ const VERDICT_LABEL = {
   FULL: { txt: "Full accountability", cls: "vd-full" },
 };
 let scandalsCache = null;
-
-function hideAllViews() {
-  ["#home-view", "#browse-view", "#report-view", "#compare-view", "#govwatch-view", "#scandal-view",
-   "#scorecards-view", "#funding-view", "#admin-view", "#leaderboard-view", "#issues-view",
-   "#issue-detail-view", "#tips-view", "#ops-view", "#org-view"].forEach((s) => { const e = $(s); if (e) e.hidden = true; });
-  // Leaving any view stops the ops auto-refresh + log polling (restarted by showOps).
-  if (window.__opsTimer) { clearInterval(window.__opsTimer); window.__opsTimer = null; }
-  if (window.__opsDrawerTimer) { clearInterval(window.__opsDrawerTimer); window.__opsDrawerTimer = null; }
-}
 
 async function showGovWatch() {
   hideAllViews();
