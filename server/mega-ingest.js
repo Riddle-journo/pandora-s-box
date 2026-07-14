@@ -16,6 +16,8 @@ import { UA, htmlToText, fetchPdfText, fetchText, fetchJson, sleep } from "./fet
 import { renderPageText, closeBrowser } from "./fetchers/playwright-portal.js";
 import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "./fetchers/opendata.js";
 import { buildTranslitNeedles, textMatchesTranslit } from "./fetchers/translit.js";
+import { consoleStyle } from "./util/log.js";
+const clog = consoleStyle("mega-ingest");
 
 const MEGA_DIR = path.join(process.cwd(), "server", "data", "mega");
 const CACHE_DIR = path.join(process.cwd(), "server", "data", "l1-cache");
@@ -472,7 +474,7 @@ function writeMegaCache(cfg, rows, totalScanned) {
     rows,
   };
   fs.writeFileSync(path.join(CACHE_DIR, `mega-${cfg.id}.json`), JSON.stringify(out));
-  console.log(`[mega] ${cfg.id}: ${rows.length} politician-matching rows kept (of ${totalScanned} scanned)`);
+  clog.log(`[mega] ${cfg.id}: ${rows.length} politician-matching rows kept (of ${totalScanned} scanned)`);
   // Single funnel every successful refreshOne() branch returns through — record
   // it here so mega sources show up in the SAME Source Health ledger/Ops Console
   // as the 22 per-politician fetchers (they previously had zero visibility there).
@@ -497,7 +499,7 @@ const LEDGER_VERSION = "opendata-ledger@1";
 function writeLedgerFacts(cfg, rows, meta = {}) {
   const L = cfg.ledger;
   if (!L?.subject || !L.metrics?.length) {
-    console.log(`[mega] ${cfg.id}: no ledger mapping — nothing to write`);
+    clog.log(`[mega] ${cfg.id}: no ledger mapping — nothing to write`);
     return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "missing cfg.ledger", ms: Date.now() - (cfg.__t0 ?? Date.now()) });
   }
   let facts = 0, skipped = 0;
@@ -528,7 +530,7 @@ function writeLedgerFacts(cfg, rows, meta = {}) {
     meta: { id: `mega-${cfg.id}`, title: cfg.title, summary: cfg.summary, match: "none", tier: cfg.tier,
       ledger: true, subjects: subjects.size, source_updated: meta.updated ?? null, extractor_version: LEDGER_VERSION },
   }));
-  console.log(`[mega] ${cfg.id}: ${facts} facts written across ${subjects.size} subjects (of ${rows.length} rows, ${skipped} cells skipped)${meta.updated ? `  [source updated ${meta.updated}]` : ""}`);
+  clog.log(`[mega] ${cfg.id}: ${facts} facts written across ${subjects.size} subjects (of ${rows.length} rows, ${skipped} cells skipped)${meta.updated ? `  [source updated ${meta.updated}]` : ""}`);
   recordFetchRun({ source: `mega:${cfg.id}`, ok: 1, items: facts, ms: Date.now() - (cfg.__t0 ?? Date.now()) });
 }
 
@@ -571,7 +573,7 @@ const CAP = 5000; // max kept rows per dataset — evidence content is capped an
 // to do. Recording it as ok:1/items:0 lands it in QUIET, not a false ROTTED
 // alarm (see server/health.js classifyHealth).
 function notConfigured(cfg) {
-  console.log(`[mega] ${cfg.id}: not configured — ${cfg.note}`);
+  clog.log(`[mega] ${cfg.id}: not configured — ${cfg.note}`);
   recordFetchRun({ source: `mega:${cfg.id}`, ok: 1, items: 0, ms: Date.now() - (cfg.__t0 ?? Date.now()) });
 }
 
@@ -625,7 +627,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       for (const u of cfg.urls) {
         const f = path.join(rawDir, u.split("/").pop().split("?")[0] || "part.csv");
         if (!rematchOnly || !fs.existsSync(f)) {
-          console.log(`[mega] ${cfg.id}: downloading ${u} (large — be patient)…`);
+          clog.log(`[mega] ${cfg.id}: downloading ${u} (large — be patient)…`);
           await downloadToFile(u, f);
         }
         // Line-streamed filter: never loads the file into memory. Naive comma
@@ -635,7 +637,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
           total++;
           if (rows.length < CAP && needles.some((n) => normLine(line).includes(n))) rows.push(line.split(","));
         }
-        console.log(`[mega] ${cfg.id}: scanned ${total} lines so far, kept ${rows.length}`);
+        clog.log(`[mega] ${cfg.id}: scanned ${total} lines so far, kept ${rows.length}`);
       }
       return writeMegaCache(cfg, rows, total);
     }
@@ -661,11 +663,11 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         const tables = parseHtmlTables(html);
         const t = tables.length ? tables.reduce((a, b) => (b.length > a.length ? b : a)) : [];
         const body = t.slice(cfg.headerRows ?? 1);
-        if (!body.length) { if (++emptyStreak >= 3) { console.log(`[mega] ${cfg.id}: stopping at page ${pg} (3 empty pages)`); break; } continue; }
+        if (!body.length) { if (++emptyStreak >= 3) { clog.log(`[mega] ${cfg.id}: stopping at page ${pg} (3 empty pages)`); break; } continue; }
         emptyStreak = 0;
         fs.appendFileSync(rawFile, JSON.stringify({ pg, rows: body }) + "\n");
         for (const r of body) { total++; if (rows.length < CAP && matchRow(needles, r)) rows.push(r); }
-        if (pg % 25 === 0) console.log(`[mega] ${cfg.id}: page ${pg}, ${total} rows scanned, ${rows.length} kept`);
+        if (pg % 25 === 0) clog.log(`[mega] ${cfg.id}: page ${pg}, ${total} rows scanned, ${rows.length} kept`);
         await new Promise((r) => setTimeout(r, cfg.delayMs ?? 1200));
       }
       return writeMegaCache(cfg, rows, total);
@@ -706,13 +708,13 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         await new Promise((r) => setTimeout(r, cfg.delayMs ?? 1500));
       }
       await closeBrowser().catch(() => {});
-      if (!total) return console.log(`[mega] ${cfg.id}: no content (playwright not installed, or page empty) — skipped`);
+      if (!total) return clog.log(`[mega] ${cfg.id}: no content (playwright not installed, or page empty) — skipped`);
       return writeMegaCache(cfg, rows, total);
     }
     if (cfg.kind === "s3-sync") {
       // Cloud bulk corpus. We do NOT pull 1TB — record the access recipe and,
       // if the AWS CLI is present, list the top prefixes so the owner can target.
-      console.log(`[mega] ${cfg.id}: bulk S3 corpus. Manual/targeted pull only:\n  ${cfg.note}`);
+      clog.log(`[mega] ${cfg.id}: bulk S3 corpus. Manual/targeted pull only:\n  ${cfg.note}`);
       return; // intentionally no cache — this is a documented access pointer
     }
     if (cfg.kind === "browser-capture") {
@@ -724,7 +726,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       // no browser at run time). Discovery only — writes NO politician cache.
       const { getBrowser } = await import("./fetchers/playwright-portal.js");
       const browser = await getBrowser();
-      if (!browser) return console.log(`[mega] ${cfg.id}: playwright not installed — skipped`);
+      if (!browser) return clog.log(`[mega] ${cfg.id}: playwright not installed — skipped`);
       fs.mkdirSync(rawDir, { recursive: true });
       const captured = [];
       let page;
@@ -736,21 +738,21 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
             const u = res.url();
             if (!/json/i.test(ct) && !/\/api\/|\.json(\?|$)/i.test(u)) return;
             if (/google|gstatic|analytics|recaptcha|font|\.css|\.js(\?|$)/i.test(u)) return;
-            let sample = ""; try { sample = (await res.text()).slice(0, 600); } catch (err) { console.warn("[mega-ingest] response body read failed:", err?.message ?? err); }
+            let sample = ""; try { sample = (await res.text()).slice(0, 600); } catch (err) { clog.warn("[mega-ingest] response body read failed:", err?.message ?? err); }
             captured.push({ url: u, status: res.status(), sample });
-          } catch (err) { console.warn("[mega-ingest] response capture failed:", err?.message ?? err); }
+          } catch (err) { clog.warn("[mega-ingest] response capture failed:", err?.message ?? err); }
         });
         await page.goto(cfg.url, { waitUntil: "networkidle", timeout: cfg.timeoutMs ?? 45000 }).catch(() => {});
         for (const sel of (cfg.clicks ?? [])) { await page.click(sel).catch(() => {}); await page.waitForTimeout(1500).catch(() => {}); }
         await page.waitForTimeout(cfg.settleMs ?? 3000).catch(() => {});
-      } catch (e) { console.error(`[mega] ${cfg.id}: capture error — ${e.message}`); }
+      } catch (e) { clog.error(`[mega] ${cfg.id}: capture error — ${e.message}`); }
       finally { if (page) await page.close().catch(() => {}); await closeBrowser().catch(() => {}); }
       const seen = new Set();
       const uniq = captured.filter((c) => !seen.has(c.url) && seen.add(c.url));
       fs.writeFileSync(path.join(rawDir, "endpoints.json"), JSON.stringify(uniq, null, 2));
-      console.log(`[mega] ${cfg.id}: captured ${uniq.length} JSON endpoint(s) → server/data/mega/${cfg.id}/endpoints.json`);
-      for (const c of uniq.slice(0, 8)) console.log(`  [${c.status}] ${c.url}`);
-      if (!uniq.length) console.log(`  (none — page may need a click/interaction; set cfg.clicks or cfg.settleMs, or the app renders server-side)`);
+      clog.log(`[mega] ${cfg.id}: captured ${uniq.length} JSON endpoint(s) → server/data/mega/${cfg.id}/endpoints.json`);
+      for (const c of uniq.slice(0, 8)) clog.log(`  [${c.status}] ${c.url}`);
+      if (!uniq.length) clog.log(`  (none — page may need a click/interaction; set cfg.clicks or cfg.settleMs, or the app renders server-side)`);
       return; // discovery only — no politician cache
     }
     if (cfg.kind === "pdf-archive") {
@@ -791,7 +793,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         }
         await new Promise((r) => setTimeout(r, cfg.delayMs ?? 800));
       }
-      console.log(`[mega] ${cfg.id}: ${links.length} documents found; harvesting${cfg.titleOnly ? " (title-only)" : ""}…`);
+      clog.log(`[mega] ${cfg.id}: ${links.length} documents found; harvesting${cfg.titleOnly ? " (title-only)" : ""}…`);
       fs.writeFileSync(idx, "");
       // 2. per doc: title match is free; body extract only when needed
       for (const { title, href } of links.slice(0, cfg.maxDocs ?? 3000)) {
@@ -803,7 +805,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         }
         fs.appendFileSync(idx, JSON.stringify({ title, href, text }) + "\n");
         if (rows.length < CAP && matchRow(needles, [title, text].filter(Boolean))) rows.push([title, href, snip(text || title)]);
-        if (total % 50 === 0) console.log(`[mega] ${cfg.id}: ${total}/${links.length} docs, ${rows.length} kept`);
+        if (total % 50 === 0) clog.log(`[mega] ${cfg.id}: ${total}/${links.length} docs, ${rows.length} kept`);
         if (rows.length >= CAP) break;
       }
       return writeMegaCache(cfg, rows, total);
@@ -849,7 +851,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         await sleep(cfg.delayMs ?? 500);
       }
       const capped = items.slice(0, maxDocs);
-      console.log(`[mega] ${cfg.id}: ${capped.length} IA items; harvesting OCR text (${cfg.textFormat ?? "DjVuTXT"})…`);
+      clog.log(`[mega] ${cfg.id}: ${capped.length} IA items; harvesting OCR text (${cfg.textFormat ?? "DjVuTXT"})…`);
       fs.writeFileSync(idx, "");
       const fmt = cfg.textFormat ?? "DjVuTXT";
       for (const it of capped) {
@@ -863,7 +865,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         const itemUrl = `https://archive.org/details/${it.id}`;
         fs.appendFileSync(idx, JSON.stringify({ title: it.title, href: itemUrl, text }) + "\n");
         if (rows.length < CAP && matchDoc(it.title, text)) rows.push([it.title, itemUrl, snip(text || it.title)]);
-        if (total % 50 === 0) console.log(`[mega] ${cfg.id}: ${total}/${capped.length} items, ${rows.length} kept`);
+        if (total % 50 === 0) clog.log(`[mega] ${cfg.id}: ${total}/${capped.length} items, ${rows.length} kept`);
         await sleep(cfg.delayMs ?? 400);
         if (rows.length >= CAP) break;
       }
@@ -876,7 +878,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       if (!cfg.resourceId) return notConfigured(cfg);
       const meta = await ogdResourceMeta(cfg.resourceId);
       const rows = await ogdResourceAll(cfg.resourceId, { maxRows: cfg.maxRows ?? 20000, pageSize: cfg.pageSize ?? 1000 });
-      if (!rows.length) { console.log(`[mega] ${cfg.id}: 0 rows (blocked or empty) — check OGD_API_KEY / resource id`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from OGD", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
+      if (!rows.length) { clog.log(`[mega] ${cfg.id}: 0 rows (blocked or empty) — check OGD_API_KEY / resource id`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from OGD", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
       return writeLedgerFacts(cfg, rows, meta);
     }
     if (cfg.kind === "ckan-datastore") {
@@ -893,12 +895,12 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         if (rows.length >= total) break;
         await new Promise((r) => setTimeout(r, cfg.delayMs ?? 400)); // polite pacing
       }
-      if (!rows.length) { console.log(`[mega] ${cfg.id}: 0 rows (portal blocked/empty — WAF or bad resource id)`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from CKAN", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
+      if (!rows.length) { clog.log(`[mega] ${cfg.id}: 0 rows (portal blocked/empty — WAF or bad resource id)`); return recordFetchRun({ source: `mega:${cfg.id}`, ok: 0, items: 0, error: "no rows from CKAN", ms: Date.now() - (cfg.__t0 ?? Date.now()) }); }
       return writeLedgerFacts(cfg, rows, {});
     }
-    console.log(`[mega] ${cfg.id}: unknown kind ${cfg.kind}`);
+    clog.log(`[mega] ${cfg.id}: unknown kind ${cfg.kind}`);
   } catch (e) {
-    console.error(`[mega] ${cfg.id}: FAILED — ${e.message}`);
+    clog.error(`[mega] ${cfg.id}: FAILED — ${e.message}`);
     // A real failure (network/unzip/parse error) — this is the one path that
     // SHOULD show ROTTED in the Ops Console, unlike the notConfigured()/
     // writeMegaCache() paths above, which are clean runs (ok:1).
@@ -912,7 +914,7 @@ const cmd = argv[0];
 if (cmd === "--refresh" || cmd === "--rematch") {
   const which = argv[1] ?? "all";
   const targets = which === "all" ? MEGA_SOURCES : MEGA_SOURCES.filter((s) => s.id === which);
-  if (!targets.length) { console.error(`[mega] unknown id '${which}'. Known: ${MEGA_SOURCES.map((s) => s.id).join(", ")}`); process.exit(1); }
+  if (!targets.length) { clog.error(`[mega] unknown id '${which}'. Known: ${MEGA_SOURCES.map((s) => s.id).join(", ")}`); process.exit(1); }
   // --max N bounds a first-pass crawl: caps the crawl-count knobs (maxDocs for
   // pdf-archive, maxPages for paged-html) so a heavy source completes in one run.
   // It does NOT touch maxRows (single-file csv/zip datasets stay whole). Re-run
@@ -920,7 +922,7 @@ if (cmd === "--refresh" || cmd === "--rematch") {
   const mi = argv.indexOf("--max");
   const maxN = mi >= 0 ? Number(argv[mi + 1]) : null;
   const needles = buildNeedles();
-  console.log(`[mega] roster: ${needles.length} politician-name needles${maxN ? `  (--max ${maxN})` : ""}`);
+  clog.log(`[mega] roster: ${needles.length} politician-name needles${maxN ? `  (--max ${maxN})` : ""}`);
   for (const cfg of targets) {
     const c = maxN
       ? { ...cfg, maxDocs: Math.min(cfg.maxDocs ?? maxN, maxN), maxPages: Math.min(cfg.maxPages ?? maxN, maxN) }
@@ -932,8 +934,8 @@ if (cmd === "--refresh" || cmd === "--rematch") {
   for (const s of MEGA_SOURCES) {
     const f = path.join(CACHE_DIR, `mega-${s.id}.json`);
     let line = "no cache — run: node server/mega-ingest.js --refresh " + s.id;
-    try { const c = JSON.parse(fs.readFileSync(f, "utf8")); line = `${c.count} matched rows (of ${c.total}), refreshed ${c.fetched_at}`; } catch (err) { console.warn(`[mega-ingest] cache status read failed for ${s.id}:`, err?.message ?? err); }
-    console.log(`[mega] ${s.id}: ${line}`);
+    try { const c = JSON.parse(fs.readFileSync(f, "utf8")); line = `${c.count} matched rows (of ${c.total}), refreshed ${c.fetched_at}`; } catch (err) { clog.warn(`[mega-ingest] cache status read failed for ${s.id}:`, err?.message ?? err); }
+    clog.log(`[mega] ${s.id}: ${line}`);
   }
   process.exit(0);
 }

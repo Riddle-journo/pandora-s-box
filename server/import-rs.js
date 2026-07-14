@@ -15,6 +15,8 @@ import "dotenv/config";
 import { batchUpsertPoliticians, listPoliticians } from "./store.js";
 import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
 import { NORM, nameScore } from "./util/names.js";
+import { consoleStyle } from "./util/log.js";
+const clog = consoleStyle("import-rs");
 
 const RS_API   = "https://sansad.in/api_rs";
 const MYNETA   = "https://www.myneta.info";
@@ -80,13 +82,13 @@ async function findMynetaUrl(name) {
 }
 
 async function main() {
-  console.log("=== Pandoro's Box — Rajya Sabha Import (Digital Sansad) ===\n");
+  clog.log("=== Pandoro's Box — Rajya Sabha Import (Digital Sansad) ===\n");
 
-  console.log("Fetching RS sitting member list from Sansad API…");
+  clog.log("Fetching RS sitting member list from Sansad API…");
   let members;
   try { members = await fetchRsSittingMembers(); }
-  catch (err) { console.error("Failed to fetch RS member list:", err.message); process.exit(1); }
-  console.log(`Got ${members.length} sitting RS members.\n`);
+  catch (err) { clog.error("Failed to fetch RS member list:", err.message); process.exit(1); }
+  clog.log(`Got ${members.length} sitting RS members.\n`);
 
   // Dedup against existing DB
   const existing = new Set(
@@ -98,9 +100,9 @@ async function main() {
     const name = normalizeSansadName(m.name ?? "");
     return name.length >= 2 && !existing.has(name.toLowerCase());
   });
-  console.log(`Already in DB: ${members.length - newMembers.length}  |  New to import: ${newMembers.length}\n`);
+  clog.log(`Already in DB: ${members.length - newMembers.length}  |  New to import: ${newMembers.length}\n`);
 
-  if (!newMembers.length) { console.log("Nothing new. Done."); return; }
+  if (!newMembers.length) { clog.log("Nothing new. Done."); return; }
 
   // Build politician rows
   const politicians = [];
@@ -128,7 +130,7 @@ async function main() {
     done++;
     const tick = myneta_url ? "✓ MyNeta" : "(no affidavit found)";
     if (done % 20 === 0 || done <= 5)
-      console.log(`  [${done}/${newMembers.length}] ${name} — ${party}, ${state} — ${tick}`);
+      clog.log(`  [${done}/${newMembers.length}] ${name} — ${party}, ${state} — ${tick}`);
   });
 
   // Uniqueness backstop: never assign a myneta_url that already belongs to another
@@ -141,35 +143,35 @@ async function main() {
   for (const p of politicians) {
     if (!p.myneta_url) continue;
     if (usedMyneta.has(p.myneta_url)) {
-      console.warn(`  ⚠ ${p.name}: MyNeta URL already assigned to another politician — dropping (fuzzy name collision).`);
+      clog.warn(`  ⚠ ${p.name}: MyNeta URL already assigned to another politician — dropping (fuzzy name collision).`);
       p.myneta_url = null; droppedDup++;
     } else {
       usedMyneta.add(p.myneta_url);
     }
   }
-  if (droppedDup) console.log(`Dropped ${droppedDup} duplicate MyNeta URL(s) to prevent mis-attribution.`);
+  if (droppedDup) clog.log(`Dropped ${droppedDup} duplicate MyNeta URL(s) to prevent mis-attribution.`);
 
-  console.log(`\nBuilt ${politicians.length} RS politician records.`);
+  clog.log(`\nBuilt ${politicians.length} RS politician records.`);
   const found = politicians.filter((p) => p.myneta_url).length;
-  console.log(`MyNeta affidavit found for ${found}/${politicians.length} members.`);
+  clog.log(`MyNeta affidavit found for ${found}/${politicians.length} members.`);
 
   if (!APPLY) {
-    console.log("\nDRY-RUN — no writes. Re-run with --apply to save.");
-    console.log("Sample of what would be added:");
+    clog.log("\nDRY-RUN — no writes. Re-run with --apply to save.");
+    clog.log("Sample of what would be added:");
     politicians.slice(0, 5).forEach((p) =>
-      console.log(`  ${p.name} (${p.party}, ${p.state}) ${p.myneta_url ? "→ " + p.myneta_url : ""}`));
+      clog.log(`  ${p.name} (${p.party}, ${p.state}) ${p.myneta_url ? "→ " + p.myneta_url : ""}`));
     return;
   }
 
   const added = batchUpsertPoliticians(politicians);
-  console.log(`\nWrote ${added.length} new RS members to DB.`);
-  console.log("Total RS members in DB now:", listPoliticians().filter((p) => p.office === "RS").length);
-  console.log("\nNext steps:");
-  console.log("  node server/ingest.js all --office RS          # fetch evidence for RS members");
-  console.log("  node server/report-generator.js all --tier 2 --office RS  # generate RS reports");
+  clog.log(`\nWrote ${added.length} new RS members to DB.`);
+  clog.log("Total RS members in DB now:", listPoliticians().filter((p) => p.office === "RS").length);
+  clog.log("\nNext steps:");
+  clog.log("  node server/ingest.js all --office RS          # fetch evidence for RS members");
+  clog.log("  node server/report-generator.js all --tier 2 --office RS  # generate RS reports");
 }
 
 const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("import-rs.js");
 if (invokedDirectly) {
-  main().catch((err) => { console.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));
+  main().catch((err) => { clog.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));
 }

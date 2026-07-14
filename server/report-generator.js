@@ -26,6 +26,8 @@ import { buildRelations } from "./graph.js";
 import { citationsFor, selectSources } from "./citations.js";
 import { FREE_CHAIN, freeComplete } from "./free-chain.js";
 import { PARAMETERS, SCORING, computeOverall } from "./scoring.js";
+import { consoleStyle } from "./util/log.js";
+const clog = consoleStyle("report-generator");
 export { PARAMETERS, SCORING, computeOverall };
 
 // ── Tone pass (Stage 2): a cheap/free "stylist" that re-voices the reader-
@@ -571,13 +573,13 @@ ${JSON.stringify(payload, null, 2)}`;
   report.narrative_gravity = gravity;
   report.styled = false;
   report.style_version = STYLE_VERSION;
-  if (!out) { console.log(`[tone]   no free stylist available — kept original text`); return report; }
+  if (!out) { clog.log(`[tone]   no free stylist available — kept original text`); return report; }
 
   let parsed;
   try {
     parsed = parseModelJson(out.text);
   } catch (err) {
-    console.warn(`[tone]   unparseable stylist JSON — kept original (${err.message})`);
+    clog.warn(`[tone]   unparseable stylist JSON — kept original (${err.message})`);
     return report;
   }
 
@@ -606,7 +608,7 @@ ${JSON.stringify(payload, null, 2)}`;
 
   report.styled = kept > 0;
   report.style_model = out.model;
-  console.log(`[tone]   ${out.model} · ${gravity} · ${kept} field(s) styled, ${rejected} rejected by gate`);
+  clog.log(`[tone]   ${out.model} · ${gravity} · ${kept} field(s) styled, ${rejected} rejected by gate`);
   return report;
 }
 
@@ -679,7 +681,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
   if (effMode === "incremental") {
     newEvidence = all.filter((e) => String(e.fetched_at ?? "") > cutoff);
     if (newEvidence.length === 0 && !force) {
-      console.log(`[generate] ${p.name} — no new evidence since ${String(cutoff).slice(0, 10)}; keeping existing report (use --mode recheck/full or --force to rebuild).`);
+      clog.log(`[generate] ${p.name} — no new evidence since ${String(cutoff).slice(0, 10)}; keeping existing report (use --mode recheck/full or --force to rebuild).`);
       return { ...prior, skipped_no_new: true };
     }
   }
@@ -706,7 +708,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
   const srcDesc = effMode === "incremental" ? `INCREMENTAL: prior digest + ${newEvidence.length} new`
     : effMode === "recheck" ? `RECHECK${stale ? "(pipeline upgraded)" : ""}: prior digest + full ${sources.length - 1} re-scan`
     : `FULL: ${sources.length}/${all.length}`;
-  console.log(`[generate] ${p.name} — ${srcDesc} sources → ${MODEL}`);
+  clog.log(`[generate] ${p.name} — ${srcDesc} sources → ${MODEL}`);
 
   // Up to 2 attempts: the model occasionally returns malformed/truncated JSON.
   // A failed parse should never silently skip a politician in a big batch.
@@ -731,11 +733,11 @@ export async function generateReport(politicianId, { mode = "incremental", force
       if (!raw) throw new Error("Model returned empty content.");
       const u = response.usage ?? {};
       const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
-      console.log(`[generate]   attempt ${attempt}: ${raw.length} chars · in ${u.prompt_tokens ?? "?"} (cached ${cached}) / out ${u.completion_tokens ?? "?"}`);
+      clog.log(`[generate]   attempt ${attempt}: ${raw.length} chars · in ${u.prompt_tokens ?? "?"} (cached ${cached}) / out ${u.completion_tokens ?? "?"}`);
     } catch (err) {
       if (err.status) {
-        console.error(`[generate]   HTTP ${err.status}: ${err.message}`);
-        console.error("    Body:", JSON.stringify(err.error ?? {}, null, 2));
+        clog.error(`[generate]   HTTP ${err.status}: ${err.message}`);
+        clog.error("    Body:", JSON.stringify(err.error ?? {}, null, 2));
         lastErr = new Error(`API error ${err.status}: ${err.message}`);
       } else {
         lastErr = err;
@@ -747,7 +749,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
       report = validateAndRepair(raw, p, registry);
       break; // parsed OK
     } catch (err) {
-      console.warn(`[generate]   attempt ${attempt} parse failed: ${err.message}`);
+      clog.warn(`[generate]   attempt ${attempt} parse failed: ${err.message}`);
       lastErr = err;
     }
   }
@@ -778,7 +780,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
     report.overall_grade = overall.overall_grade; // narrativeGravity reads this
     report.computed_flags = computedFlags;         // …and this for the SIGNIFICANT bump
     try { await applyTonePass(report, registry); }
-    catch (err) { console.warn(`[tone]   pass failed for ${p.name}: ${err.message} — kept original`); }
+    catch (err) { clog.warn(`[tone]   pass failed for ${p.name}: ${err.message} — kept original`); }
   }
 
   return addReport({
@@ -838,7 +840,7 @@ if (invokedDirectly) {
   }
   const runMode = flags.full ? "full" : (["incremental", "full", "recheck"].includes(flags.mode) ? flags.mode : "incremental");
   // --tone-pass turns on the Stage-2 stylist for this run (also honours AI_STYLE_ENABLED env).
-  if (flags["tone-pass"]) { setStyleEnabled(true); console.log(`[tone] Stage-2 tone pass ENABLED (chain: ${FREE_CHAIN.map((e) => e.provider + ":" + e.model).join(", ") || "no free keys found!"})`); }
+  if (flags["tone-pass"]) { setStyleEnabled(true); clog.log(`[tone] Stage-2 tone pass ENABLED (chain: ${FREE_CHAIN.map((e) => e.provider + ":" + e.model).join(", ") || "no free keys found!"})`); }
   const target = positional[0];
 
   let list;
@@ -847,7 +849,7 @@ if (invokedDirectly) {
     //   node server/report-generator.js "Narendra Modi,Rahul Gandhi"
     const { findPolitician } = await import("./store.js");
     list = target.split(",").map((t) => findPolitician(t.trim())).filter(Boolean);
-    if (!list.length) { console.error(`No politician matched "${target}". Use a full/partial name or an id.`); process.exit(1); }
+    if (!list.length) { clog.error(`No politician matched "${target}". Use a full/partial name or an id.`); process.exit(1); }
   } else {
     list = listPoliticians().filter((p) => !p.is_demo);
     // --mps groups BOTH houses of Parliament (Lok Sabha office=MP + Rajya Sabha
@@ -859,7 +861,7 @@ if (invokedDirectly) {
     if (flags.limit)  list = list.slice(0, Number(flags.limit));
   }
 
-  console.log(`Generating reports for ${list.length} politician(s)`
+  clog.log(`Generating reports for ${list.length} politician(s)`
     + `${flags.office ? ` · office=${flags.office}` : ""}${flags.state ? ` · state=${flags.state}` : ""} · mode=${runMode}${flags["new-only"] ? " · new-only" : ""} · pipeline v${PIPELINE_VERSION}\n`);
 
   // Scandal layer (task #14): GLM-driven, part of report generation — NOT the
@@ -875,13 +877,13 @@ if (invokedDirectly) {
       let made = 0;
       for (const seed of SCANDAL_SEEDS) {
         if (getScandal(seed.slug)) continue;
-        try { await generateScandal(seed); made++; } catch (e) { console.warn(`[scandal] ${seed.slug}: ${e.message}`); }
+        try { await generateScandal(seed); made++; } catch (e) { clog.warn(`[scandal] ${seed.slug}: ${e.message}`); }
       }
-      if (made) console.log(`[scandal] generated ${made} new seed analysis(es).`);
+      if (made) clog.log(`[scandal] generated ${made} new seed analysis(es).`);
       const d = await maybeDiscover({ force: !!flags.force });
-      if (d.queued != null) console.log(`[scandal] discovery queued ${d.queued} new proposal(s) for your admin review.`);
-      else console.log(`[scandal] discovery: ${d.skipped}.`);
-    } catch (err) { console.warn(`[scandal] step skipped: ${err.message}`); }
+      if (d.queued != null) clog.log(`[scandal] discovery queued ${d.queued} new proposal(s) for your admin review.`);
+      else clog.log(`[scandal] discovery: ${d.skipped}.`);
+    } catch (err) { clog.warn(`[scandal] step skipped: ${err.message}`); }
   }
 
   // Issues layer (task #5): generate any policy-issue analyses not yet done, so
@@ -894,10 +896,10 @@ if (invokedDirectly) {
       let made = 0;
       for (const seed of ISSUE_SEEDS) {
         if (getIssue(seed.slug)) continue;
-        try { await generateIssue(seed); made++; } catch (e) { console.warn(`[issue] ${seed.slug}: ${e.message}`); }
+        try { await generateIssue(seed); made++; } catch (e) { clog.warn(`[issue] ${seed.slug}: ${e.message}`); }
       }
-      if (made) console.log(`[issue] generated ${made} new issue analysis(es).`);
-    } catch (err) { console.warn(`[issue] step skipped: ${err.message}`); }
+      if (made) clog.log(`[issue] generated ${made} new issue analysis(es).`);
+    } catch (err) { clog.warn(`[issue] step skipped: ${err.message}`); }
   }
 
   // NOTE (branch split): this CLI is Summarizer-side only. The conflict/anomaly
@@ -910,11 +912,11 @@ if (invokedDirectly) {
     process.stdout.write(`[${i}/${list.length}] ${p.name}… `);
     try {
       const r = await generateReport(p.id, { mode: runMode, force: !!flags.force });
-      if (r.skipped_no_new) { console.log("· no new evidence, kept existing"); skip++; }
-      else { console.log(`${r.overall_grade} (${r.overall_score}/100), ${r.categories.length} cats, ${r.red_flags.length} flags [${r.update_mode}]`); ok++; }
-    } catch (err) { console.log(`✗ ${err.message}`); fail++; }
+      if (r.skipped_no_new) { clog.log("· no new evidence, kept existing"); skip++; }
+      else { clog.log(`${r.overall_grade} (${r.overall_score}/100), ${r.categories.length} cats, ${r.red_flags.length} flags [${r.update_mode}]`); ok++; }
+    } catch (err) { clog.log(`✗ ${err.message}`); fail++; }
   }
-  console.log(`\nDone. ${ok} generated, ${skip} unchanged, ${fail} failed.`);
+  clog.log(`\nDone. ${ok} generated, ${skip} unchanged, ${fail} failed.`);
 
   stop();
   // Let the process exit naturally so buffered stdout is fully flushed.

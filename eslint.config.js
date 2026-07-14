@@ -90,6 +90,13 @@ export default [
     rules: coreRules,
   },
   {
+    // New server code should use util/log.js (structured, ops-console-mirrored)
+    // instead of raw console. Warn-only: the ~250-call long tail migrates
+    // incrementally, and worker.js's console patch depends on console existing.
+    files: ["server/**/*.js"],
+    rules: { "no-console": "warn" },
+  },
+  {
     files: ["public/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",

@@ -20,6 +20,8 @@ import "dotenv/config";
 import { batchUpsertPoliticians, listPoliticians } from "./store.js";
 import { ingestFor } from "./ingest.js";
 import { sleep } from "./util/timing.js";
+import { consoleStyle } from "./util/log.js";
+const clog = consoleStyle("bulk-import");
 
 const MYNETA_BASE = "https://www.myneta.info";
 const UA = { "User-Agent": "PandorosBox/0.1 (public-accountability research)" };
@@ -137,49 +139,49 @@ const ASSEMBLIES = [
 ];
 
 async function main() {
-  console.log("=== Pandoro's Box — Bulk Representative Import ===\n");
+  clog.log("=== Pandoro's Box — Bulk Representative Import ===\n");
 
   // ── PHASE 1: scrape (no DB) ──────────────────────────────────────────
-  console.log("Phase 1 — Scraping MyNeta (no DB writes yet)\n");
+  clog.log("Phase 1 — Scraping MyNeta (no DB writes yet)\n");
   const all = [];
 
   if (!STATE_ONLY) {
     process.stdout.write("Lok Sabha 2024… ");
     const { results, error } = await scrapePage("LokSabha2024", "Lok Sabha (Parliament)", "MP");
-    console.log(error ? `FAILED: ${error}` : `${results.length} MPs`);
+    clog.log(error ? `FAILED: ${error}` : `${results.length} MPs`);
     all.push(...results);
     await sleep(DELAY_MS);
   }
 
   if (!LS_ONLY) {
-    console.log("\nState assemblies:");
+    clog.log("\nState assemblies:");
     for (const [slug, state] of ASSEMBLIES) {
       process.stdout.write(`  ${state.padEnd(20)} `);
       const { results, error } = await scrapePage(slug, state, "MLA");
-      console.log(error ? `skipped (${error})` : `${results.length} MLAs`);
+      clog.log(error ? `skipped (${error})` : `${results.length} MLAs`);
       all.push(...results);
       await sleep(DELAY_MS);
     }
   }
 
-  console.log(`\nScraped ${all.length} candidates total.`);
+  clog.log(`\nScraped ${all.length} candidates total.`);
 
   // ── PHASE 2: single batch write ──────────────────────────────────────
-  console.log("\nPhase 2 — Writing to database (one operation)…");
+  clog.log("\nPhase 2 — Writing to database (one operation)…");
   const added = batchUpsertPoliticians(all);
-  console.log(`  Added: ${added.length}  |  Skipped (already in DB): ${all.length - added.length}`);
-  console.log(`  Total real representatives in DB: ${listPoliticians().filter(p => !p.is_demo).length}\n`);
+  clog.log(`  Added: ${added.length}  |  Skipped (already in DB): ${all.length - added.length}`);
+  clog.log(`  Total real representatives in DB: ${listPoliticians().filter(p => !p.is_demo).length}\n`);
 
-  if (!added.length) { console.log("Nothing new. Done."); return; }
+  if (!added.length) { clog.log("Nothing new. Done."); return; }
   if (NO_INGEST) {
-    console.log("--no-ingest set. Skipping evidence fetch.");
-    console.log("Run `node server/ingest.js` later, or generate reports directly.");
+    clog.log("--no-ingest set. Skipping evidence fetch.");
+    clog.log("Run `node server/ingest.js` later, or generate reports directly.");
     return;
   }
 
   // ── PHASE 3: evidence ingest ─────────────────────────────────────────
-  console.log(`Phase 3 — Ingesting evidence for ${added.length} new politicians`);
-  console.log("(Ctrl+C is safe — saved politicians are not lost)\n");
+  clog.log(`Phase 3 — Ingesting evidence for ${added.length} new politicians`);
+  clog.log("(Ctrl+C is safe — saved politicians are not lost)\n");
 
   let done = 0, failed = 0;
   for (const p of added) {
@@ -187,13 +189,13 @@ async function main() {
     process.stdout.write(`[${done}/${added.length}] ${p.name} (${p.constituency})… `);
     try {
       const n = await ingestFor(p);
-      console.log(`${n} items`);
-    } catch (err) { console.log(`failed: ${err.message}`); failed++; }
+      clog.log(`${n} items`);
+    } catch (err) { clog.log(`failed: ${err.message}`); failed++; }
     await sleep(DELAY_MS);
   }
 
-  console.log(`\nDone. Ingested ${done - failed}, failed ${failed}.`);
-  console.log(`Next: node server/report-generator.js all --tier 2`);
+  clog.log(`\nDone. Ingested ${done - failed}, failed ${failed}.`);
+  clog.log(`Next: node server/report-generator.js all --tier 2`);
 }
 
-main().catch((err) => { console.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));
+main().catch((err) => { clog.error("Fatal:", err); process.exit(1); }).finally(() => process.exit(0));

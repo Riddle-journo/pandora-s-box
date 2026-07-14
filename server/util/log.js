@@ -63,4 +63,24 @@ export function logger(name) {
   };
 }
 
+// Console-compatible adapter for CLI-style modules with many multi-arg
+// console.log("text", value, …) calls: pino drops extra args without %s
+// placeholders, so this joins them space-separated exactly like console
+// before forwarding — a drop-in `clog.log/warn/error` replacement that
+// still gets levels, JSON output, and ops-console ring-buffer mirroring.
+/** @param {string} name */
+export function consoleStyle(name) {
+  const log = logger(name);
+  const join = (args) => args.map((x) => {
+    if (typeof x === "string") return x;
+    if (x instanceof Error) return x.stack ?? x.message;
+    try { return JSON.stringify(x); } catch { return String(x); }
+  }).join(" ");
+  return {
+    log: (...a) => log.info(join(a)),
+    warn: (...a) => log.warn(join(a)),
+    error: (...a) => log.error(join(a)),
+  };
+}
+
 export default logger("app");

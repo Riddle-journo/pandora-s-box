@@ -28,6 +28,8 @@ import {
   listJobs, jobCounts, getMeta, setMeta, trimJobs,
 } from "./store.js";
 import { dataGovKey } from "./config.js";
+import { consoleStyle } from "./util/log.js";
+const clog = consoleStyle("db-maintenance");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.PANDOROS_DB_PATH || path.join(__dirname, "..", "data", "pandoros.db");
@@ -64,8 +66,8 @@ export function backup({ keep = 5, quiet = false } = {}) {
 
   const out = { dest, size, ms: Date.now() - t0, kept: Math.min(existing.length, keep), pruned: pruned.length };
   if (!quiet) {
-    console.log(`[backup] wrote ${path.relative(DATA_DIR, dest)} (${fmtBytes(size)}) in ${out.ms}ms`);
-    if (pruned.length) console.log(`[backup] pruned ${pruned.length} old backup(s), keeping newest ${keep}`);
+    clog.log(`[backup] wrote ${path.relative(DATA_DIR, dest)} (${fmtBytes(size)}) in ${out.ms}ms`);
+    if (pruned.length) clog.log(`[backup] pruned ${pruned.length} old backup(s), keeping newest ${keep}`);
   }
   return out;
 }
@@ -487,7 +489,7 @@ function writeMaintenanceLog({ tier, status, durationMs, findings }) {
 
 // Run a whole tier: singleton-guarded (never overlap with itself), heavy tasks
 // deferred when busy, every finding logged. Returns the full report object.
-export async function runMaintenance(tier, { log = console.log, enqueue = true } = {}) {
+export async function runMaintenance(tier, { log = clog.log, enqueue = true } = {}) {
   const tasks = TIERS[tier];
   if (!tasks) throw new Error(`unknown maintenance tier: ${tier} (use ${Object.keys(TIERS).join("|")})`);
 
@@ -539,28 +541,28 @@ async function doctor(days) {
   const quiet = health.filter((h) => h.runs > 0 && h.ok_rate >= 0.5 && h.total_items === 0).map((h) => h.source);
   const datasets = await optionalDatasets();
 
-  console.log(`\n── Doctor (last ${days}d) ────────────────────────────────────────────\n`);
-  console.log("Optional datasets / keys:");
+  clog.log(`\n── Doctor (last ${days}d) ────────────────────────────────────────────\n`);
+  clog.log("Optional datasets / keys:");
   for (const d of datasets) {
-    console.log(`  ${d.ok ? "✓" : "✗"} ${pad(d.id, 16)} ${d.detail}`);
-    if (!d.ok) console.log(`      feeds: ${d.feeds}\n      fix:   ${d.fix}`);
+    clog.log(`  ${d.ok ? "✓" : "✗"} ${pad(d.id, 16)} ${d.detail}`);
+    if (!d.ok) clog.log(`      feeds: ${d.feeds}\n      fix:   ${d.fix}`);
   }
 
   // Cross-reference: which QUIET sources are QUIET *because* they're unconfigured.
   const unconfiguredFeeds = new Set(datasets.filter((d) => !d.ok).flatMap((d) => d.feeds.split(",").map((s) => s.trim())));
   const explained = quiet.filter((s) => unconfiguredFeeds.has(s));
   const genuinelyRare = quiet.filter((s) => !unconfiguredFeeds.has(s));
-  console.log(`\nZero-item sources this window: ${quiet.length}`);
-  if (explained.length) console.log(`  unconfigured (fixable): ${explained.join(", ")}`);
-  if (genuinelyRare.length) console.log(`  rare-hit or worth a look: ${genuinelyRare.join(", ")}`);
+  clog.log(`\nZero-item sources this window: ${quiet.length}`);
+  if (explained.length) clog.log(`  unconfigured (fixable): ${explained.join(", ")}`);
+  if (genuinelyRare.length) clog.log(`  rare-hit or worth a look: ${genuinelyRare.join(", ")}`);
 
   const legacy = legacyBackups();
   if (legacy.length) {
     const total = legacy.reduce((s, f) => s + f.size, 0);
-    console.log(`\nLegacy .bak files in data/: ${legacy.length} using ${fmtBytes(total)} — consider moving to data/backups/ and pruning:`);
-    for (const f of legacy.slice(0, 6)) console.log(`  ${pad(fmtBytes(f.size), 9)} ${f.name}`);
+    clog.log(`\nLegacy .bak files in data/: ${legacy.length} using ${fmtBytes(total)} — consider moving to data/backups/ and pruning:`);
+    for (const f of legacy.slice(0, 6)) clog.log(`  ${pad(fmtBytes(f.size), 9)} ${f.name}`);
   }
-  console.log("");
+  clog.log("");
 }
 
 async function main() {
@@ -574,34 +576,34 @@ async function main() {
 
   if (cmd === "check") {
     const r = check();
-    if (argv.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return process.exit(r.ok ? 0 : 1); }
-    console.log(`\n── Integrity check ──────────────────────────────────────────────\n`);
-    console.log(`  integrity_check: ${r.integrityOk ? "ok" : "FAILED — " + r.integrity.slice(0, 5).join("; ")}`);
-    console.log(`\n  Orphaned references:`);
+    if (argv.includes("--json")) { clog.log(JSON.stringify(r, null, 2)); return process.exit(r.ok ? 0 : 1); }
+    clog.log(`\n── Integrity check ──────────────────────────────────────────────\n`);
+    clog.log(`  integrity_check: ${r.integrityOk ? "ok" : "FAILED — " + r.integrity.slice(0, 5).join("; ")}`);
+    clog.log(`\n  Orphaned references:`);
     for (const o of r.orphans) {
       const mark = o.count > 0 ? "✗" : o.count < 0 ? "?" : "✓";
-      console.log(`  ${mark} ${pad(o.name, 28)} ${o.error ? "ERR " + o.error : o.count}`);
+      clog.log(`  ${mark} ${pad(o.name, 28)} ${o.error ? "ERR " + o.error : o.count}`);
     }
-    console.log(`\n  ${r.ok ? "✓ clean" : `✗ ${r.totalOrphans} orphaned row(s)` + (r.integrityOk ? "" : " + integrity failure")}\n`);
+    clog.log(`\n  ${r.ok ? "✓ clean" : `✗ ${r.totalOrphans} orphaned row(s)` + (r.integrityOk ? "" : " + integrity failure")}\n`);
     return process.exit(r.ok ? 0 : 1);
   }
 
   if (cmd === "doctor") { await doctor(days); return process.exit(0); }
 
   if (cmd === "vacuum") {
-    console.log("[vacuum] taking a safety backup first…");
+    clog.log("[vacuum] taking a safety backup first…");
     backup({ keep });
-    console.log("[vacuum] VACUUM…"); db.prepare("VACUUM").run();
-    console.log("[vacuum] ANALYZE…"); db.prepare("ANALYZE").run();
-    console.log("[vacuum] WAL checkpoint (TRUNCATE)…"); db.pragma("wal_checkpoint(TRUNCATE)");
-    console.log(`[vacuum] done. DB now ${fmtBytes(fs.statSync(DB_PATH).size)}`);
+    clog.log("[vacuum] VACUUM…"); db.prepare("VACUUM").run();
+    clog.log("[vacuum] ANALYZE…"); db.prepare("ANALYZE").run();
+    clog.log("[vacuum] WAL checkpoint (TRUNCATE)…"); db.pragma("wal_checkpoint(TRUNCATE)");
+    clog.log(`[vacuum] done. DB now ${fmtBytes(fs.statSync(DB_PATH).size)}`);
     return process.exit(0);
   }
 
   if (cmd === "all") {
     backup({ keep });
     const r = check();
-    console.log(`[check] integrity ${r.integrityOk ? "ok" : "FAILED"}, ${r.totalOrphans} orphan(s)`);
+    clog.log(`[check] integrity ${r.integrityOk ? "ok" : "FAILED"}, ${r.totalOrphans} orphan(s)`);
     await doctor(days);
     return process.exit(r.ok ? 0 : 1);
   }
@@ -609,22 +611,22 @@ async function main() {
   // The automated tiered sweep — the entry point Task Scheduler / the queue call.
   if (cmd === "cron") {
     const tier = argv[1] || "nightly";
-    if (!TIERS[tier]) { console.log(`Unknown tier "${tier}". Use: ${Object.keys(TIERS).join(" | ")}`); return process.exit(1); }
-    const rep = await runMaintenance(tier, { log: console.log });
-    if (argv.includes("--json")) console.log(JSON.stringify(rep, null, 2));
+    if (!TIERS[tier]) { clog.log(`Unknown tier "${tier}". Use: ${Object.keys(TIERS).join(" | ")}`); return process.exit(1); }
+    const rep = await runMaintenance(tier, { log: clog.log });
+    if (argv.includes("--json")) clog.log(JSON.stringify(rep, null, 2));
     return process.exit(rep.status === "red" ? 1 : 0);
   }
 
   // Run a single task by name (for scripting / debugging individual checks).
   if (cmd === "task") {
     const name = argv[1];
-    if (!name) { console.log(`Usage: task <name>. Known: ${Object.keys(TASKS).join(", ")}`); return process.exit(1); }
-    const limit = flag("--limit"); const out = await runMaintenanceTask(name, { limit: limit != null ? Number(limit) : null, force: argv.includes("--force") }, { log: console.log });
-    console.log(JSON.stringify(out, null, 2));
+    if (!name) { clog.log(`Usage: task <name>. Known: ${Object.keys(TASKS).join(", ")}`); return process.exit(1); }
+    const limit = flag("--limit"); const out = await runMaintenanceTask(name, { limit: limit != null ? Number(limit) : null, force: argv.includes("--force") }, { log: clog.log });
+    clog.log(JSON.stringify(out, null, 2));
     return process.exit(out.status === "red" ? 1 : 0);
   }
 
-  console.log(`Unknown command "${cmd}". Use: backup | check | doctor | vacuum | all | cron <tier> | task <name>`);
+  clog.log(`Unknown command "${cmd}". Use: backup | check | doctor | vacuum | all | cron <tier> | task <name>`);
   process.exit(1);
 }
 
