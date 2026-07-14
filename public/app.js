@@ -42,7 +42,7 @@ const AVATAR_COLORS = ["#1f3a93","#c2255c","#0b7285","#5f3dc4","#a61e4d","#2b8a3
 let reps = [], methodology = null, currentId = null;
 let currentRep = null, currentEvidence = [];
 
-const api = async (path) => { const r = await fetch(path); return r.ok ? r.json() : null; };
+const api = async (path) => { try { const r = await fetch(path); return r.ok ? r.json() : null; } catch { return null; } };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const avatarColor = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; };
 const initials = (name) => name.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join("");
