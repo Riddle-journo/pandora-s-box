@@ -38,11 +38,14 @@ const OPS_JOB_TYPES = new Set([
   "engine_scan", "engine_synthesis", "investigate_lead", "cppp_scan",
   // Editorial (GLM, human-gated)
   "discover_scandals",
+  // DB maintenance (free; tiers + individual tasks). Destructive tasks go through
+  // the _danger type below so they inherit the confirm-phrase gate.
+  "db_maintenance", "db_maintenance_danger",
   // Legacy dossier (transition only)
   "generate_report",
 ]);
 // Destructive types → the exact confirm phrase the UI must echo before enqueue.
-const OPS_DANGER = { reset_data: "RESET" };
+const OPS_DANGER = { reset_data: "RESET", db_maintenance_danger: "MAINTAIN" };
 
 // Overview tiles: counts, grade histogram, per-source coverage, missing-data gaps.
 router.get("/api/admin/ops/summary", requireAdmin, (_req, res) => {
@@ -58,6 +61,19 @@ router.get("/api/admin/ops/health", requireAdmin, asyncH(async (req, res) => {
     res.json({ days, ...classifyHealth(rows, FETCHER_NAMES) });
   } catch (err) {
     res.json({ days, rows, rotted: [], stale: [], warn: err.message });
+  }
+}));
+
+// DB maintenance history — the latest run's full findings report + a short run
+// trend, for the Health tab. Quiet-by-default: the UI highlights warn/red, green
+// runs are just history. Read-only; the actual runs are queued jobs.
+router.get("/api/admin/ops/maintenance", requireAdmin, asyncH(async (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
+  try {
+    const { maintenanceHistory } = await import("../db-maintenance.js");
+    res.json(maintenanceHistory({ limit }));
+  } catch (err) {
+    res.json({ latest: null, runs: [], tiers: ["nightly", "weekly", "monthly"], warn: err.message });
   }
 }));
 

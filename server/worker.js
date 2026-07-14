@@ -71,6 +71,9 @@ export const MIN_GAP_MS = {
   engine_synthesis: 0,     // flags → leads, pure code
   investigate_lead: 30_000, // single-lead GLM investigation (paid)
   noop: 0,
+  // DB maintenance — self-throttles internally (skips heavy tasks when busy).
+  db_maintenance: 0,
+  db_maintenance_danger: 0,
   // Spawn-based maintenance CLIs — serial by default; no extra gap needed.
   roster_update: 0,
   mega_refresh: 0,
@@ -265,6 +268,28 @@ export const HANDLERS = {
   // enqueue anywhere (no network, no LLM) to confirm the worker is consuming.
   async noop(payload = {}) {
     return { ok: true, echo: payload };
+  },
+
+  // DB maintenance (SAFE): run a whole tier (nightly/weekly/monthly) or one named
+  // task. Composes db-maintenance.js — integrity/orphans/drift/backup/… — and writes
+  // a maintenance_log row. Free: SQLite PRAGMAs + better-sqlite3 backup, no network.
+  async db_maintenance(payload = {}, job) {
+    const { runMaintenance, runMaintenanceTask } = await import("./db-maintenance.js");
+    if (payload.tier) return await runMaintenance(payload.tier, { log: console.log });
+    if (payload.task) return await runMaintenanceTask(payload.task, payload, { log: console.log });
+    throw new Error("db_maintenance: need a tier or task in the payload");
+  },
+  // DB maintenance (DESTRUCTIVE): the tasks that rewrite/rebuild — full VACUUM and
+  // drift-heal (delete+re-extract). Gated by the HTTP confirm phrase; this is the
+  // defensive second gate. Everything it touches is rebuildable (a backup is taken
+  // before VACUUM; heal only rewrites derived ledger rows), but it's kept behind the
+  // danger door so it's a deliberate click.
+  async db_maintenance_danger(payload = {}, job) {
+    if (payload.confirm !== true) throw new Error("db_maintenance_danger refused: confirm must be true.");
+    const allowed = new Set(["vacuum", "drift_heal"]);
+    if (!allowed.has(payload.task)) throw new Error(`db_maintenance_danger: task "${payload.task}" is not a danger task`);
+    const { runMaintenanceTask } = await import("./db-maintenance.js");
+    return await runMaintenanceTask(payload.task, payload, { log: console.log });
   },
 
   // ---- Spawn-based maintenance CLIs (no exported worker fn; run as subprocess) ----

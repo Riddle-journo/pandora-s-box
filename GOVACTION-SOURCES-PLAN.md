@@ -49,10 +49,22 @@ URL, owner runs `--refresh` from an India route). What shipped:
   `cci-cartel-orders`, `cvc-reports`, `ed-press`, `cppp-debarment`,
   `coal-block-allotment`, `sez-approvals`, `ibm-mining-leases` (existing pdf-archive/
   browser-capture kinds; not sandbox-verifiable).
-- **Orders/gazette/transfers (Phase 2): ⏭ DEFERRED** — need dedicated fetchers
-  (`orgpedia/mahGRs` via Internet Archive API, `sushant354/egazette`, AP/TS/TN GO
-  registers, DoPT IAS Civil List). Half-baked pdf-archive stubs would be low quality;
-  left as the next dedicated-fetcher batch.
+- **Orders/gazette (Phase 2): ✅ MOSTLY DONE (verified) + registered rest.** Generic
+  `archive-org` mega-ingest kind (IA advancedsearch + metadata + OCR-text download,
+  VERIFIED live). `gazette-india-archive` = 794k central+ALL-STATE gazette items on
+  IA (the eGazette win, since egazette.gov.in is blocked) — VERIFIED harvest.
+  `mahgrs-archive` = 169k Maharashtra GRs. Both are Devanagari OCR → `translit:true`
+  romanized-consonant-skeleton matcher (server/fetchers/translit.js) bridges English
+  roster ↔ Devanagari (7/8 clean-name pairs; approximate). Registered owner-run:
+  `ap-go-register` (+TS/TN mirrors), `dopt-ias-civillist`.
+- **Anomaly detectors: ✅ BUILT + VERIFIED on live data.** `denominator-detectors.js`
+  emits ENTITY-keyed (district/scheme/procurement) leads: `MGNREGA_WAGE_OUTLIER`
+  (cohort z-score), `MGNREGA_PAYMENT_DELAY` (<15-day-mandate share), `SCHEME_OVERSPEND`
+  (expenditure vs allocation), and `PROCUREMENT_ABOVE_MARKET` (purchase price vs mandi
+  modal median for the same commodity — the cross-source join). Wired into
+  `runExtractAndDetect`; `npm run detect:denominators`. Live proof: MGNREGA wage
+  outlier on real Dec-2024-25 rows (Manipur/Ukhrul 3σ); procurement-above-market on a
+  real mandi baseline (potato ₹3600 vs ₹1200 median, 3×).
 
 ---
 

@@ -71,6 +71,22 @@ export function deleteByExtractorVersion(version) {
   return { facts, claims };
 }
 
+// Drift-heal lever: drop the facts/claims a SPECIFIC set of evidence rows produced,
+// so they can be re-extracted from the (now newer) blob. The idempotent writers
+// dedupe on evidence_id+extractor_version, NOT on the blob's fetched_at, so a
+// re-fetched evidence row would otherwise keep its STALE typed rows forever. Deleting
+// first is what lets re-extraction actually refresh them. Raw evidence is untouched.
+export function deleteFactsClaimsByEvidence(evidenceIds = []) {
+  if (!evidenceIds.length) return { facts: 0, claims: 0 };
+  const delF = db.prepare("DELETE FROM facts WHERE evidence_id = ?");
+  const delC = db.prepare("DELETE FROM claims WHERE evidence_id = ?");
+  let facts = 0, claims = 0;
+  db.transaction((ids) => {
+    for (const eid of ids) { facts += delF.run(eid).changes; claims += delC.run(eid).changes; }
+  })(evidenceIds);
+  return { facts, claims };
+}
+
 // ── readers (for detectors + tests) ─────────────────────────────────────────
 export function factsFor(entityId, metric = null) {
   return (metric

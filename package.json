@@ -18,6 +18,7 @@
     "extract:all": "node server/extract-all.js",
     "opendata:catalog": "node server/opendata-catalog.js",
     "detect:ledger": "node server/ledger-detectors.js",
+    "detect:denominators": "node server/denominator-detectors.js",
     "reingest:party-finance": "node scripts/reingest-party-finance.js",
     "worker": "node server/worker.js",
     "worker:once": "node server/worker.js --once",

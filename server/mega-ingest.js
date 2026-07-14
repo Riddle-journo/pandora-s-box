@@ -12,9 +12,10 @@ import readline from "node:readline";
 import { listPoliticians, recordFetchRun, db } from "./store.js";
 import { ensureEntity } from "./entities.js";
 import { upsertFact } from "./ledger.js";
-import { UA, htmlToText, fetchPdfText, fetchText } from "./fetchers/http.js";
+import { UA, htmlToText, fetchPdfText, fetchText, fetchJson, sleep } from "./fetchers/http.js";
 import { renderPageText, closeBrowser } from "./fetchers/playwright-portal.js";
 import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "./fetchers/opendata.js";
+import { buildTranslitNeedles, textMatchesTranslit } from "./fetchers/translit.js";
 
 const MEGA_DIR = path.join(process.cwd(), "server", "data", "mega");
 const CACHE_DIR = path.join(process.cwd(), "server", "data", "l1-cache");
@@ -372,6 +373,25 @@ const MEGA_SOURCES = [
     note: "Pick a datastore_active resource id from `npm run opendata:catalog` (openbudgetsindia) and set resourceId + confirm the real column names (subject.fields / periodField / metrics[].field) against ckanDatastoreSearch fields[].",
     summary: "Union/state scheme budget-estimate vs actuals per year — the budget-vs-actual gap denominator." },
 
+  // ==== Phase 2 — orders/gazette (dedicated fetcher). VERIFIED reachable: Internet
+  // Archive is a global CDN, not IP-blocked. mahGRs = orgpedia's mirror of 169k
+  // Maharashtra GRs with OCR. ====
+  { id: "mahgrs-archive", title: "Maharashtra Government Resolutions (Internet Archive OCR)", tier: 5, match: "name",
+    kind: "archive-org", iaQuery: "identifier:in.gov.maharashtra.gr.*", iaSort: "addeddate desc",
+    textFormat: "DjVuTXT", maxDocs: 2000, delayMs: 400,
+    translit: true,
+    note: "169k GRs on Internet Archive via orgpedia — zero-scrape (advancedsearch + download API, VERIFIED live). The IA _djvu.txt is MARATHI original OCR (orgpedia's English translations are in its GitHub repo, not the IA items). translit:true romanizes the Devanagari body + folds it to a match skeleton so English roster names hit approximately; the full corpus is also persisted to docs.jsonl for FTS. Bounded to recent maxDocs.",
+    summary: "Maharashtra GRs (sanctions, land, transfers, tender exemptions) — OCR bodies captured; roster name-match via transliteration skeleton." },
+  // Gazette of India (central + ALL states) on Internet Archive — bilingual OCR
+  // (eng+regional), so English roster names match directly. Covers the eGazette
+  // portal (blocked from datacenter IPs) AND the state gazettes, via the same
+  // verified archive-org path. Identifiers: in.gazette.<state|central>.<date>...
+  { id: "gazette-india-archive", title: "Gazette of India + state gazettes (Internet Archive OCR)", tier: 5, match: "name",
+    kind: "archive-org", iaQuery: "collection:gazetteofindia", iaSort: "addeddate desc",
+    textFormat: "DjVuTXT", maxDocs: 3000, delayMs: 350, translit: true,
+    note: "794k gazette items (central + every state) via IA (VERIFIED live) — the eGazette/state-gazette Phase-2 win instead of the blocked egazette.gov.in. Real-data check: the OCR body is often Hindi/regional Devanagari (English fragments too), so translit:true adds the romanized-skeleton match alongside direct English matching. Backdated/midnight notifications + de-notifications live here. Narrow iaQuery (e.g. ' AND identifier:in.gazette.maharashtra*') for a state slice.",
+    summary: "Central + state gazette notifications (appointments, de-notifications, land, rules) — OCR bodies name-matched to the roster." },
+
   // ==== Gov-action phases 1/3/6 — OWNER-RUN scrape/PDF targets (see GOVACTION-
   // SOURCES-PLAN.md). Registered with the correct existing kind + the research-
   // verified URL, but NOT sandbox-verified (these hosts WAF-block / don't resolve
@@ -412,6 +432,17 @@ const MEGA_SOURCES = [
     kind: "pdf-archive", url: "https://ibm.gov.in/IBMPortal/pages/All_India_Directory_of_Mining_Leases", linkRe: "\\.pdf", maxDocs: 200,
     note: "~3000 leases: lessee name+address, area, grant/execution date, period. 'Fully computerised' → published files. Confirm whether the directory is PDF or a table (may need paged-html-table/browser-render instead).",
     summary: "Major-mineral mining-lease directory (named lessees + grant dates) — lease favoritism / below-auction grants." },
+
+  // Phase 2 — state GO registers + civil-service postings (gov hosts blocked from
+  // datacenter IPs; browser-capture discovery targets, owner-run from an India route).
+  { id: "ap-go-register", title: "Andhra Pradesh Government Orders (GOIR)", tier: 5, match: "name",
+    kind: "browser-capture", url: "https://goir.ap.gov.in/", settleMs: 5000,
+    note: "Full-text GO PDFs, dept/date/number search (ASP.NET viewstate POST). Capture the search XHR then promote to json-api/paged-html. Mirror https://www.govtorders.in/ap flattens it. GOs = discretionary land/contract/appointment/pension sanctions to named parties; GO-number-vs-issue-date gaps expose backdating.",
+    summary: "AP full-text Government Orders (named beneficiaries) — discretionary-favor + backdating surface. TS/TN registers mirror this (goir.telangana.gov.in, tn.gov.in/go_view)." },
+  { id: "dopt-ias-civillist", title: "DoPT IAS Civil List — officer posting history", tier: 5, match: "name",
+    kind: "browser-capture", url: "https://iascivillist.dopt.gov.in/", settleMs: 5000,
+    note: "Structured per-officer cadre/posting-history DB (also easy.nic.in/civilListIAS). Capture the officer-search XHR. Posting-history timelines → transfer-racket detection (abnormally short tenures, repeat parking in lucrative postings, election-timed transfers).",
+    summary: "IAS officer posting histories — transfer-posting-racket detection (short tenures, lucrative-posting parking)." },
 ];
 
 // --- roster needles ---------------------------------------------------------
@@ -773,6 +804,67 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         fs.appendFileSync(idx, JSON.stringify({ title, href, text }) + "\n");
         if (rows.length < CAP && matchRow(needles, [title, text].filter(Boolean))) rows.push([title, href, snip(text || title)]);
         if (total % 50 === 0) console.log(`[mega] ${cfg.id}: ${total}/${links.length} docs, ${rows.length} kept`);
+        if (rows.length >= CAP) break;
+      }
+      return writeMegaCache(cfg, rows, total);
+    }
+    if (cfg.kind === "archive-org") {
+      // Internet Archive collection harvest (Phase-2 orders/gazette). Pages item
+      // identifiers via advancedsearch.php, pulls each item's OCR text file (DjVuTXT
+      // — plain .txt, no PDF parse), name-matches bodies. Persists every item's text
+      // to docs.jsonl so --rematch re-filters offline AND the raw corpus is captured
+      // for FTS/investigator even when the name-match keeps nothing (e.g. regional-
+      // language OCR that English roster needles can't hit yet). Mirrors pdf-archive.
+      fs.mkdirSync(rawDir, { recursive: true });
+      const idx = path.join(rawDir, "docs.jsonl");
+      // translit:true (regional-language OCR) → also match a romanized consonant
+      // skeleton so English roster names hit Devanagari bodies approximately.
+      const tnSkel = cfg.translit ? buildTranslitNeedles(needles) : null;
+      const matchDoc = (title, text) => matchRow(needles, [title, text].filter(Boolean))
+        || (tnSkel && textMatchesTranslit(`${title || ""} ${text || ""}`, tnSkel));
+      const snip = (text) => {
+        const t = normLine(text); const hit = needles.find((n) => t.includes(n));
+        if (!hit) return "";
+        const i = t.indexOf(hit); return text.slice(Math.max(0, i - 300), i + 300).replace(/\s+/g, " ").trim();
+      };
+      const rows = []; let total = 0;
+      if (rematchOnly && fs.existsSync(idx)) {
+        for (const line of fs.readFileSync(idx, "utf8").split("\n").filter(Boolean)) {
+          const d = JSON.parse(line); total++;
+          if (rows.length < CAP && matchDoc(d.title, d.text)) rows.push([d.title, d.href, snip(d.text || d.title)]);
+        }
+        return writeMegaCache(cfg, rows, total);
+      }
+      // 1. page item identifiers (bounded by maxDocs)
+      const items = []; const maxDocs = cfg.maxDocs ?? 2000; const rowsPer = 100;
+      for (let page = 1; items.length < maxDocs; page++) {
+        const api = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(cfg.iaQuery)}`
+          + `&fl[]=identifier&fl[]=title&fl[]=date&sort[]=${encodeURIComponent(cfg.iaSort ?? "addeddate desc")}`
+          + `&rows=${rowsPer}&page=${page}&output=json`;
+        const j = await fetchJson(api, { timeoutMs: 30000 });
+        const docs = j?.response?.docs ?? [];
+        if (!docs.length) break;
+        for (const d of docs) items.push({ id: d.identifier, title: d.title ?? d.identifier });
+        if (items.length >= (j?.response?.numFound ?? Infinity)) break;
+        await sleep(cfg.delayMs ?? 500);
+      }
+      const capped = items.slice(0, maxDocs);
+      console.log(`[mega] ${cfg.id}: ${capped.length} IA items; harvesting OCR text (${cfg.textFormat ?? "DjVuTXT"})…`);
+      fs.writeFileSync(idx, "");
+      const fmt = cfg.textFormat ?? "DjVuTXT";
+      for (const it of capped) {
+        total++;
+        let text = "";
+        try {
+          const meta = await fetchJson(`https://archive.org/metadata/${it.id}`, { timeoutMs: 20000 });
+          const file = (meta?.files ?? []).find((f) => f.format === fmt) ?? (meta?.files ?? []).find((f) => /_djvu\.txt$/i.test(f.name || ""));
+          if (file) text = await fetchText(`https://archive.org/download/${it.id}/${encodeURIComponent(file.name)}`, { timeoutMs: 30000 });
+        } catch { /* skip this item's body, keep going */ }
+        const itemUrl = `https://archive.org/details/${it.id}`;
+        fs.appendFileSync(idx, JSON.stringify({ title: it.title, href: itemUrl, text }) + "\n");
+        if (rows.length < CAP && matchDoc(it.title, text)) rows.push([it.title, itemUrl, snip(text || it.title)]);
+        if (total % 50 === 0) console.log(`[mega] ${cfg.id}: ${total}/${capped.length} items, ${rows.length} kept`);
+        await sleep(cfg.delayMs ?? 400);
         if (rows.length >= CAP) break;
       }
       return writeMegaCache(cfg, rows, total);

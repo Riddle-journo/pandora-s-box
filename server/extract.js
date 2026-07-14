@@ -128,6 +128,32 @@ export function runExtraction({ sourceType = null, limit = null } = {}) {
   return total;
 }
 
+// Re-extract a SPECIFIC set of evidence rows by id (the drift-heal target list).
+// Pair with deleteFactsClaimsByEvidence() upstream: delete the stale typed rows,
+// then this rebuilds them from the current blob. One transaction for the batch.
+// Callers must ensure the extractors are registered first (import extract-all.js).
+export function reExtractEvidence(evidenceIds = []) {
+  const total = { evidence: 0, facts: 0, claims: 0, events: 0, relationships: 0, skipped: 0 };
+  if (!evidenceIds.length) return total;
+  const sel = db.prepare("SELECT id, politician_id, data FROM evidence WHERE id = ?");
+  const run = db.transaction((ids) => {
+    for (const eid of ids) {
+      const raw = sel.get(eid);
+      if (!raw) continue;
+      const d = safeJson(raw.data);
+      const out = extractFromEvidence({
+        id: raw.id, politician_id: raw.politician_id,
+        source_type: d.source_type, tier: d.tier, date: d.date, data: d,
+      });
+      total.evidence++;
+      total.facts += out.facts; total.claims += out.claims;
+      total.events += out.events; total.relationships += out.relationships; total.skipped += out.skipped;
+    }
+  });
+  run(evidenceIds);
+  return total;
+}
+
 // Run an extractor over POLITICIAN rows instead of the evidence table, for sources
 // that live on the politician blob (e.g. the parsed affidavit) rather than in
 // evidence. buildEvidence(p) synthesizes an evidence-shaped object (with a STABLE

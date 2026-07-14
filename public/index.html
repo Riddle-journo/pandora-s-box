@@ -400,6 +400,7 @@
           <button class="ops-tab" data-tab="leads" type="button">Leads <span id="ops-leadcount" class="ops-tabcount"></span></button>
           <button class="ops-tab" data-tab="roster" type="button">Roster</button>
           <button class="ops-tab" data-tab="jobs" type="button">Jobs</button>
+          <button class="ops-tab" data-tab="health" type="button">Health <span id="ops-maintcount" class="ops-tabcount"></span></button>
         </nav>
 
         <div class="ops-tabpane" data-pane="overview">
@@ -539,6 +540,32 @@
               <button class="ghost small ops-trim" data-older="7" type="button">older than 7d</button>
             </div>
             <div id="ops-jobs"></div>
+          </section>
+        </div>
+
+        <div class="ops-tabpane" data-pane="health" hidden>
+          <section class="ops-panel">
+            <h3 class="ops-h">Database maintenance <span id="ops-maint-latest" class="muted small"></span></h3>
+            <p class="muted small">Automated, free hygiene for the DB itself — integrity, orphans, stale-JSON drift, backups. Runs on a schedule (nightly / weekly / monthly) and via Task Scheduler; you can also trigger any tier or single task here. Green runs stay quiet; <strong>warn / red</strong> findings surface below.</p>
+            <div id="ops-maint-report"></div>
+          </section>
+          <section class="ops-panel">
+            <h3 class="ops-h">Run a maintenance tier</h3>
+            <p class="muted small">Each tier queues one job that runs its full checklist and writes a maintenance-log entry. Watch it in <strong>Jobs</strong>.</p>
+            <div id="ops-maint-tiers" class="ops-cmds"></div>
+          </section>
+          <section class="ops-panel">
+            <h3 class="ops-h">Run a single check</h3>
+            <div id="ops-maint-tasks" class="ops-cmds"></div>
+          </section>
+          <details class="ops-danger">
+            <summary>⚠ Danger zone — destructive maintenance</summary>
+            <p class="muted small">Both are rebuildable-safe (a backup is taken before VACUUM; heal only rewrites derived ledger rows), but kept behind a confirm phrase. Type <strong>MAINTAIN</strong> to run.</p>
+            <div id="ops-maint-danger" class="ops-cmds"></div>
+          </details>
+          <section class="ops-panel">
+            <h3 class="ops-h">Recent runs</h3>
+            <div id="ops-maint-history"></div>
           </section>
         </div>
       </div>

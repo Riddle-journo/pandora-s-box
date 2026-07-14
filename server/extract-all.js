@@ -39,6 +39,7 @@ import { runParliamentCommitteeExtraction } from "./extractors/parliament-commit
 import { runSebiDisclosuresExtraction } from "./extractors/sebi-disclosures.js";
 import { db } from "./store.js";
 import { runLedgerDetectors } from "./ledger-detectors.js";
+import { runDenominatorDetectors } from "./denominator-detectors.js";
 
 // Pick up any tender/procurement-shaped source_types present in this DB that aren't
 // in the static list (mega corpora differ between installs).
@@ -92,8 +93,15 @@ export function runExtractAndDetect({ log = console.log } = {}) {
     detectors = runLedgerDetectors({ log });
     log(`[extract-all] ledger detectors: ${JSON.stringify(detectors.counts)} (${detectors.upserted} leads upserted)`);
   } catch (e) { log(`[extract-all] ledger detectors FAILED: ${e.message}`); }
+  // Denominator detectors run over the open-data baseline facts (district/scheme
+  // subjects) — independent of the politician-keyed ledger detectors above.
+  let denominators = null;
+  try {
+    denominators = runDenominatorDetectors({ log });
+    log(`[extract-all] denominator detectors: ${JSON.stringify(denominators.counts)} (${denominators.upserted} leads upserted)`);
+  } catch (e) { log(`[extract-all] denominator detectors FAILED: ${e.message}`); }
   done();
-  return { extraction: ext, detectors };
+  return { extraction: ext, detectors, denominators };
 }
 
 const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("server/extract-all.js");

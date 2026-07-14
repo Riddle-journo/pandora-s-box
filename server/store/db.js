@@ -92,6 +92,18 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS meta ( key TEXT PRIMARY KEY, value TEXT );
 
+  -- Maintenance ledger — one row per db-maintenance run (a tier sweep or a single
+  -- task), so the health of the DB itself becomes a trend, not a surprise. status
+  -- is the worst finding severity in the run: 'green' | 'warn' | 'red'. report is
+  -- the full findings JSON the Ops Console Health tab renders. db_size + row_count
+  -- are snapshotted each run so anomalous growth (a fetcher looping, a double
+  -- insert) shows up here before it becomes a problem.
+  CREATE TABLE IF NOT EXISTS maintenance_log (
+    id TEXT PRIMARY KEY, at TEXT, tier TEXT, status TEXT,
+    duration_ms INTEGER, db_size INTEGER, row_count INTEGER, findings INTEGER, report TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_maint_at ON maintenance_log(at);
+
   CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, type TEXT, payload TEXT, status TEXT DEFAULT 'queued',
     priority INTEGER DEFAULT 0, run_at INTEGER, attempts INTEGER DEFAULT 0,

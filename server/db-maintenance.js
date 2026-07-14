@@ -14,11 +14,19 @@
 //   node server/db-maintenance.js doctor    [--days 30]   config/health preflight (unconfigured vs rare sources)
 //   node server/db-maintenance.js vacuum                  backup, then VACUUM + ANALYZE + WAL checkpoint
 //   node server/db-maintenance.js all                     backup → check → doctor (the nightly routine)
+//   node server/db-maintenance.js cron <nightly|weekly|monthly>   the automated tiered sweep (writes maintenance_log)
+//   node server/db-maintenance.js task <name>             run ONE maintenance task by name
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { db } from "./store.js";
+import Database from "better-sqlite3";
+import { db, id } from "./store.js";
+import {
+  pruneFetchRuns, reclaimRunningJobs, sourceHealth,
+  enqueueJob, listPoliticians, lastFetchByPolitician,
+  listJobs, jobCounts, getMeta, setMeta, trimJobs,
+} from "./store.js";
 import { dataGovKey } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,6 +97,8 @@ const ORPHAN_CHECKS = [
   { name: "relationships→src_entity",sql: "SELECT COUNT(*) c FROM relationships r WHERE r.src_entity_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = r.src_entity_id)" },
   { name: "relationships→dst_entity",sql: "SELECT COUNT(*) c FROM relationships r WHERE r.dst_entity_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = r.dst_entity_id)" },
   { name: "entity_aliases→entity",   sql: "SELECT COUNT(*) c FROM entity_aliases a WHERE NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = a.entity_id)" },
+  { name: "flags→politician",        sql: "SELECT COUNT(*) c FROM flags f      WHERE f.politician_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM politicians p WHERE p.id = f.politician_id)" },
+  { name: "assertions→entity",       sql: "SELECT COUNT(*) c FROM entity_assertions a WHERE a.entity_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = a.entity_id)" },
 ];
 
 export function check() {
@@ -159,6 +169,356 @@ export async function optionalDatasets() {
     feeds: "company_registry (name→CIN/status) + l1 json-api sources (fci-stock, pmfby-claims, dilrmp-progress, cpcb-aqi)",
   });
   return checks;
+}
+
+// ── Integrity: the SQLite file itself ─────────────────────────────────────────
+// quick_check is the fast structural pass (nightly); integrity_check scans every
+// page (weekly). Both return a single 'ok' row when sound, else one row per fault.
+export function integrityCheck({ full = false } = {}) {
+  const pragma = full ? "integrity_check" : "quick_check";
+  const rows = db.prepare(`PRAGMA ${pragma}`).all().map((r) => Object.values(r)[0]);
+  const ok = rows.length === 1 && String(rows[0]).toLowerCase() === "ok";
+  return { ok, full, rows: rows.slice(0, 20) };
+}
+
+// PRAGMA foreign_key_check. This schema declares no FKs (ids are plain TEXT, which
+// is why ORPHAN_CHECKS exists), so this is normally empty — but it's a cheap extra
+// net that catches any future declared-FK violation for free.
+export function foreignKeyCheck() {
+  const rows = db.prepare("PRAGMA foreign_key_check").all();
+  return { ok: rows.length === 0, violations: rows.length, rows: rows.slice(0, 20) };
+}
+
+// FTS5 self-verify: ask the evidence_fts index to prove it still matches its shadow
+// content. On failure, optionally 'rebuild' it from scratch. A desynced FTS index
+// silently drops search hits, so this is how text co-occurrence mining stays honest.
+export function ftsVerify({ rebuild = false } = {}) {
+  try {
+    db.prepare("INSERT INTO evidence_fts(evidence_fts) VALUES('integrity-check')").run();
+    return { ok: true, rebuilt: false };
+  } catch (e) {
+    if (!rebuild) return { ok: false, rebuilt: false, error: e.message };
+    try {
+      db.prepare("INSERT INTO evidence_fts(evidence_fts) VALUES('rebuild')").run();
+      return { ok: true, rebuilt: true };
+    } catch (e2) { return { ok: false, rebuilt: false, error: e2.message }; }
+  }
+}
+
+// Fold the write-ahead log back into the main DB and truncate the -wal sidecar, so
+// it can't grow unbounded. Reports before/after -wal size; a -wal that won't shrink
+// means a long-lived transaction is holding it open (worth a look).
+export function walCheckpoint() {
+  const walPath = DB_PATH + "-wal";
+  const walSize = () => { try { return fs.statSync(walPath).size; } catch { return 0; } };
+  const before = walSize();
+  const result = db.pragma("wal_checkpoint(TRUNCATE)");
+  return { before, after: walSize(), result };
+}
+
+// ── Referential hygiene beyond orphans ────────────────────────────────────────
+// Duplicate-entity guard: two entities must never share the same STRONG id (the
+// exact failure behind the 96-politicians-one-entity bug). Scans every entity's
+// strong_ids and flags any id value claimed by more than one entity.
+export function duplicateEntityScan() {
+  const rows = db.prepare("SELECT id, canonical_name, strong_ids FROM entities WHERE strong_ids IS NOT NULL AND strong_ids != ''").all();
+  const owners = new Map(); // "idkey=value" -> Set(entityId)
+  for (const r of rows) {
+    let ids; try { ids = JSON.parse(r.strong_ids); } catch { continue; }
+    if (!ids || typeof ids !== "object") continue;
+    for (const [k, v] of Object.entries(ids)) {
+      if (v == null || v === "") continue;
+      const key = `${k}=${String(v).toLowerCase()}`;
+      if (!owners.has(key)) owners.set(key, new Set());
+      owners.get(key).add(r.id);
+    }
+  }
+  const collisions = [];
+  for (const [key, set] of owners) if (set.size > 1) collisions.push({ key, entities: [...set] });
+  return { scanned: rows.length, collisions: collisions.length, sample: collisions.slice(0, 10) };
+}
+
+// Snapshot of every ledger's row count — the size/growth trend recorded each run.
+export function rowCounts() {
+  const tables = ["politicians", "evidence", "reports", "cards", "entities",
+    "facts", "claims", "events", "relationships", "flags", "investigation_leads", "jobs"];
+  const out = {};
+  for (const t of tables) { try { out[t] = db.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c; } catch { out[t] = -1; } }
+  return out;
+}
+
+// ── Stale-JSON drift: typed rows older than the blob they came from ────────────
+// A re-fetched evidence blob re-stamps evidence.fetched_at, but the idempotent
+// upsert (keyed on evidence_id+extractor_version, NOT fetched_at) leaves the old
+// typed rows in place — so the ledgers silently drift out of sync with the raw
+// data. This finds exactly the affected evidence rows via the timestamp join.
+export function driftScan({ sample = 12 } = {}) {
+  const q = (table) => db.prepare(
+    `SELECT x.evidence_id AS eid, COUNT(*) AS n FROM ${table} x JOIN evidence e ON e.id = x.evidence_id
+     WHERE x.evidence_id IS NOT NULL AND e.fetched_at IS NOT NULL AND x.created_at IS NOT NULL
+       AND e.fetched_at > x.created_at GROUP BY x.evidence_id`).all();
+  const f = q("facts"), c = q("claims");
+  const ids = new Set([...f.map((r) => r.eid), ...c.map((r) => r.eid)]);
+  return {
+    evidence: ids.size,
+    facts: f.reduce((s, r) => s + r.n, 0),
+    claims: c.reduce((s, r) => s + r.n, 0),
+    evidenceIds: [...ids],
+    sample: [...ids].slice(0, sample),
+  };
+}
+
+// Heal drift: delete the stale typed rows for the drifted evidence, then re-extract
+// them from the current blob. `limit` caps how many evidence rows to heal in one
+// pass (0/null = all). Extractors self-register on importing extract-all.js.
+export async function driftHeal({ limit = null } = {}) {
+  const scan = driftScan();
+  let ids = scan.evidenceIds;
+  if (limit != null && Number(limit) > 0) ids = ids.slice(0, Number(limit));
+  if (!ids.length) return { detected: 0, healed: 0, deleted: { facts: 0, claims: 0 }, reextracted: null };
+  await import("./extract-all.js"); // side-effect: registers every extractor
+  const { deleteFactsClaimsByEvidence } = await import("./ledger.js");
+  const { reExtractEvidence } = await import("./extract.js");
+  const deleted = deleteFactsClaimsByEvidence(ids);
+  const reextracted = reExtractEvidence(ids);
+  return { detected: scan.evidence, healed: ids.length, deleted, reextracted };
+}
+
+// ── Freshness: is the pipeline still alive? ───────────────────────────────────
+// Classify per-source fetch health (rotted / quiet / stale) over a window. Thin
+// wrapper over the same classifier the ops health endpoint uses.
+export async function freshness(days = 14) {
+  const rows = sourceHealth(days);
+  try {
+    const { classifyHealth } = await import("./health.js");
+    const { FETCHER_NAMES } = await import("./ingest.js");
+    const c = classifyHealth(rows, FETCHER_NAMES);
+    return { days, sources: rows.length, rotted: c.rotted ?? [], quiet: c.quiet ?? [], stale: c.stale ?? [] };
+  } catch (e) {
+    return { days, sources: rows.length, rotted: [], quiet: [], stale: [], warn: e.message };
+  }
+}
+
+// Staleness queue: enqueue an INCREMENTAL ingest for reps never fetched or fetched
+// longer than `staleDays` ago. The ingest_all handler already knows how to skip
+// fresh reps; here we just kick it. Cheap — it only fetches new/stale items.
+export function enqueueStaleIngest({ staleDays = 7 } = {}) {
+  const last = lastFetchByPolitician();
+  const cutoff = Date.now() - Math.max(0, Number(staleDays) || 0) * 86400_000;
+  const stale = listPoliticians().filter((p) => !p.is_demo).filter((p) => {
+    const t = last.get(p.id); return t == null || t < cutoff;
+  });
+  if (!stale.length) return { stale: 0, enqueued: false };
+  const job = enqueueJob({ type: "ingest_all", payload: { incremental: true, staleDays } });
+  return { stale: stale.length, enqueued: true, jobId: job.id };
+}
+
+// Self-healing zombie reclaim: requeue jobs stuck 'running' past `minutes` (a crash
+// left them claimed). This is the automated form of the ops console's manual button.
+export function reclaimZombies({ minutes = 30 } = {}) {
+  return { reclaimed: reclaimRunningJobs({ olderThanMs: Math.max(0, Number(minutes) || 0) * 60_000 }) };
+}
+
+// Cache pruning — CACHES ONLY, never ledgers (keep-all-data rule). Trims the
+// fetch_runs telemetry ledger and old finished jobs. Raw evidence + typed ledgers
+// are never touched here.
+export function cachePrune({ fetchRunDays = 90, jobDays = 14 } = {}) {
+  const fetchRuns = pruneFetchRuns(fetchRunDays);
+  const doneJobs = trimJobs({ status: "done", olderThanMs: jobDays * 86400_000 });
+  const deadJobs = trimJobs({ status: "dead", olderThanMs: jobDays * 86400_000 });
+  return { fetchRuns, doneJobs, deadJobs };
+}
+
+// ── Size & performance ────────────────────────────────────────────────────────
+// Refresh the query planner's statistics. Cheap and safe — run it nightly.
+export function optimize() {
+  db.pragma("optimize");
+  db.prepare("ANALYZE").run();
+  return { ok: true };
+}
+
+// Freelist accounting — how much dead space a VACUUM would reclaim.
+export function dbSpace() {
+  const page_count = db.pragma("page_count", { simple: true });
+  const freelist = db.pragma("freelist_count", { simple: true });
+  const page_size = db.pragma("page_size", { simple: true });
+  return { bytes: page_count * page_size, page_count, freelist, page_size, freeRatio: page_count ? freelist / page_count : 0 };
+}
+
+// Full VACUUM — rewrites the file, reclaiming freelist space. Takes a safety backup
+// first (VACUUM rewrites in place), then ANALYZE + WAL checkpoint. Expensive.
+export function vacuum({ keep = 5, backupFirst = true } = {}) {
+  if (backupFirst) backup({ keep, quiet: true });
+  db.prepare("VACUUM").run();
+  db.prepare("ANALYZE").run();
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  return { size: fs.statSync(DB_PATH).size };
+}
+
+// Conditional VACUUM: only pay the cost when dead space exceeds `threshold` (freelist
+// ratio). Monthly tier calls this so a healthy DB is left alone.
+export function vacuumIfNeeded({ threshold = 0.15, force = false } = {}) {
+  const before = dbSpace();
+  if (!force && before.freeRatio < threshold) return { vacuumed: false, before, threshold };
+  vacuum();
+  return { vacuumed: true, threshold, before, after: dbSpace() };
+}
+
+// ── Backups: can we actually recover? ─────────────────────────────────────────
+// A backup you haven't opened is a hope, not a backup. Open the newest backup file
+// read-only and run quick_check on it. Returns red if there is no backup or it's
+// unreadable/corrupt.
+export function backupVerify() {
+  let newest = null;
+  try {
+    newest = fs.readdirSync(BACKUP_DIR)
+      .filter((n) => /^pandoros-.*\.db$/.test(n))
+      .map((n) => ({ n, p: path.join(BACKUP_DIR, n), t: fs.statSync(path.join(BACKUP_DIR, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)[0] ?? null;
+  } catch { /* no backup dir yet */ }
+  if (!newest) return { ok: false, error: "no backup found" };
+  let bkp;
+  try {
+    bkp = new Database(newest.p, { readonly: true, fileMustExist: true });
+    const rows = bkp.prepare("PRAGMA quick_check").all().map((r) => Object.values(r)[0]);
+    const ok = rows.length === 1 && String(rows[0]).toLowerCase() === "ok";
+    const pols = bkp.prepare("SELECT COUNT(*) c FROM politicians").get().c;
+    return { ok, file: newest.n, size: fs.statSync(newest.p).size, politicians: pols, rows: ok ? undefined : rows.slice(0, 5) };
+  } catch (e) {
+    return { ok: false, file: newest.n, error: e.message };
+  } finally { try { bkp?.close(); } catch { /* ignore */ } }
+}
+
+// ── The maintenance runner: tasks, tiers, findings, and the log ───────────────
+// Each task is a thunk returning { status: 'ok'|'warn'|'red', ...data }. runTask
+// wraps one and normalises errors to a red finding; runMaintenance composes a tier.
+
+// A tier is skipped-if-busy for its HEAVY tasks: when a concurrent ingest is queued
+// or running (the schtasks CLI can overlap the live server worker), vacuum/full
+// integrity are deferred rather than fighting for the write lock.
+function busyWithIngest() {
+  try {
+    const running = listJobs({ status: "running" }).some((j) => String(j.type).startsWith("ingest"));
+    const queued = listJobs({ status: "queued" }).some((j) => String(j.type).startsWith("ingest"));
+    return running || queued;
+  } catch { return false; }
+}
+
+// Task registry: name -> async () => finding. `heavy` tasks are skipped when busy.
+const TASKS = {
+  async integrity_quick() { const r = integrityCheck({ full: false }); return { status: r.ok ? "ok" : "red", ...r }; },
+  async integrity_full()  { const r = integrityCheck({ full: true });  return { status: r.ok ? "ok" : "red", ...r }; },
+  async foreign_keys()    { const r = foreignKeyCheck();                return { status: r.ok ? "ok" : "red", ...r }; },
+  async fts_verify()      { const r = ftsVerify({ rebuild: true });     return { status: r.ok ? "ok" : "red", ...r }; },
+  async wal_checkpoint()  { const r = walCheckpoint();                  return { status: "ok", ...r }; },
+  async orphans()         { const r = check();                         return { status: r.ok ? "ok" : "red", integrityOk: r.integrityOk, totalOrphans: r.totalOrphans, orphans: r.orphans }; },
+  async duplicate_entities() { const r = duplicateEntityScan();        return { status: r.collisions ? "red" : "ok", ...r }; },
+  async drift_scan()      { const r = driftScan();                     return { status: (r.facts + r.claims) ? "warn" : "ok", ...r }; },
+  async drift_heal()      { const r = await driftHeal({});             return { status: "ok", ...r }; },
+  async freshness()       { const r = await freshness(14);             return { status: r.rotted.length ? "warn" : "ok", ...r }; },
+  async staleness_ingest(){ const r = enqueueStaleIngest({});          return { status: "ok", ...r }; },
+  async reclaim_zombies() { const r = reclaimZombies({});              return { status: "ok", ...r }; },
+  async cache_prune()     { const r = cachePrune({});                  return { status: "ok", ...r }; },
+  async optimize()        { const r = optimize();                      return { status: "ok", ...r }; },
+  async backup()          { const r = backup({ quiet: true });         return { status: "ok", dest: path.basename(r.dest), size: r.size, ms: r.ms }; },
+  async backup_verify()   { const r = backupVerify();                  return { status: r.ok ? "ok" : "red", ...r }; },
+  async vacuum()          { if (busyWithIngest()) return { status: "warn", skipped: "ingest busy" }; const r = vacuum(); return { status: "ok", ...r }; },
+  async vacuum_if_needed(){ if (busyWithIngest()) return { status: "warn", skipped: "ingest busy" }; const r = vacuumIfNeeded({}); return { status: "ok", ...r }; },
+};
+const HEAVY = new Set(["integrity_full", "vacuum", "vacuum_if_needed"]);
+
+// Run one named task, catching failures into a red finding so a tier never aborts.
+export async function runMaintenanceTask(name, opts = {}, { log = () => {} } = {}) {
+  const fn = TASKS[name];
+  if (!fn) throw new Error(`unknown maintenance task: ${name}`);
+  const t0 = Date.now();
+  try {
+    // Task-specific overrides (e.g. drift_heal limit) flow through the opts payload.
+    const finding = name === "drift_heal" ? { status: "ok", ...(await driftHeal({ limit: opts.limit ?? null })) }
+      : name === "vacuum_if_needed" ? { status: "ok", ...(busyWithIngest() ? { status: "warn", skipped: "ingest busy" } : vacuumIfNeeded({ force: !!opts.force })) }
+      : await fn();
+    const out = { task: name, ...finding, ms: Date.now() - t0 };
+    log(`[maint] ${name}: ${out.status}`);
+    return out;
+  } catch (e) {
+    log(`[maint] ${name} FAILED: ${e.message}`);
+    return { task: name, status: "red", error: e.message, ms: Date.now() - t0 };
+  }
+}
+
+// The tiers. nightly = fast daily hygiene; weekly = deeper checks + drift heal;
+// monthly = the expensive rewrite + backup audit. Order matters within a tier.
+export const TIERS = {
+  nightly: ["wal_checkpoint", "optimize", "integrity_quick", "orphans", "drift_scan", "freshness", "backup", "backup_verify"],
+  weekly:  ["integrity_full", "foreign_keys", "fts_verify", "duplicate_entities", "reclaim_zombies", "staleness_ingest", "cache_prune", "drift_heal"],
+  monthly: ["vacuum_if_needed", "backup", "backup_verify", "duplicate_entities"],
+};
+
+const SEV_RANK = { green: 0, ok: 0, warn: 1, red: 2 };
+const worst = (findings) => {
+  let s = "green";
+  for (const f of findings) if ((SEV_RANK[f.status] ?? 0) > (SEV_RANK[s] ?? 0)) s = f.status === "ok" ? "green" : f.status;
+  return s;
+};
+
+// Persist one run into maintenance_log. Quiet-by-default lives in the reader/UI:
+// green rows are just history; warn/red rows are what the Health tab surfaces.
+function writeMaintenanceLog({ tier, status, durationMs, findings }) {
+  const rc = rowCounts();
+  const rowTotal = Object.values(rc).reduce((s, n) => s + Math.max(0, n), 0);
+  const dbSize = (() => { try { return fs.statSync(DB_PATH).size; } catch { return null; } })();
+  const redOrWarn = findings.filter((f) => f.status === "red" || f.status === "warn").length;
+  db.prepare(`INSERT INTO maintenance_log (id, at, tier, status, duration_ms, db_size, row_count, findings, report)
+    VALUES (@id, @at, @tier, @status, @duration_ms, @db_size, @row_count, @findings, @report)`).run({
+    id: id(), at: new Date().toISOString(), tier, status,
+    duration_ms: durationMs, db_size: dbSize, row_count: rowTotal, findings: redOrWarn,
+    report: JSON.stringify({ tier, status, durationMs, dbSize, rowCounts: rc, findings }),
+  });
+}
+
+// Run a whole tier: singleton-guarded (never overlap with itself), heavy tasks
+// deferred when busy, every finding logged. Returns the full report object.
+export async function runMaintenance(tier, { log = console.log, enqueue = true } = {}) {
+  const tasks = TIERS[tier];
+  if (!tasks) throw new Error(`unknown maintenance tier: ${tier} (use ${Object.keys(TIERS).join("|")})`);
+
+  // Singleton lock: a maintenance run set within the last hour means another run is
+  // in flight (or crashed mid-run) — skip rather than double-run heavy work.
+  const LOCK = "maintenance_running";
+  const lock = getMeta(LOCK, null);
+  if (lock && Date.now() - Number(lock) < 3600_000) {
+    log(`[maint] ${tier}: another run started ${Math.round((Date.now() - Number(lock)) / 1000)}s ago — skipping.`);
+    return { tier, status: "warn", skipped: "locked", findings: [] };
+  }
+  setMeta(LOCK, Date.now());
+  const t0 = Date.now();
+  const findings = [];
+  try {
+    log(`\n[maint] ── tier ${tier} ──`);
+    for (const name of tasks) {
+      if (!enqueue && (name === "staleness_ingest")) { log(`[maint] ${name}: skipped (enqueue off)`); continue; }
+      if (HEAVY.has(name) && busyWithIngest()) { findings.push({ task: name, status: "warn", skipped: "ingest busy" }); log(`[maint] ${name}: skipped (ingest busy)`); continue; }
+      findings.push(await runMaintenanceTask(name, {}, { log }));
+    }
+  } finally { setMeta(LOCK, 0); }
+
+  const durationMs = Date.now() - t0;
+  const status = worst(findings);
+  writeMaintenanceLog({ tier, status, durationMs, findings });
+  log(`[maint] ${tier} done in ${durationMs}ms → ${status.toUpperCase()} (${findings.filter((f) => f.status === "red").length} red, ${findings.filter((f) => f.status === "warn").length} warn)`);
+  return { tier, status, durationMs, findings };
+}
+
+// Reader for the Ops Console Health tab: the latest N runs (newest first), with the
+// most-recent run's full report parsed out for rendering.
+export function maintenanceHistory({ limit = 20 } = {}) {
+  const rows = db.prepare("SELECT id, at, tier, status, duration_ms, db_size, row_count, findings, report FROM maintenance_log ORDER BY at DESC LIMIT ?").all(limit);
+  const latest = rows[0] ? (() => { try { return JSON.parse(rows[0].report); } catch { return null; } })() : null;
+  return {
+    latest,
+    runs: rows.map((r) => ({ id: r.id, at: r.at, tier: r.tier, status: r.status, duration_ms: r.duration_ms, db_size: r.db_size, row_count: r.row_count, findings: r.findings })),
+    tiers: Object.keys(TIERS),
+  };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -237,7 +597,25 @@ async function main() {
     return process.exit(r.ok ? 0 : 1);
   }
 
-  console.log(`Unknown command "${cmd}". Use: backup | check | doctor | vacuum | all`);
+  // The automated tiered sweep — the entry point Task Scheduler / the queue call.
+  if (cmd === "cron") {
+    const tier = argv[1] || "nightly";
+    if (!TIERS[tier]) { console.log(`Unknown tier "${tier}". Use: ${Object.keys(TIERS).join(" | ")}`); return process.exit(1); }
+    const rep = await runMaintenance(tier, { log: console.log });
+    if (argv.includes("--json")) console.log(JSON.stringify(rep, null, 2));
+    return process.exit(rep.status === "red" ? 1 : 0);
+  }
+
+  // Run a single task by name (for scripting / debugging individual checks).
+  if (cmd === "task") {
+    const name = argv[1];
+    if (!name) { console.log(`Usage: task <name>. Known: ${Object.keys(TASKS).join(", ")}`); return process.exit(1); }
+    const limit = flag("--limit"); const out = await runMaintenanceTask(name, { limit: limit != null ? Number(limit) : null, force: argv.includes("--force") }, { log: console.log });
+    console.log(JSON.stringify(out, null, 2));
+    return process.exit(out.status === "red" ? 1 : 0);
+  }
+
+  console.log(`Unknown command "${cmd}". Use: backup | check | doctor | vacuum | all | cron <tier> | task <name>`);
   process.exit(1);
 }
 
