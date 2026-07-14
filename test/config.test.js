@@ -45,3 +45,29 @@ test("dataGovKey falls back to OGD_API_KEY when the first three are unset", () =
   process.env.OGD_API_KEY = "ogd-key";
   assert.equal(dataGovKey(), "ogd-key");
 });
+
+// ---- validateStartupConfig (takes an env object — no process.env juggling) ----
+test("validateStartupConfig: missing ADMIN_TOKEN warns in dev, fatal in production", async () => {
+  const { validateStartupConfig } = await import("../server/config.js");
+  const dev = validateStartupConfig({});
+  assert.equal(dev.fatal.length, 0);
+  assert.ok(dev.warnings.some((w) => w.includes("ADMIN_TOKEN")));
+
+  const prod = validateStartupConfig({ NODE_ENV: "production" });
+  assert.ok(prod.fatal.some((f) => f.includes("ADMIN_TOKEN")));
+});
+
+test("validateStartupConfig: missing AI_API_KEY is always only a warning", async () => {
+  const { validateStartupConfig } = await import("../server/config.js");
+  const out = validateStartupConfig({ NODE_ENV: "production", ADMIN_TOKEN: "x" });
+  assert.equal(out.fatal.length, 0);
+  assert.ok(out.warnings.some((w) => w.includes("AI_API_KEY")));
+});
+
+test("validateStartupConfig: non-numeric PORT is fatal; clean env passes", async () => {
+  const { validateStartupConfig } = await import("../server/config.js");
+  assert.ok(validateStartupConfig({ PORT: "abc" }).fatal.some((f) => f.includes("PORT")));
+  const clean = validateStartupConfig({ ADMIN_TOKEN: "x", AI_API_KEY: "y", PORT: "3000" });
+  assert.equal(clean.fatal.length, 0);
+  assert.equal(clean.warnings.length, 0);
+});

@@ -309,6 +309,13 @@ app.use((err, req, res, next) => {
 });
 
 if (process.env.PB_NO_LISTEN !== "1") {
+  const { validateStartupConfig } = await import("./config.js");
+  const { fatal, warnings } = validateStartupConfig();
+  for (const w of warnings) console.warn(`[config] WARNING: ${w}`);
+  if (fatal.length > 0) {
+    for (const f of fatal) console.error(`[config] FATAL: ${f}`);
+    process.exit(1);
+  }
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, async () => {
     console.log(`Pandoro's Box running at http://localhost:${PORT}`);
