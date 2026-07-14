@@ -1,17 +1,31 @@
-// Single-process, sequential job worker. Claims ONE job at a time and dispatches
-// by type to a handler that CALLS AN EXISTING EXPORTED FUNCTION — it never
-// reimplements ingest/report/discovery logic. Concurrency inside a job already
-// exists (fetchers use mapLimit), so the worker itself stays deliberately serial:
-// simple, predictable, and easy on external endpoints and the LLM budget.
+// Single-process job worker with a bounded CONCURRENCY POOL. Claims jobs and
+// dispatches by type to a handler that CALLS AN EXISTING EXPORTED FUNCTION — it
+// never reimplements ingest/report/discovery logic.
+//
+// Parallelism model (one Node process, several jobs in flight):
+//   - a global cap (worker.pool.maxParallel, ops-tunable, default 4)
+//   - a per-type cap (CONCURRENCY map + worker.concurrency.<type> overrides):
+//     network-bound types (ingest_politician, generate_card) get >1 lane;
+//     paid-LLM and file-cache-writing types stay at 1 so spend and cache files
+//     are never multiplied
+//   - MUTEX_GROUPS: full engine runs never overlap each other (they'd cross-mark
+//     each other's flags stale) but run fine beside unrelated types
+//   - EXCLUSIVE types (reset_data, db_maintenance_danger) run strictly alone
+//   - MIN_GAP_MS still spaces per-type STARTS (the paid-budget throttle)
+// A type at its cap / in a gap is SKIPPED OVER, so a saturated ingest lane never
+// blocks a due card job. That is an intentional soft priority inversion: a
+// high-priority job of a capped type yields to lower-priority jobs of others.
+// External hosts are protected by server/util/host-limiter.js (cross-job gate).
 //
 // Usage:
 //   node server/worker.js           # long-running: drain + poll forever, runs the scheduler
 //   node server/worker.js --once    # drain the queue until empty, then exit (tests/verification)
 //
-// SIGINT: finish the current job, then exit (a second SIGINT force-quits).
+// SIGINT: stop claiming, finish the in-flight jobs, then exit (a second SIGINT force-quits).
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   claimNextJob, peekNextJob, completeJob, failJob, enqueueJob,
   listPoliticians, getPolitician, sourceHealth, pruneFetchRuns,
@@ -25,6 +39,7 @@ import { startScheduler } from "./scheduler.js";
 import { runAnomalyScan } from "./anomaly.js";
 import { push as pushLog } from "./ops-log.js";
 import { sleep } from "./util/timing.js";
+import { getSetting, listOverrides } from "./engine-settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
@@ -80,6 +95,87 @@ export const MIN_GAP_MS = {
   repair_myneta: 0,
   reset_data: 0,
 };
+
+// ── Per-type concurrency limits ─────────────────────────────────────────────
+// How many jobs of one type may run AT THE SAME TIME. Types not listed default
+// to 1. Only genuinely network-bound types get extra lanes — everything CPU-
+// bound gains nothing from overlap (one JS thread), paid-LLM types must never
+// multiply spend, and the file-cache writers (ingest_all L1 refresh,
+// mega_refresh, roster/myneta CLIs) use non-atomic writeFileSync paths that
+// would corrupt under overlap. Live overrides: worker.concurrency.<type>.
+export const CONCURRENCY = {
+  ingest_politician: 3, // multi-source fetch; external pressure capped by host-limiter
+  generate_card: 2,     // free-chain only; >2 just burns free-tier 429s
+};
+export const DEFAULT_MAX_PARALLEL = 4; // global cap; override: worker.pool.maxParallel
+
+// Types that run strictly ALONE — claimed only when the pool is empty, and
+// nothing else is claimed while one runs. Both wipe/rewrite data.
+export const EXCLUSIVE = new Set(["reset_data", "db_maintenance_danger"]);
+
+// Types sharing a group never overlap EACH OTHER (they run fine beside
+// unrelated types). Full engine runs mark every flag not written by their own
+// runId stale (flags.js markStaleExcept), so two overlapping full runs would
+// corrupt each other's flag set; a cppp rebuild must not overlap a cppp scan
+// (non-atomic DROP→CREATE→insert). investigate_politician is politicianId-
+// scoped (skips stale-marking) so it stays outside the group.
+export const MUTEX_GROUPS = {
+  engine_scan: "engine",
+  investigate_all: "engine",
+  engine_synthesis: "engine",
+  cppp_scan: "engine",
+};
+
+const limitFor = (type, perType) =>
+  Math.max(1, perType?.[type] ?? CONCURRENCY[type] ?? 1);
+
+// Ops-tunable worker settings (stored in engine_settings under 'worker.<param>',
+// edited live from the Tuning tab exactly like detector thresholds). Only the
+// knobs that are SAFE to raise are exposed: paid-LLM, engine-mutex and
+// file-cache-writing types are pinned at 1 by design and deliberately absent.
+export const WORKER_TUNABLES = {
+  "pool.maxParallel": {
+    label: "max jobs in flight", type: "number", min: 1, max: 16, step: 1, def: DEFAULT_MAX_PARALLEL,
+    desc: "Global cap on concurrently running jobs. Per-type lanes below still apply.",
+  },
+  "concurrency.ingest_politician": {
+    label: "ingest lanes", type: "number", min: 1, max: 8, step: 1, def: CONCURRENCY.ingest_politician,
+    desc: "Parallel per-politician ingest jobs. External sites stay protected by the shared host rate limiter regardless of this number.",
+  },
+  "concurrency.generate_card": {
+    label: "card lanes", type: "number", min: 1, max: 8, step: 1, def: CONCURRENCY.generate_card,
+    desc: "Parallel report-card jobs (free LLM chain only). High values just trade speed for more free-tier rate-limit fallbacks.",
+  },
+};
+
+// Tuning-tab surface for the pool — shaped like an engine group so the ops
+// console's generic tunables renderer can display it.
+export function workerStatus() {
+  const settings = {};
+  for (const [param, meta] of Object.entries(WORKER_TUNABLES)) {
+    const v = getSetting(`worker.${param}`);
+    settings[param] = v === undefined ? meta.def : v;
+  }
+  return {
+    id: "worker", label: "Worker pool", category: "worker",
+    desc: "Job-queue parallelism. Paid-LLM, engine and maintenance job types always run one at a time (safety-pinned); these knobs only tune the network-bound lanes.",
+    tunables: WORKER_TUNABLES, settings,
+  };
+}
+
+// Live pool config, re-read every claim tick (better-sqlite3 point reads are
+// microseconds) so ops-console changes apply on the next tick — no restart.
+export function readWorkerConfig() {
+  const raw = Number(getSetting("worker.pool.maxParallel", DEFAULT_MAX_PARALLEL));
+  const maxParallel = Math.max(1, Math.min(16, Number.isFinite(raw) ? Math.floor(raw) : DEFAULT_MAX_PARALLEL));
+  const perType = {};
+  for (const { key, value } of listOverrides("worker.concurrency.")) {
+    const type = key.slice("worker.concurrency.".length);
+    const n = Number(value);
+    if (type && Number.isFinite(n) && n >= 1) perType[type] = Math.min(8, Math.floor(n));
+  }
+  return { maxParallel, perType };
+}
 
 // Job-type → handler. Handlers receive the parsed payload (and the job row) and
 // must call the real exported functions. Returned value is logged, not stored.
@@ -338,15 +434,30 @@ export const HANDLERS = {
   },
 };
 
-// Tee console.log/warn/error into the job's live-log buffer for the duration of a
-// job, returning a restore fn. The worker is serial, so patching the global
-// console for the running job is safe (only one job runs at a time). This is what
-// makes an in-process handler's existing `[ingest]`/`[generate]` lines streamable.
-function teeConsole(jobId) {
-  const orig = { log: console.log, warn: console.warn, error: console.error };
-  const wrap = (fn) => (...a) => { try { pushLog(jobId, a.map((x) => (typeof x === "string" ? x : String(x))).join(" ")); } catch { /* logging must never break a job */ } return fn(...a); };
-  console.log = wrap(orig.log); console.warn = wrap(orig.warn); console.error = wrap(orig.error);
-  return () => { console.log = orig.log; console.warn = orig.warn; console.error = orig.error; };
+// Per-job log routing under CONCURRENT jobs. The old approach swapped the
+// global console per job — safe only while exactly one job ran at a time. Now
+// the console is patched ONCE, and each call looks up "which job am I inside?"
+// via AsyncLocalStorage, which follows the async call chain across await/
+// timers/mapLimit automatically. Output from code running inside job A lands in
+// A's live-log buffer; output outside any job (boot, HTTP, scheduler) passes
+// straight through to the real console.
+export const jobLogContext = new AsyncLocalStorage(); // store = jobId string
+
+let consolePatched = false;
+export function patchConsoleForJobs() {
+  if (consolePatched) return;
+  consolePatched = true;
+  for (const m of ["log", "warn", "error"]) {
+    const orig = console[m].bind(console);
+    console[m] = (...a) => {
+      const jobId = jobLogContext.getStore();
+      if (jobId) {
+        try { pushLog(jobId, a.map((x) => (typeof x === "string" ? x : String(x))).join(" ")); }
+        catch { /* logging must never break a job */ }
+      }
+      return orig(...a);
+    };
+  }
 }
 
 // Run a single claimed job through its handler, then complete or fail it.
@@ -360,71 +471,126 @@ export async function runJob(job, handlers = HANDLERS) {
     console.error(`[worker] failed ${job.type} ${job.id} (0ms) → ${outcome?.status}: no handler`);
     return { ok: false, error: "no handler", outcome };
   }
-  const restore = teeConsole(job.id);
-  try {
-    const result = await handler(job.payload ?? {}, job);
-    completeJob(job.id);
-    const ms = Date.now() - t0;
-    console.log(`[worker] done ${job.type} ${job.id} (${ms}ms)`);
-    return { ok: true, result, ms };
-  } catch (err) {
-    const ms = Date.now() - t0;
-    const outcome = failJob(job.id, err);
-    console.error(`[worker] failed ${job.type} ${job.id} (${ms}ms) → ${outcome?.status}: ${err.message}`);
-    return { ok: false, error: err, outcome, ms };
-  } finally {
-    restore();
-  }
+  patchConsoleForJobs(); // idempotent — ensures routing even when runJob is called directly (tests)
+  return jobLogContext.run(job.id, async () => {
+    try {
+      const result = await handler(job.payload ?? {}, job);
+      completeJob(job.id);
+      const ms = Date.now() - t0;
+      console.log(`[worker] done ${job.type} ${job.id} (${ms}ms)`);
+      return { ok: true, result, ms };
+    } catch (err) {
+      const ms = Date.now() - t0;
+      const outcome = failJob(job.id, err);
+      console.error(`[worker] failed ${job.type} ${job.id} (${ms}ms) → ${outcome?.status}: ${err.message}`);
+      return { ok: false, error: err, outcome, ms };
+    }
+  });
 }
 
-// Drain every currently-claimable job, honoring the per-type rate budget, until
-// the queue has nothing due. Backed-off (future run_at) jobs are NOT claimable,
-// so a repeatedly-failing job cannot spin this loop forever. Used by --once.
-export async function drain(handlers = HANDLERS, { gapMap = MIN_GAP_MS, lastStart = {}, honorGaps = true } = {}) {
+// ── The pool loop — the ONE consumer behind every entry point ────────────────
+// Replaces the old serial drain/poll loops. Each tick: honor pause, read the
+// live config, exclude types that are capped / mutex-blocked / gap-blocked /
+// exclusive, claim ONE job (atomic UPDATE…RETURNING) and launch it WITHOUT
+// awaiting. When the pool is full, wait for any in-flight job to finish.
+//
+//   once:true   → drain semantics: exit when nothing due remains (backed-off
+//                 future-run_at jobs don't spin it; gap-blocked due jobs are
+//                 waited out, matching the old drain()). Ignores pause, like
+//                 the old --once drain did.
+//   isStopped() → cooperative stop: stop claiming, finish in-flight, return.
+export async function runPool({
+  handlers = HANDLERS, gapMap = MIN_GAP_MS, pollMs = 1000,
+  once = false, isStopped = () => false, getConfig = readWorkerConfig,
+  lastStart = {},
+} = {}) {
+  patchConsoleForJobs();
+  const runningByType = new Map(); // type  → in-flight count
+  const runningGroups = new Map(); // group → in-flight count
+  const inflight = new Set();
+  let exclusiveRunning = false;
   let processed = 0;
-  for (;;) {
-    const peek = peekNextJob();
-    if (!peek) break;
-    if (honorGaps) {
-      const gap = gapMap[peek.type] ?? 0;
-      const since = Date.now() - (lastStart[peek.type] ?? 0);
-      if (gap && since < gap) await sleep(gap - since);
+
+  // Sleep, but wake early if any in-flight job finishes (frees a lane/type).
+  const waitTick = (ms) => inflight.size
+    ? Promise.race([Promise.race(inflight), sleep(ms)])
+    : sleep(ms);
+
+  while (!isStopped()) {
+    if (!once && isQueuePaused()) { await waitTick(pollMs); continue; } // pause: claim nothing; in-flight finish
+    const cfg = getConfig();
+    if (exclusiveRunning || inflight.size >= cfg.maxParallel) {
+      // Bounded wait (not a bare race): re-reads the live config every pollMs,
+      // so RAISING worker.pool.maxParallel mid-flight takes effect within a
+      // tick instead of only after the next job completes.
+      await waitTick(pollMs);
+      continue;
     }
-    const job = claimNextJob();
-    if (!job) break;
+    // Types we must not claim right now.
+    const excluded = new Set();
+    for (const [t, n] of runningByType) if (n >= limitFor(t, cfg.perType)) excluded.add(t);
+    for (const [t, g] of Object.entries(MUTEX_GROUPS)) if ((runningGroups.get(g) ?? 0) > 0) excluded.add(t);
+    if (inflight.size > 0) for (const t of EXCLUSIVE) excluded.add(t);
+    let minGapWait = pollMs;
+    for (const [t, gap] of Object.entries(gapMap)) {
+      if (!gap) continue;
+      const left = gap - (Date.now() - (lastStart[t] ?? 0));
+      if (left > 0) { excluded.add(t); minGapWait = Math.min(minGapWait, left); }
+    }
+
+    const job = claimNextJob({ excludeTypes: [...excluded] });
+    if (!job) {
+      // Nothing claimable outside the exclusions. In --once mode we're done
+      // only when the queue is truly empty of DUE jobs (an exclusion-blocked
+      // due job still needs waiting out; a backed-off future run_at does not).
+      if (once && inflight.size === 0 && !peekNextJob()) break;
+      await waitTick(Math.max(10, minGapWait));
+      continue;
+    }
+
+    if (EXCLUSIVE.has(job.type)) exclusiveRunning = true;
     lastStart[job.type] = Date.now();
-    await runJob(job, handlers);
+    runningByType.set(job.type, (runningByType.get(job.type) ?? 0) + 1);
+    const group = MUTEX_GROUPS[job.type];
+    if (group) runningGroups.set(group, (runningGroups.get(group) ?? 0) + 1);
     processed++;
+    const p = runJob(job, handlers).finally(() => {
+      const n = (runningByType.get(job.type) ?? 1) - 1;
+      if (n > 0) runningByType.set(job.type, n); else runningByType.delete(job.type);
+      if (group) {
+        const m = (runningGroups.get(group) ?? 1) - 1;
+        if (m > 0) runningGroups.set(group, m); else runningGroups.delete(group);
+      }
+      if (EXCLUSIVE.has(job.type)) exclusiveRunning = false;
+      inflight.delete(p);
+    });
+    inflight.add(p);
   }
+  await Promise.allSettled([...inflight]); // graceful drain: claim nothing new, finish in-flight
   return processed;
 }
 
-// Start the scheduler + a polling drain loop IN-PROCESS (for the one-launch ops
-// console: `node server/index.js` runs the web server AND the worker together).
-// Non-blocking: returns a stop() fn. Long jobs are async I/O so they don't starve
+// Drain every currently-claimable job until the queue has nothing due, then
+// return the processed count. Kept as a thin wrapper over runPool for tests and
+// the --once CLI. Backed-off (future run_at) jobs are NOT claimable, so a
+// repeatedly-failing job cannot spin it forever.
+export async function drain(handlers = HANDLERS, { gapMap = MIN_GAP_MS, lastStart = {}, honorGaps = true, pollMs = 25 } = {}) {
+  return runPool({ handlers, gapMap: honorGaps ? gapMap : {}, lastStart, pollMs, once: true });
+}
+
+// Start the scheduler + the pool IN-PROCESS (for the one-launch ops console:
+// `node server/index.js` runs the web server AND the worker together).
+// Non-blocking: returns a stop() fn. Jobs are async I/O so they don't starve
 // the HTTP event loop. Idempotent-ish — call once at server boot.
 export function startInProcessWorker({ pollMs = 1000, scheduler = true } = {}) {
-  // This worker is the sole serial consumer, so any 'running' job at boot is a
-  // zombie orphaned by a prior crash/restart — requeue it before we start.
+  // This process hosts the ONLY consumer pool, so any 'running' job at boot is
+  // a zombie orphaned by a prior crash/restart — requeue it before we start.
   const reclaimed = reclaimRunningJobs();
   if (reclaimed) console.log(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
   if (scheduler) startScheduler();
-  const lastStart = {};
   let stopped = false;
-  (async () => {
-    while (!stopped) {
-      if (isQueuePaused()) { await sleep(pollMs); continue; } // ops-console pause: leave queued jobs untouched
-      const peek = peekNextJob();
-      if (!peek) { await sleep(pollMs); continue; }
-      const gap = MIN_GAP_MS[peek.type] ?? 0;
-      const since = Date.now() - (lastStart[peek.type] ?? 0);
-      if (gap && since < gap) { await sleep(Math.min(gap - since, pollMs)); continue; }
-      const job = claimNextJob();
-      if (!job) { await sleep(pollMs); continue; }
-      lastStart[job.type] = Date.now();
-      await runJob(job);
-    }
-  })();
+  runPool({ pollMs, isStopped: () => stopped })
+    .catch((err) => console.error(`[worker] pool crashed: ${err.stack ?? err}`));
   return () => { stopped = true; };
 }
 
@@ -435,10 +601,10 @@ async function main() {
   process.on("SIGINT", () => {
     if (stopping) { console.log("\n[worker] second SIGINT — force exit."); process.exit(130); }
     stopping = true;
-    console.log("\n[worker] SIGINT — finishing the current job, then exiting…");
+    console.log("\n[worker] SIGINT — finishing the in-flight job(s), then exiting…");
   });
 
-  // Sole serial consumer: recover any job left 'running' by a previous crash.
+  // Sole consumer pool: recover any job left 'running' by a previous crash.
   const reclaimed = reclaimRunningJobs();
   if (reclaimed) console.log(`[worker] reclaimed ${reclaimed} orphaned running job(s) → queued`);
 
@@ -449,23 +615,9 @@ async function main() {
     process.exit(0);
   }
 
-  console.log("[worker] starting (long-running). Ctrl-C to stop after the current job.");
+  console.log("[worker] starting (long-running, pooled). Ctrl-C to stop after in-flight jobs.");
   startScheduler();
-  const lastStart = {};
-  const POLL_MS = 1000;
-  while (!stopping) {
-    if (isQueuePaused()) { await sleep(POLL_MS); continue; } // ops-console pause: leave queued jobs untouched
-    const peek = peekNextJob();
-    if (!peek) { await sleep(POLL_MS); continue; }
-    const gap = MIN_GAP_MS[peek.type] ?? 0;
-    const since = Date.now() - (lastStart[peek.type] ?? 0);
-    if (gap && since < gap) { await sleep(Math.min(gap - since, POLL_MS)); continue; }
-    if (stopping) break;
-    const job = claimNextJob();
-    if (!job) { await sleep(POLL_MS); continue; }
-    lastStart[job.type] = Date.now();
-    await runJob(job);
-  }
+  await runPool({ isStopped: () => stopping });
   console.log("[worker] stopped.");
   process.exit(0);
 }

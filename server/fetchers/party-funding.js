@@ -6,14 +6,22 @@
 // Maps p.party (e.g. "BJP") → MyNeta party id via the abbreviation MyNeta prints
 // in parentheses, e.g. "Bharatiya Janata Party (BJP)". Free, no key.
 import { fetchText, htmlToText, mapLimit } from "./http.js";
+import { acquire } from "../util/host-limiter.js";
 
 const BASE = "https://www.myneta.info/party/index.php";
+
+// Every myneta.info request first takes a slot on the shared cross-job limiter,
+// so parallel ingest jobs collectively stay at ~1 request / 2 s to the site.
+async function mynetaFetch(url, opts) {
+  await acquire("myneta", 2000);
+  return fetchText(url, opts);
+}
 
 // Cached party directory: abbreviation + full name → MyNeta party id.
 let mapPromise = null;
 async function partyMap() {
   if (!mapPromise) mapPromise = (async () => {
-    const html = await fetchText("https://www.myneta.info/party/", { timeoutMs: 25000 });
+    const html = await mynetaFetch("https://www.myneta.info/party/", { timeoutMs: 25000 });
     const map = new Map();
     if (!html) return map;
     for (const m of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
@@ -90,15 +98,25 @@ function formatItr(html, fyLabel) {
 
 // Party-level scrape cache: many politicians share a party, so scraping the
 // summary + per-year detail + donations once per party (keyed by MyNeta id)
-// avoids re-fetching for every member during a single ingest run. `null` marks
-// a party whose summary page failed, so we don't retry it repeatedly.
+// avoids re-fetching for every member during a single ingest run. The cache
+// holds the in-flight PROMISE (not the resolved value) so concurrent ingest
+// jobs for same-party reps share one scrape instead of each firing their own.
+// A resolved `null` marks a party whose summary page failed (kept — don't
+// retry repeatedly this run); a REJECTED scrape is evicted so a transient
+// network error doesn't poison the cache.
 const partyCache = new Map();
 
-async function scrapeParty(entry) {
-  if (partyCache.has(entry.id)) return partyCache.get(entry.id);
+function scrapeParty(entry) {
+  if (!partyCache.has(entry.id)) {
+    const p = scrapePartyFresh(entry).catch((err) => { partyCache.delete(entry.id); throw err; });
+    partyCache.set(entry.id, p);
+  }
+  return partyCache.get(entry.id);
+}
 
-  const summaryHtml = await fetchText(`${BASE}?action=summary&id=${entry.id}`, { timeoutMs: 20000 });
-  if (!summaryHtml) { partyCache.set(entry.id, null); return null; }
+async function scrapePartyFresh(entry) {
+  const summaryHtml = await mynetaFetch(`${BASE}?action=summary&id=${entry.id}`, { timeoutMs: 20000 });
+  if (!summaryHtml) return null;
 
   let summary = trim(htmlToText(summaryHtml, 5000), 2500);
   const si = summary.search(/Total (Assets|Income)/i);
@@ -114,7 +132,7 @@ async function scrapeParty(entry) {
   }
   years.sort((a, b) => Number(b.year) - Number(a.year));
   const blocks = await mapLimit(years.slice(0, DETAIL_YEARS), 2, async ({ year, label }) => {
-    const h = await fetchText(`${BASE}?action=itr&year=${year}&id=${entry.id}`, { timeoutMs: 20000 });
+    const h = await mynetaFetch(`${BASE}?action=itr&year=${year}&id=${entry.id}`, { timeoutMs: 20000 });
     return h ? formatItr(h, label) : "";
   });
   const detail = blocks.filter(Boolean).join("\n");
@@ -123,7 +141,7 @@ async function scrapeParty(entry) {
   let donations = "";
   const yr = summaryHtml.match(/action=donation&year=([\d-]+)&id=/)?.[1];
   if (yr) {
-    const dHtml = await fetchText(`${BASE}?action=donation&year=${yr}&id=${entry.id}`, { timeoutMs: 20000 });
+    const dHtml = await mynetaFetch(`${BASE}?action=donation&year=${yr}&id=${entry.id}`, { timeoutMs: 20000 });
     if (dHtml) {
       const d = trim(htmlToText(dHtml, 4000), 2500);
       const dsi = d.search(/donat/i);
@@ -131,9 +149,7 @@ async function scrapeParty(entry) {
     }
   }
 
-  const result = { entry, summary, detail, donations };
-  partyCache.set(entry.id, result);
-  return result;
+  return { entry, summary, detail, donations };
 }
 
 export async function fetchPartyFunding(p) {

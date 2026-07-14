@@ -53,6 +53,16 @@ async function worker() {
   return _workerPromise;
 }
 
+// The shared worker handles ONE recognize() at a time — concurrent jobs each
+// OCRing a PDF must take turns page-by-page. Promise-chain mutex: each caller
+// queues behind the previous one; a failure doesn't break the chain.
+let _ocrQueue = Promise.resolve();
+function withOcrLock(fn) {
+  const p = _ocrQueue.then(fn, fn);
+  _ocrQueue = p.catch(() => {});
+  return p;
+}
+
 // Cleanly shut the worker down (call once at process end so Node can exit).
 export async function terminateOcr() {
   const w = _workerPromise ? await _workerPromise : null;
@@ -78,7 +88,7 @@ export async function ocrPdfBuffer(buf, { force = false, maxLen = 20000, pages =
     for await (const png of doc) {
       if (n++ >= pages) break;
       try {
-        const { data: { text } } = await w.recognize(png);
+        const { data: { text } } = await withOcrLock(() => w.recognize(png));
         if (text) out += text + "\n";
       } catch { /* skip a bad page, keep going */ }
       if (out.length >= maxLen) break;

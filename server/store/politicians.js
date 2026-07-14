@@ -93,6 +93,12 @@ export function evRow(e) {
   };
 }
 
+// Dedup contract: one evidence row per (politician_id, url). The check-then-
+// merge below is race-free in-process — the whole db.transaction is synchronous
+// better-sqlite3 with no await, so concurrent jobs can't interleave inside it —
+// and the UNIQUE idx_ev_uniq (see store/db.js) is the schema-level backstop:
+// even a code path that skips this merge resolves via INSERT OR REPLACE
+// instead of silently creating a duplicate.
 export function addEvidence(items) {
   const added = [];
   const findByUrl = db.prepare("SELECT id, has_content, data FROM evidence WHERE politician_id = ? AND url = ? LIMIT 1");

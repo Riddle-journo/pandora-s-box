@@ -12,6 +12,12 @@
 // and keep entries whose pricing.prompt/completion are "0" and id ends ":free".
 import "dotenv/config";
 import { makeClient, parseModelJson } from "./llm.js";
+import { acquire, penalize } from "./util/host-limiter.js";
+
+// Cross-job pacing: parallel card jobs each calling the free chain would burst
+// the free-tier providers into 429s. One shared slot per second smooths that
+// out; the per-entry 60s cooldown below still handles hard rate-limits.
+const FREE_LLM_INTERVAL_MS = 1000;
 
 export const FREE_CHAIN = [
   { provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",                          key: process.env.AI_API_KEY,  model: "openai/gpt-oss-120b:free" },
@@ -45,6 +51,7 @@ export async function freeComplete({ system, user, maxTokens = 4000, temperature
     .map((e, i) => ({ e, i }))
     .filter(({ i }) => (_cooldownUntil.get(i) ?? 0) <= now);
   for (const { e, i } of order) {
+    await acquire("free-llm", FREE_LLM_INTERVAL_MS); // shared cross-job gate
     try {
       const res = await chainClient(e).chat.completions.create({
         model: e.model,
@@ -58,6 +65,7 @@ export async function freeComplete({ system, user, maxTokens = 4000, temperature
     } catch (err) {
       if (isRateLimit(err)) {
         _cooldownUntil.set(i, Date.now() + 60_000); // 60s cooldown, then re-enters rotation
+        penalize("free-llm", 5000); // and slow the whole pool's next free call a little
         console.warn(`[${tag}]   ${e.provider}:${e.model} rate-limited → rotating`);
         continue;
       }

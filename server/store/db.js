@@ -45,7 +45,6 @@ db.exec(`
     has_content INTEGER DEFAULT 0, fetched_at TEXT, data TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_ev_pol  ON evidence(politician_id);
-  CREATE INDEX IF NOT EXISTS idx_ev_dupe ON evidence(politician_id, url);
 
   CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY, politician_id TEXT, generated_at TEXT, report_tier INTEGER,
@@ -236,6 +235,32 @@ db.exec(`
     title, summary, body, tokenize = 'unicode61'
   );
 `);
+
+// ── Evidence uniqueness migration ────────────────────────────────────────────
+// addEvidence dedups (politician_id, url) procedurally, which is race-free
+// in-process (synchronous better-sqlite3) — this UNIQUE index is the schema-level
+// backstop so no code path (or future second process) can ever create duplicate
+// evidence rows. One-time: dedupe first, keeping the best row per pair —
+// has_content DESC (never downgrade a row that has full text), then newest
+// fetched_at, then highest rowid — matching addEvidence's upgrade-in-place rule.
+// Dropped duplicates may be referenced by ledger evidence_id columns; that is
+// acceptable because the ledgers are rebuildable by design (delete by
+// extractor_version, re-extract) and evidence_fts is re-backfillable.
+{
+  const hasEvUniq = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_ev_uniq'").get();
+  if (!hasEvUniq) {
+    const dropped = db.prepare(`DELETE FROM evidence WHERE url IS NOT NULL AND rowid NOT IN (
+      SELECT rowid FROM (
+        SELECT rowid, row_number() OVER (
+          PARTITION BY politician_id, url
+          ORDER BY has_content DESC, fetched_at DESC, rowid DESC) AS rn
+        FROM evidence WHERE url IS NOT NULL) WHERE rn = 1)`).run().changes;
+    if (dropped) console.warn(`[db] evidence dedupe: removed ${dropped} duplicate (politician,url) row(s) before enforcing uniqueness`);
+    db.exec("DROP INDEX IF EXISTS idx_ev_dupe"); // superseded by the unique index below
+    db.exec("CREATE UNIQUE INDEX idx_ev_uniq ON evidence(politician_id, url)");
+  }
+}
 
 // Shared connection for the entity layer (server/entities.js) — one DB handle,
 // one schema init, honouring PANDOROS_DB_PATH exactly like every other table here.

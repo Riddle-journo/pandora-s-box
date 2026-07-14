@@ -10,6 +10,12 @@
 // a global `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 import https from "node:https";
 import { sleep } from "../util/timing.js";
+import { acquire, penalize } from "../util/host-limiter.js";
+
+// GDELT enforces ~1 request / 5 s ACROSS the whole client IP — with parallel
+// ingest jobs the per-call retry alone isn't enough, so every request first
+// takes a slot on the shared cross-job limiter.
+const GDELT_INTERVAL_MS = 5000;
 
 const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -30,12 +36,14 @@ function httpsGetJson(url, { timeout = 20000, headers = {} } = {}) {
 // Returns the parsed JSON, or null on any failure (callers already treat news
 // as best-effort). Logs once if it had to use the insecure fallback.
 let warnedRate = false;
+let warnedExpired = false; // was previously undeclared — a ReferenceError in ESM strict mode on the cert-expiry path
 export async function gdeltJson(url, { headers = {}, timeout = 20000 } = {}) {
   // 1) Secure path first — the normal case, with 429 back-off. GDELT enforces
   // ~1 request / 5 s; under batch load it returns HTTP 429 with a plain-text
   // body, which would otherwise silently blank every rep's news. Retry a couple
   // of times with a polite wait before giving up.
   for (let attempt = 0; attempt < 3; attempt++) {
+    await acquire("gdelt", GDELT_INTERVAL_MS); // shared cross-job gate
     try {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeout) });
       if (res.ok) {
@@ -45,7 +53,9 @@ export async function gdeltJson(url, { headers = {}, timeout = 20000 } = {}) {
       }
       if (res.status === 429) {
         if (!warnedRate) { console.warn("[gdelt] rate-limited (429) — backing off; regional-language news via Google News still flows."); warnedRate = true; }
-        await sleep(6000 + attempt * 2000);
+        const backoff = 6000 + attempt * 2000;
+        penalize("gdelt", backoff); // every concurrent job backs off, not just this one
+        await sleep(backoff);
         continue; // retry
       }
       return null; // other HTTP error

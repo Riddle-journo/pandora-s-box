@@ -2456,7 +2456,9 @@ async function opsBatchRun(mode) {
 
 let __opsPaused = false;
 
-// Reflect worker paused-state on the Pause button (and remember it for the toggle).
+// Reflect worker paused-state on the Pause button (and remember it for the
+// toggle), and show every job currently in flight — the pool runs several at
+// once, so this is a list, not a single job.
 async function loadOpsQueueState() {
   const d = await opsFetch("/api/admin/ops/queue");
   if (!d || d.error) return;
@@ -2466,6 +2468,18 @@ async function loadOpsQueueState() {
     btn.textContent = __opsPaused ? "▶ Resume queue" : "⏸ Pause queue";
     btn.classList.toggle("primary", __opsPaused);
     btn.classList.toggle("ghost", !__opsPaused);
+  }
+  const runEl = $("#ops-running");
+  if (runEl) {
+    const running = d.running ?? [];
+    runEl.innerHTML = running.length
+      ? `▶ ${running.length} in flight: ` + running.map((j) =>
+          `<a href="#" class="ops-runlink" data-id="${esc(j.id)}" data-type="${esc(j.type)}">${esc(j.type)}</a>`).join(" · ")
+      : (__opsPaused ? "⏸ paused — nothing will be claimed until resumed" : "");
+    runEl.querySelectorAll(".ops-runlink").forEach((a) => a.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      openOpsDrawer(a.dataset.id, a.dataset.type);
+    }));
   }
 }
 
@@ -2518,7 +2532,7 @@ async function opsTrim(spec) {
 
 async function opsJobCancel(id) {
   const r = await opsFetch(`/api/admin/ops/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
-  if (r && r.reason === "running") alert("That job is already running — pause the queue instead; it can't be stopped mid-flight.");
+  if (r && r.reason === "running") alert("That job is already in flight — it can't be stopped mid-run. Pause the queue to stop new jobs from being claimed; the in-flight ones finish on their own.");
   loadOpsJobs();
 }
 
@@ -2634,11 +2648,13 @@ function openOpsText(title, text) {
 async function loadOpsTuning() {
   if (!__opsEngine) await loadOpsEngine();
   if (!__opsEngine) return;
-  const groupBlock = (g) => `<div class="ops-tune-group" data-gid="${esc(g.id)}">
+  // keyPrefix: engine tunables persist as engine.<gid>.<param>; the worker-pool
+  // group persists as worker.<param> (same PUT endpoint validates both).
+  const groupBlock = (g, keyPrefix = `engine.${g.id}.`) => `<div class="ops-tune-group" data-gid="${esc(g.id)}">
     <h4 class="ops-sub">${esc(g.label)} <span class="muted small">· ${esc(g.id)}</span></h4>
     <p class="muted small">${esc(g.desc)}</p>
     <div class="ops-tune-rows">${Object.entries(g.tunables).map(([param, meta]) => {
-      const key = `engine.${g.id}.${param}`;
+      const key = keyPrefix + param;
       const val = g.settings[param];
       const input = meta.type === "boolean"
         ? `<select data-key="${esc(key)}" data-def="${meta.def}"><option value="true"${val === true ? " selected" : ""}>on</option><option value="false"${val === false ? " selected" : ""}>off</option></select>`
@@ -2647,8 +2663,9 @@ async function loadOpsTuning() {
     }).join("")}</div>
   </div>`;
   $("#ops-tuning").innerHTML =
-    `<h4 class="ops-sub">Engine-wide</h4>` + __opsEngine.groups.map(groupBlock).join("") +
-    `<h4 class="ops-sub">Detectors</h4>` + __opsEngine.detectors.map(groupBlock).join("");
+    (__opsEngine.worker ? `<h4 class="ops-sub">Worker pool</h4>` + groupBlock(__opsEngine.worker, "worker.") : "") +
+    `<h4 class="ops-sub">Engine-wide</h4>` + __opsEngine.groups.map((g) => groupBlock(g)).join("") +
+    `<h4 class="ops-sub">Detectors</h4>` + __opsEngine.detectors.map((g) => groupBlock(g)).join("");
 }
 
 async function opsSaveTuning() {

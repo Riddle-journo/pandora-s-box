@@ -114,7 +114,16 @@ function strongIdsConflict(entity, ids) {
 
 // Match by strong id first, then by exact alias, else create. Always upserts the
 // alias and folds in any new strong ids. Returns the entity id.
-export function ensureEntity({ kind, name, strongIds = {}, source = null } = {}) {
+//
+// Concurrency note: the whole lookup-then-insert is synchronous (no await), so
+// in-process parallel jobs cannot interleave inside it — no duplicate entity can
+// be minted by the worker pool. A schema-level UNIQUE index is deliberately NOT
+// used here: strong_ids is a JSON blob whose keys vary by source, and
+// (kind, name_lc) is legitimately non-unique (namesakes are DIFFERENT subjects —
+// that's what strongIdsConflict protects). The db.transaction wrapper below adds
+// cross-connection atomicity should a second process ever write entities.
+export const ensureEntity = db.transaction(ensureEntityBody);
+function ensureEntityBody({ kind, name, strongIds = {}, source = null } = {}) {
   let ent = findEntityByStrongId(kind, strongIds);
   // A strong-id match on ONE key must not merge subjects that DISAGREE on another:
   // two politician rows the roster gave the same myneta_url but distinct politician_ids

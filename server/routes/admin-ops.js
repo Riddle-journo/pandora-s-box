@@ -18,6 +18,7 @@ import { tail as opsLogTail } from "../ops-log.js";
 import { engineStatus, detectorById, runEngine } from "../engine.js";
 import { listFlags, flagCounts, getFlag } from "../flags.js";
 import { setSetting, coerceValue } from "../engine-settings.js";
+import { WORKER_TUNABLES, workerStatus } from "../worker.js";
 import { decideLeadShared } from "./util.js";
 
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -147,19 +148,22 @@ router.get("/api/admin/ops/logs/:id", requireAdmin, (req, res) => {
 // Full engine surface: every detector + group, tunables meta, resolved values,
 // live flag counts. The ops console renders its Engine + Tuning panels from this.
 router.get("/api/admin/ops/engine", requireAdmin, (_req, res) => {
-  res.json(engineStatus());
+  res.json({ ...engineStatus(), worker: workerStatus() });
 });
 
-// Live threshold editing. Body: { settings: { "engine.<id>.<param>": value | null } }
-// null clears the override (back to the code default). Values are validated
-// against the detector's tunable metadata before persisting.
+// Live threshold editing. Body: { settings: { "<key>": value | null } } where
+// key is "engine.<id>.<param>" (detector tunables) or "worker.<param>" (worker
+// pool tunables — the pool re-reads them each claim tick, no restart). null
+// clears the override (back to the code default). Values are validated against
+// the owning tunable metadata before persisting.
 router.put("/api/admin/ops/engine/settings", requireAdmin, (req, res) => {
   const changes = req.body?.settings ?? {};
   const applied = [], errors = [];
   for (const [key, raw] of Object.entries(changes)) {
-    const m = key.match(/^engine\.([\w-]+)\.([\w-]+)$/);
-    const det = m && detectorById(m[1]);
-    const meta = det?.tunables?.[m?.[2]];
+    let meta = null;
+    const em = key.match(/^engine\.([\w-]+)\.([\w-]+)$/);
+    if (em) meta = detectorById(em[1])?.tunables?.[em[2]] ?? null;
+    else if (key.startsWith("worker.")) meta = WORKER_TUNABLES[key.slice("worker.".length)] ?? null;
     if (!meta) { errors.push({ key, error: "unknown setting" }); continue; }
     try {
       applied.push(setSetting(key, raw === null ? null : coerceValue(meta, raw)));

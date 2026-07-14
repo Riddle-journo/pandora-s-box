@@ -32,25 +32,37 @@ export function enqueueJob({ type, payload = {}, runAt = Date.now(), priority = 
 
 // Atomically flip the single best-eligible queued job to 'running' and return it.
 // One UPDATE ... WHERE id = (SELECT ...) RETURNING is atomic in SQLite, so two
-// sequential claims can never hand back the same row.
+// claims (even from concurrent pool lanes) can never hand back the same row.
+// excludeTypes lets the worker pool skip job types that are currently at their
+// per-type concurrency cap or inside a rate-budget gap, so a saturated type
+// never blocks a due job of another type. (Arrays can't be bound directly in
+// better-sqlite3 — json_each over a JSON-encoded list is the standard idiom.)
+// Back-compat: callable as claimNextJob(), claimNextJob(now), or with options.
 const claimStmt = db.prepare(`
   UPDATE jobs SET status = 'running', started_at = @ts, attempts = attempts + 1
   WHERE id = (
     SELECT id FROM jobs WHERE status = 'queued' AND run_at <= @now
+      AND type NOT IN (SELECT value FROM json_each(@excluded))
     ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1
   )
   RETURNING *`);
-export function claimNextJob(now = Date.now()) {
-  const row = claimStmt.get({ ts: new Date().toISOString(), now });
+export function claimNextJob(arg) {
+  const { now = Date.now(), excludeTypes = [] } =
+    typeof arg === "number" ? { now: arg } : (arg ?? {});
+  const row = claimStmt.get({ ts: new Date().toISOString(), now, excluded: JSON.stringify(excludeTypes) });
   return row ? { ...row, payload: safeParse(row.payload) } : null;
 }
 
 // Non-mutating look at the next claimable job (worker uses it to gate on rate
-// budget before claiming). Same ordering as claimNextJob.
-const peekStmt = db.prepare(
-  "SELECT * FROM jobs WHERE status = 'queued' AND run_at <= ? ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1");
-export function peekNextJob(now = Date.now()) {
-  const row = peekStmt.get(now);
+// budget before claiming). Same ordering + excludeTypes filter as claimNextJob.
+const peekStmt = db.prepare(`
+  SELECT * FROM jobs WHERE status = 'queued' AND run_at <= @now
+    AND type NOT IN (SELECT value FROM json_each(@excluded))
+  ORDER BY priority DESC, run_at ASC, created_at ASC LIMIT 1`);
+export function peekNextJob(arg) {
+  const { now = Date.now(), excludeTypes = [] } =
+    typeof arg === "number" ? { now: arg } : (arg ?? {});
+  const row = peekStmt.get({ now, excluded: JSON.stringify(excludeTypes) });
   return row ? { ...row, payload: safeParse(row.payload) } : null;
 }
 

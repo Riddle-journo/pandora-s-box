@@ -421,7 +421,7 @@
         <div class="ops-tabpane" data-pane="pipeline" hidden>
           <section class="ops-panel">
             <h3 class="ops-h">One-click pipelines</h3>
-            <p class="muted small">Each preset enqueues its steps in order (the worker is serial, so they run as a chain).</p>
+            <p class="muted small">Each preset enqueues its steps in order. The worker pool runs several jobs at once (up to the Tuning tab's "max jobs in flight"); heavy fan-outs like ingest run in parallel lanes while paid-LLM and engine steps still run one at a time.</p>
             <div id="ops-presets" class="ops-cmds"></div>
           </section>
           <section class="ops-panel">
@@ -539,6 +539,7 @@
               <button class="ghost small ops-trim" data-status="queued" type="button">drop all queued</button>
               <button class="ghost small ops-trim" data-older="7" type="button">older than 7d</button>
             </div>
+            <div id="ops-running" class="muted small"></div>
             <div id="ops-jobs"></div>
           </section>
         </div>
