@@ -15,6 +15,7 @@ import {
   listLeads, getLead, upsertLead, recordLeadFeedback, detectorPrecision,
 } from "../store.js";
 import { tail as opsLogTail } from "../ops-log.js";
+import { llmUsageSummary } from "../store/llm-usage.js";
 import { engineStatus, detectorById, runEngine } from "../engine.js";
 import { listFlags, flagCounts, getFlag } from "../flags.js";
 import { setSetting, coerceValue } from "../engine-settings.js";
@@ -190,6 +191,13 @@ router.post("/api/admin/ops/engine/dryrun", requireAdmin, asyncH(async (req, res
 
 // Per-detector precision from the human-decision ledger — the feedback loop's
 // report. Suggestion-only; the console shows it, nothing auto-tunes.
+// Paid-LLM spend panel: token totals per module+model from the llm_usage
+// ledger (written by llm.js callWithRetry). ?days=N window, default 30.
+router.get("/api/admin/ops/llm-usage", requireAdmin, (req, res) => {
+  const sinceDays = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  res.json(llmUsageSummary({ sinceDays }));
+});
+
 router.get("/api/admin/ops/precision", requireAdmin, (req, res) => {
   const minSample = Math.max(1, Number(req.query.minSample) || 5);
   res.json({ minSample, detectors: detectorPrecision({ minSample }) });

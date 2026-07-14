@@ -41,6 +41,7 @@ describe("admin auth", () => {
     "/api/admin/investigation-leads",
     "/api/admin/conflicts",
     "/api/admin/ops/leads",
+    "/api/admin/ops/llm-usage",
   ];
 
   for (const p of protectedPaths) {
@@ -103,5 +104,19 @@ describe("admin ops jobs", () => {
       body: JSON.stringify({ type: "nonsense_type" }),
     });
     assert.equal(res.status, 400);
+  });
+});
+
+// llm-usage panel (Task 5.4): authorized shape check on an empty ledger.
+describe("llm usage panel", () => {
+  it("GET /api/admin/ops/llm-usage with token -> summary shape", async () => {
+    const res = await fetch(srv.baseUrl + "/api/admin/ops/llm-usage?days=7", {
+      headers: { "x-admin-token": srv.adminToken },
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.sinceDays, 7);
+    assert.ok(Array.isArray(body.byModule));
+    assert.ok("totals" in body);
   });
 });
