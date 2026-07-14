@@ -1,151 +1,27 @@
 // legacy.js — the not-yet-extracted remainder of the old app.js (Task 9.1).
-// Each subsequent task moves a banner-comment section out into its own module
-// until this file is empty. Module scope, so nothing leaks to window.
-import {
-  $, currentTheme, toggleTheme, syncThemeToggle,
-  GRADE_COLORS, GRADE_TEXT, CONF, AVATAR_COLORS,
-  esc, avatarColor, initials, barColor, confChip, withCites,
-  consequenceRank, SIGNAL_DOT, VERDICT_LABEL,
-} from "./core.js";
+// After Task 9.11 only the INIT section (bootstrapping + event wiring) is
+// left; Task 9.12 moves it into main.js and deletes this file.
+import { $, toggleTheme, syncThemeToggle } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
-import { hideAllViews } from "./views.js";
-import { showReport } from "./report.js";
-import { showOrgCard, renderRelationGraph } from "./report-sections.js";
-import { renderHomeRails } from "./bookmarks.js";
 import { exportEvidenceCsv, exportEvidenceBibtex, copyCiteLink } from "./export.js";
-import { showHome, showBrowse, renderHome, buildFilters, setBrowseChip, getBrowseChip, growBrowse } from "./home.js";
-import { showCompare, wireComparePicker } from "./compare.js";
-import { showGovWatch, renderGovList, showScandal, getScandalsCache, invalidateScandalsCache } from "./govwatch.js";
-import { showScorecards, renderScorecardTab, setScActiveTab } from "./scorecards.js";
-import { showFunding, renderFundingOverview, setFundActiveTab } from "./funding.js";
+import { renderHome, buildFilters, setBrowseChip, getBrowseChip, growBrowse } from "./home.js";
+import { wireComparePicker } from "./compare.js";
+import { renderGovList, getScandalsCache } from "./govwatch.js";
+import { renderScorecardTab, setScActiveTab } from "./scorecards.js";
+import { renderFundingOverview, setFundActiveTab } from "./funding.js";
 import {
-  showAdmin, loadAdminQueue, adminToken, setAdminTab, loadDirectorshipNetwork,
+  loadAdminQueue, adminToken, setAdminTab, loadDirectorshipNetwork,
   loadAllLeads, loadStories, setLeadStatusFilter, setStoryStatusFilter,
   decideLead, decideProposal,
 } from "./admin.js";
-import { showLeaderboard, renderLeaderboard, setLbMetric } from "./leaderboard.js";
-import { showIssues, showIssue } from "./issues.js";
-import { showTips, wireTipPicker, submitPageTip, submitReportTip } from "./tips.js";
-import { showOps } from "./ops.js";
-import { attachAutocomplete, fuzzyScore, repSuggestions, scandalSuggestions } from "./search.js";
+import { renderLeaderboard, setLbMetric } from "./leaderboard.js";
+import { wireTipPicker, submitPageTip, submitReportTip } from "./tips.js";
+import { attachAutocomplete, repSuggestions, scandalSuggestions } from "./search.js";
+import { route, syncNav, initRouter } from "./router.js";
+import { initCmdk } from "./cmdk.js";
 
-// ================= ROUTER =================
-function route() {
-  if (location.hash === "#/admin") { showAdmin(); return; }
-  if (location.hash === "#/browse") { showBrowse(); return; }
-  if (location.hash === "#/leaderboard") { showLeaderboard(); return; }
-  if (location.hash === "#/issues") { showIssues(); return; }
-  if (location.hash === "#/tips") { showTips(); return; }
-  if (location.hash === "#/funding") { showFunding(); return; }
-  if (location.hash === "#/scorecards") { showScorecards(); return; }
-  if (location.hash === "#/govwatch") { showGovWatch(); return; }
-  if (location.hash === "#/ops") { showOps(); return; }
-  const iss = location.hash.match(/^#\/issue\/(.+)$/);
-  if (iss) { showIssue(iss[1]); return; }
-  const sc = location.hash.match(/^#\/scandal\/(.+)$/);
-  if (sc) { showScandal(sc[1]); return; }
-  const cmp = location.hash.match(/^#\/compare(?:\/([^/]+)\/([^/]+))?$/);
-  if (cmp) { showCompare(cmp[1] === "_" ? null : cmp[1], cmp[2] === "_" ? null : cmp[2]); return; }
-  const mi = location.hash.match(/^#\/ministry\/(.+)$/);
-  if (mi) { showOrgCard("ministry", decodeURIComponent(mi[1])); return; }
-  const pa = location.hash.match(/^#\/party\/([^/]+)(?:\/(.+))?$/);
-  if (pa) { showOrgCard("party", pa[1], pa[2] ? decodeURIComponent(pa[2]) : "union"); return; }
-  const m = location.hash.match(/^#\/rep\/(.+)$/);
-  if (m) showReport(m[1]); else showHome();
-}
-
-// Highlight the active section in the persistent nav (browse+rep+compare all map to Representatives).
-function syncNav() {
-  const h = location.hash || "#/";
-  let key = null;
-  if (h.startsWith("#/browse") || h.startsWith("#/rep/") || h.startsWith("#/compare") || h.startsWith("#/leaderboard")) key = "browse";
-  else if (h.startsWith("#/ministry/") || h.startsWith("#/party/")) key = "scorecards";
-  else if (h.startsWith("#/govwatch") || h.startsWith("#/scandal/")) key = "govwatch";
-  else if (h.startsWith("#/scorecards")) key = "scorecards";
-  else if (h.startsWith("#/funding")) key = "funding";
-  else if (h.startsWith("#/issues") || h.startsWith("#/issue/")) key = "issues";
-  else if (h.startsWith("#/tips")) key = "tips";
-  else if (h.startsWith("#/ops")) key = "ops";
-  document.querySelectorAll("#appnav-links a").forEach((a) => a.classList.toggle("active", a.dataset.nav === key));
-  const links = document.getElementById("appnav-links");
-  if (links) links.classList.remove("open"); // close mobile menu on navigate
-  const tgl = document.getElementById("appnav-toggle");
-  if (tgl) tgl.setAttribute("aria-expanded", "false");
-}
-window.addEventListener("hashchange", () => { route(); syncNav(); });
-
-// ================= GLOBAL SEARCH (command palette) =================
-let cmdkScandals = null, cmdkIssues = null, cmdkActive = -1, cmdkRows = [];
-const RECENT_KEY = "pb_recent_searches";
-function getRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; } }
-function pushRecent(item) {
-  const cur = getRecent().filter((r) => !(r.type === item.type && r.id === item.id));
-  cur.unshift(item);
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(cur.slice(0, 6))); } catch {}
-}
-async function openCmdk() {
-  const ov = $("#cmdk"); if (!ov) return;
-  ov.hidden = false;
-  // lazy-load government + issues data once
-  if (cmdkScandals === null) cmdkScandals = (await api("/api/scandals")) ?? [];
-  if (cmdkIssues === null) { const iss = await api("/api/issues"); cmdkIssues = Array.isArray(iss) ? iss : (iss ? Object.values(iss) : []); }
-  const inp = $("#cmdk-input"); inp.value = ""; inp.focus();
-  cmdkRender("");
-}
-function closeCmdk() { const ov = $("#cmdk"); if (ov) ov.hidden = true; cmdkActive = -1; }
-function cmdkGather(q) {
-  q = q.trim().toLowerCase();
-  const groups = [];
-  if (!q) {
-    const recent = getRecent();
-    if (recent.length) groups.push({ label: "Recent", items: recent.map((r) => ({ ...r, recent: true })) });
-    return groups;
-  }
-  const people = state.reps.map((p) => [fuzzyScore(`${p.name} ${p.constituency ?? ""} ${p.party ?? ""} ${p.state ?? ""}`, q) + (p.latest ? 5 : 0), p])
-    .filter(([s]) => s > 0).sort((a, b) => b[0] - a[0]).slice(0, 6)
-    .map(([, p]) => ({ type: "rep", id: p.id, label: p.name, sub: [p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · ") }));
-  if (people.length) groups.push({ label: "Representatives", items: people });
-  const gov = (cmdkScandals ?? []).map((s) => [fuzzyScore(`${s.title} ${s.party ?? ""} ${s.minister ?? ""} ${s.sector ?? ""}`, q), s])
-    .filter(([sc]) => sc > 0).sort((a, b) => b[0] - a[0]).slice(0, 5)
-    .map(([, s]) => ({ type: "scandal", id: s.slug, label: s.title, sub: [s.sector, s.minister].filter(Boolean).join(" · ") }));
-  if (gov.length) groups.push({ label: "Government Watch", items: gov });
-  const issues = (cmdkIssues ?? []).filter((i) => `${i.title ?? i.name ?? ""} ${i.summary ?? ""}`.toLowerCase().includes(q))
-    .slice(0, 4).map((i) => ({ type: "issue", id: i.slug ?? i.id, label: i.title ?? i.name, sub: "Where India Stands" }));
-  if (issues.length) groups.push({ label: "Issues", items: issues });
-  return groups;
-}
-function cmdkGoto(item) {
-  pushRecent({ type: item.type, id: item.id, label: item.label, sub: item.sub });
-  closeCmdk();
-  if (item.type === "rep") location.hash = `#/rep/${item.id}`;
-  else if (item.type === "scandal") location.hash = `#/scandal/${item.id}`;
-  else if (item.type === "issue") location.hash = `#/issue/${item.id}`;
-}
-function cmdkRender(q) {
-  const box = $("#cmdk-results");
-  const groups = cmdkGather(q);
-  cmdkRows = [];
-  if (!groups.length) { box.innerHTML = `<div class="cmdk-empty">${q ? "No matches." : "Type to search people, scandals and issues."}</div>`; return; }
-  let html = "";
-  groups.forEach((g) => {
-    html += `<div class="cmdk-group">${esc(g.label)}</div>`;
-    g.items.forEach((it) => {
-      const idx = cmdkRows.length; cmdkRows.push(it);
-      const icon = it.type === "rep" ? "🧑‍⚖️" : it.type === "scandal" ? "🏛️" : "🧭";
-      html += `<div class="cmdk-item" role="option" data-idx="${idx}"><span class="cmdk-ic">${icon}</span><span class="cmdk-main">${esc(it.label)}</span><span class="cmdk-sub">${esc(it.sub ?? "")}</span></div>`;
-    });
-  });
-  box.innerHTML = html;
-  cmdkActive = cmdkRows.length ? 0 : -1;
-  cmdkPaint();
-}
-function cmdkPaint() {
-  document.querySelectorAll("#cmdk-results .cmdk-item").forEach((el, i) => {
-    const on = i === cmdkActive; el.classList.toggle("active", on);
-    if (on) el.scrollIntoView({ block: "nearest" });
-  });
-}
+initRouter();
 
 $("#tip-form").addEventListener("submit", submitReportTip);
 
@@ -284,24 +160,8 @@ $("#landing-search")?.addEventListener("submit", (e) => {
   $("#export-csv")?.addEventListener("click", exportEvidenceCsv);
   $("#export-bib")?.addEventListener("click", exportEvidenceBibtex);
   $("#cite-link")?.addEventListener("click", (e) => copyCiteLink(e.currentTarget));
-  // Global command-palette search
-  $("#global-search-btn")?.addEventListener("click", openCmdk);
-  document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); const ov = $("#cmdk"); ov && ov.hidden ? openCmdk() : closeCmdk(); }
-    else if (e.key === "Escape" && !$("#cmdk").hidden) { closeCmdk(); }
-  });
-  $("#cmdk-input")?.addEventListener("input", (e) => cmdkRender(e.target.value));
-  $("#cmdk-input")?.addEventListener("keydown", (e) => {
-    if (!cmdkRows.length) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); cmdkActive = (cmdkActive + 1) % cmdkRows.length; cmdkPaint(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); cmdkActive = (cmdkActive - 1 + cmdkRows.length) % cmdkRows.length; cmdkPaint(); }
-    else if (e.key === "Enter") { e.preventDefault(); if (cmdkRows[cmdkActive]) cmdkGoto(cmdkRows[cmdkActive]); }
-  });
-  $("#cmdk-results")?.addEventListener("mousedown", (e) => {
-    const el = e.target.closest(".cmdk-item"); if (!el) return;
-    e.preventDefault(); cmdkGoto(cmdkRows[+el.dataset.idx]);
-  });
-  $("#cmdk")?.addEventListener("mousedown", (e) => { if (e.target.id === "cmdk") closeCmdk(); });
+  // Global command-palette search (button, Ctrl/Cmd-K, list interaction)
+  initCmdk();
   // Mobile nav toggle
   $("#appnav-toggle")?.addEventListener("click", () => {
     const links = $("#appnav-links");
