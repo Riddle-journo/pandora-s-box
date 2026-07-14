@@ -19,6 +19,7 @@
 import "dotenv/config";
 import { batchUpsertPoliticians, listPoliticians } from "./store.js";
 import { ingestFor } from "./ingest.js";
+import { sleep } from "./util/timing.js";
 
 const MYNETA_BASE = "https://www.myneta.info";
 const UA = { "User-Agent": "PandorosBox/0.1 (public-accountability research)" };
@@ -27,8 +28,6 @@ const DELAY_MS = 500;
 const NO_INGEST  = process.argv.includes("--no-ingest");
 const LS_ONLY    = process.argv.includes("--ls-only");
 const STATE_ONLY = process.argv.includes("--state-only");
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function stripHtml(s) {
   return (s ?? "")

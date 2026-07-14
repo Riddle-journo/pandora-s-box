@@ -9,6 +9,7 @@
 // in the app stays fully certificate-verified. This is a scoped workaround, not
 // a global `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 import https from "node:https";
+import { sleep } from "../util/timing.js";
 
 const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -28,7 +29,6 @@ function httpsGetJson(url, { timeout = 20000, headers = {} } = {}) {
 
 // Returns the parsed JSON, or null on any failure (callers already treat news
 // as best-effort). Logs once if it had to use the insecure fallback.
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let warnedRate = false;
 export async function gdeltJson(url, { headers = {}, timeout = 20000 } = {}) {
   // 1) Secure path first — the normal case, with 429 back-off. GDELT enforces

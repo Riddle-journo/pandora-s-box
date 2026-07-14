@@ -4,7 +4,7 @@
 
 export const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountability research)" };
 
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export { sleep } from "../util/timing.js";
 
 export const isPdf = (url) => /\.pdf($|\?)/i.test(url);
 

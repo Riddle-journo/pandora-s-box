@@ -24,8 +24,7 @@ import { classifyHealth } from "./health.js";
 import { startScheduler } from "./scheduler.js";
 import { runAnomalyScan } from "./anomaly.js";
 import { push as pushLog } from "./ops-log.js";
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { sleep } from "./util/timing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, "..");
