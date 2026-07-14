@@ -4,7 +4,7 @@
 //
 // PIB removed: government's own press bureau adds PR noise, not accountability signal.
 // Free, no key. Two-level scrape: listing page → individual release pages.
-import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf } from "./http.js";
+import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf , TIMEOUT_DEFAULT } from "./http.js";
 
 
 // [label, source_type, tier, listing URL, base URL for resolving relative links]
@@ -43,7 +43,7 @@ function linksNear(html, name, base, windowChars = 2500) {
 
 export async function fetchPressReleases(p) {
   const all = await Promise.all(SOURCES.map(async ([label, source_type, tier, listingUrl, base]) => {
-    const html = await fetchText(listingUrl, { timeoutMs: 14000 });
+    const html = await fetchText(listingUrl, { timeoutMs: TIMEOUT_DEFAULT });
     if (!html) return [];
 
     // Convert full page to text (large limit so we get the whole listing)
@@ -70,7 +70,7 @@ export async function fetchPressReleases(p) {
       // Many ED/CBI releases are PDFs → read them with pdf-parse.
       const dText = isPdf(url)
         ? await fetchPdfText(url, { maxLen: 5000 })
-        : htmlToText(await fetchText(url, { timeoutMs: 12000 }), 5000);
+        : htmlToText(await fetchText(url, { timeoutMs: TIMEOUT_DEFAULT }), 5000);
       if (!dText || dText.length < 120) return null;
       return {
         politician_id: p.id,

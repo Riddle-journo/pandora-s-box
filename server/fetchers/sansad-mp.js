@@ -14,7 +14,7 @@
 //   SANSAD_FULLTEXT_LIMIT  how many recent questions to fetch verbatim PDF text
 //                          for (default 8; set 0 = metadata only/fast; 200 = all)
 //   SANSAD_DISABLE=1       skip this fetcher entirely
-import { fetchJson, fetchPdfText, mapLimit } from "./http.js";
+import { fetchJson, fetchPdfText, mapLimit , TIMEOUT_DEFAULT, TIMEOUT_SLOW } from "./http.js";
 import { ministryToSector, textToSector } from "../data/sectors.js";
 import { recordAssertion } from "../entities.js";
 
@@ -61,7 +61,7 @@ async function lsDirectory() {
   if (!lsDirPromise) lsDirPromise = (async () => {
     const url = `${LS}/member?loksabha=${LOKSABHA}&state=&party=&gender=&ageFrom=&ageTo=`
       + `&noOfTerms=&page=1&size=1000&searchText=&constituency=&sitting=1&locale=en&memberStatus=s`;
-    const data = await fetchJson(url, { timeoutMs: 20000 });
+    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW });
     return (data?.membersDtoList ?? []).map((m) => ({
       id: m.mpsno,
       name: m.mpFirstLastName || `${m.firstName ?? ""} ${m.lastName ?? ""}`,
@@ -76,7 +76,7 @@ async function rsDirectory() {
   if (!rsDirPromise) rsDirPromise = (async () => {
     const url = `${RS}/member/sitting-members?state=&party=&gender=&page=1&size=1000`
       + `&mpFlag=1&ageFrom=&ageTo=&terms=&search=&locale=en`;
-    const data = await fetchJson(url, { timeoutMs: 20000 });
+    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW });
     return (data?.records ?? []).map((m) => ({
       id: m.mpsno,
       name: (m.name ?? "").replace(/^@\s*/, ""),
@@ -141,7 +141,7 @@ export async function attachQuestionFulltext(records, {
   if (!targets.length) return "";
   const texts = await mapLimit(targets, 3, async (q) => {
     let t = "";
-    try { t = await fetchPdf(q[pathField], { timeoutMs: 25000, maxLen: 1600 }); }
+    try { t = await fetchPdf(q[pathField], { timeoutMs: TIMEOUT_SLOW, maxLen: 1600 }); }
     catch { /* graceful: a failed PDF just contributes no fulltext */ }
     return t && t.length > 120 ? `── ${formatHeader(q)} ──\n${t}` : null;
   });
@@ -159,18 +159,18 @@ async function scrapeLS(p, m) {
 
   const [profile, positions, qData, dData, aData, cData,
          pQ, pD, pB, pSM, pA, pC] = await Promise.all([
-    fetchJson(`${LS}/member/${id}?locale=en`, { timeoutMs: 15000 }),
-    fetchJson(`${LS}/member/positionHeld?mpCode=${id}&locale=en`, { timeoutMs: 15000 }),
-    fetchJson(`${LS}/question/qetAllQuestionsForMember?lkNo=${LOKSABHA}&mpNo=${id}&pageNo=1&pageSize=300&locale=en`, { timeoutMs: 20000 }),
-    fetchJson(`${LS}/debate/debate-search?debateTypeId=&loksabha=${LOKSABHA}&sessionNumber=&fromDate=&toDate=&searchKeyword=&page=1&size=300&mpCode=${id}&house=LS`, { timeoutMs: 20000 }),
-    fetchJson(`${LS}/govtAssurance/assurances?mpCode=${id}&page=1&size=300&sortOrder=DESC&loksabha=${LOKSABHA}&locale=en`, { timeoutMs: 20000 }),
-    fetchJson(`${LS}/committee/findCommitteeMembership?mpsno=${id}&lsno=${LOKSABHA}`, { timeoutMs: 15000 }),
-    fetchJson(`${LS}/question/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: 12000 }),
-    fetchJson(`${LS}/debate/participation?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: 12000 }),
-    fetchJson(`${LS}/debate/participationInBills?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: 12000 }),
-    fetchJson(`${LS}/debate/participationInSpecialMention?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: 12000 }),
-    fetchJson(`${LS}/govtAssurance/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: 12000 }),
-    fetchJson(`${LS}/committee/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: 12000 }),
+    fetchJson(`${LS}/member/${id}?locale=en`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/member/positionHeld?mpCode=${id}&locale=en`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/question/qetAllQuestionsForMember?lkNo=${LOKSABHA}&mpNo=${id}&pageNo=1&pageSize=300&locale=en`, { timeoutMs: TIMEOUT_SLOW }),
+    fetchJson(`${LS}/debate/debate-search?debateTypeId=&loksabha=${LOKSABHA}&sessionNumber=&fromDate=&toDate=&searchKeyword=&page=1&size=300&mpCode=${id}&house=LS`, { timeoutMs: TIMEOUT_SLOW }),
+    fetchJson(`${LS}/govtAssurance/assurances?mpCode=${id}&page=1&size=300&sortOrder=DESC&loksabha=${LOKSABHA}&locale=en`, { timeoutMs: TIMEOUT_SLOW }),
+    fetchJson(`${LS}/committee/findCommitteeMembership?mpsno=${id}&lsno=${LOKSABHA}`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/question/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/debate/participation?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/debate/participationInBills?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/debate/participationInSpecialMention?mpsno=${id}&loksabha=${LOKSABHA}&house=LS`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/govtAssurance/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${LS}/committee/participation?mpsno=${id}&loksabha=${LOKSABHA}`, { timeoutMs: TIMEOUT_DEFAULT }),
   ]);
 
   // 1) Summary: identity, participation counts, positions, committees
@@ -268,14 +268,14 @@ async function scrapeLS(p, m) {
 // Questions + debates (metadata) from every Lok Sabha the member served in
 // before the current one — the full historical record.
 async function pastTermItems(p, id, bioUrl) {
-  const served = await fetchJson(`${LS}/member/members-loksabha-session?mpCode=${id}`, { timeoutMs: 15000 });
+  const served = await fetchJson(`${LS}/member/members-loksabha-session?mpCode=${id}`, { timeoutMs: TIMEOUT_DEFAULT });
   const terms = [...new Set((Array.isArray(served) ? served : [])
     .map((s) => s.loksabha).filter((n) => n && n < LOKSABHA))].sort((a, b) => b - a);
   const out = [];
   for (const ls of terms) {
     const [q, d] = await Promise.all([
-      fetchJson(`${LS}/question/qetAllQuestionsForMember?lkNo=${ls}&mpNo=${id}&pageNo=1&pageSize=400&locale=en`, { timeoutMs: 20000 }),
-      fetchJson(`${LS}/debate/debate-search?debateTypeId=&loksabha=${ls}&sessionNumber=&fromDate=&toDate=&searchKeyword=&page=1&size=400&mpCode=${id}&house=LS`, { timeoutMs: 20000 }),
+      fetchJson(`${LS}/question/qetAllQuestionsForMember?lkNo=${ls}&mpNo=${id}&pageNo=1&pageSize=400&locale=en`, { timeoutMs: TIMEOUT_SLOW }),
+      fetchJson(`${LS}/debate/debate-search?debateTypeId=&loksabha=${ls}&sessionNumber=&fromDate=&toDate=&searchKeyword=&page=1&size=400&mpCode=${id}&house=LS`, { timeoutMs: TIMEOUT_SLOW }),
     ]);
     const qList = q?.[0]?.listOfQuestions ?? [];
     const qTotal = q?.[0]?.totalRecordSize ?? qList.length;
@@ -311,8 +311,8 @@ async function pastTermItems(p, id, bioUrl) {
 async function scrapeRS(p, m) {
   const id = m.id;
   const [bio, positions] = await Promise.all([
-    fetchJson(`${RS}/member/bio-data?mpCode=${id}&locale=en`, { timeoutMs: 15000 }),
-    fetchJson(`${RS}/member/position-held?mpCode=${id}&locale=en`, { timeoutMs: 15000 }),
+    fetchJson(`${RS}/member/bio-data?mpCode=${id}&locale=en`, { timeoutMs: TIMEOUT_DEFAULT }),
+    fetchJson(`${RS}/member/position-held?mpCode=${id}&locale=en`, { timeoutMs: TIMEOUT_DEFAULT }),
   ]);
   const posLines = (Array.isArray(positions) ? positions : [])
     .map((x) => `• ${clip(x.period, 60)} — ${clip(x.position, 160)}`);

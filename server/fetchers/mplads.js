@@ -5,7 +5,7 @@
 //
 // MP-only. Free, no key. The official mplads.mospi.gov.in portal is login-walled
 // for per-MP data, so this mirror is the only free programmatic path.
-import { fetchJson } from "./http.js";
+import { fetchJson , TIMEOUT_SLOW } from "./http.js";
 
 const API = "https://api.empoweredindian.in/api";
 
@@ -17,7 +17,7 @@ const toks = (s) => (s ?? "").toLowerCase().replace(/\([^)]*\)/g, " ").replace(/
 let dirPromise = null;
 async function directory() {
   if (!dirPromise) dirPromise = (async () => {
-    const d = await fetchJson(`${API}/summary/mps?page=1&limit=900`, { timeoutMs: 20000 });
+    const d = await fetchJson(`${API}/summary/mps?page=1&limit=900`, { timeoutMs: TIMEOUT_SLOW });
     return (d?.data ?? []).map((m) => ({ ...m, toks: toks(m.mpName), cons: (m.constituency ?? "").toLowerCase() }));
   })();
   return dirPromise;
@@ -45,9 +45,9 @@ export async function fetchMPLADS(p) {
   const m = matchMP(p, await directory());
   if (!m) return [];
 
-  const detail = await fetchJson(`${API}/mplads/mps/${m.id}`, { timeoutMs: 20000 });
+  const detail = await fetchJson(`${API}/mplads/mps/${m.id}`, { timeoutMs: TIMEOUT_SLOW });
   const dd = detail?.data ?? {};
-  const works = await fetchJson(`${API}/mplads/mps/${m.id}/works?page=1&limit=100`, { timeoutMs: 20000 });
+  const works = await fetchJson(`${API}/mplads/mps/${m.id}/works?page=1&limit=100`, { timeoutMs: TIMEOUT_SLOW });
 
   const lines = [
     `MPLADS record — ${m.mpName} (${m.house}), ${m.constituency}, ${m.state}`,

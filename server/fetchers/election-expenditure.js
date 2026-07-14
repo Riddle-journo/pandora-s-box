@@ -4,7 +4,7 @@
 //
 // Declared campaign spending; a large gap between this and observed campaign
 // activity is a classic undeclared-funding signal. Free, no key.
-import { fetchText, htmlToText } from "./http.js";
+import { fetchText, htmlToText , TIMEOUT_SLOW } from "./http.js";
 
 // Strip inner markup + decode the handful of entities MyNeta emits, then collapse
 // whitespace — the same cell-cleaning idiom as sources/myneta-full.js.
@@ -74,7 +74,7 @@ export async function fetchElectionExpenditure(p) {
   if (!p.myneta_url || !/candidate\.php/i.test(p.myneta_url)) return [];
   const url = p.myneta_url.replace(/candidate\.php/i, "expense.php");
 
-  const html = await fetchText(url, { timeoutMs: 20000 });
+  const html = await fetchText(url, { timeoutMs: TIMEOUT_SLOW });
   if (!html) return [];
 
   // Whole-page text (MyNeta uses legacy table layout, no <main>); then trim the

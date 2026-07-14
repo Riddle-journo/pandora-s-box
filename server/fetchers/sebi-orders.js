@@ -8,7 +8,7 @@
 //      names the politician (strong: the order document itself mentions them).
 //   2. Fallback — if no order PDF is found/matched, the search-results-page
 //      excerpt (today's behaviour), so we never regress.
-import { fetchText, htmlToText, contextAround, fetchPdfText, mapLimit, sleep } from "./http.js";
+import { fetchText, htmlToText, contextAround, fetchPdfText, mapLimit, sleep , TIMEOUT_DEFAULT } from "./http.js";
 
 const SEBI_BASE = "https://www.sebi.gov.in";
 const SUMMARY = "SEBI enforcement orders — insider trading, market manipulation, or promoter violations (admissible public record from a statutory regulator).";
@@ -76,7 +76,7 @@ const orderRow = (p, url, content) => ({
 
 export async function fetchSEBIOrders(p) {
   const url = `${SEBI_BASE}/enforcement/orders/?text=${encodeURIComponent(p.name)}`;
-  const html = await fetchText(url, { timeoutMs: 14000 });
+  const html = await fetchText(url, { timeoutMs: TIMEOUT_DEFAULT });
   if (!html) return [];
 
   // Today's behaviour, computed up front as the guaranteed fallback.

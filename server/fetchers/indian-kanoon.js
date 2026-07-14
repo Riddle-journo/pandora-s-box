@@ -16,7 +16,7 @@
 // effort: any failure silently falls back to the snippet-only line, and a total
 // failure reproduces the original search-only output exactly.
 
-import { fetchText, fetchJsonEx, htmlToText, mapLimit, sleep } from "./http.js";
+import { fetchText, fetchJsonEx, htmlToText, mapLimit, sleep , TIMEOUT_SLOW } from "./http.js";
 import { logger } from "../util/log.js";
 
 const log = logger("indian-kanoon");
@@ -75,7 +75,7 @@ async function fetchViaWeb(p) {
   const searchUrl = `${IK_WEB}?formInput=${encodeURIComponent(`"${p.name}" doctypes:judgments`)}`;
   let html;
   try {
-    html = await fetchText(searchUrl, { timeoutMs: 25000 });
+    html = await fetchText(searchUrl, { timeoutMs: TIMEOUT_SLOW });
   } catch { return []; }
 
   // Real results live in <div class="result_title"><a href="/docfragment/NUM/…">
@@ -181,7 +181,7 @@ async function fetchDocApi(tid, key) {
 // "" on any failure (fetchText already fails soft to "").
 async function fetchDocWeb(href) {
   if (!href) return "";
-  const html = await fetchText(href, { timeoutMs: 25000 });
+  const html = await fetchText(href, { timeoutMs: TIMEOUT_SLOW });
   return htmlToText(html, 6000);
 }
 

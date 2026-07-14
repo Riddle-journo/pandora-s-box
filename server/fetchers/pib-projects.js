@@ -8,7 +8,7 @@
 // politician (their own announcements) and extract {title, date, state, district,
 // ministry}. Parsing is best-effort — district names in free text are noisy — so
 // everything downstream treats a project as a LEAD input, never a finding.
-import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf, sleep } from "./http.js";
+import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf, sleep , TIMEOUT_DEFAULT } from "./http.js";
 
 // Indian states + UTs — used to anchor a location in free release text.
 export const STATES = [
@@ -102,7 +102,7 @@ export async function fetchPIBProjects(p) {
   // PIB search-by-name page (best-effort; returns [] silently on any failure).
   const listUrl = process.env.PIB_LIST_URL || "https://pib.gov.in/AllReleasem.aspx";
   let html;
-  try { html = await fetchText(listUrl, { timeoutMs: 14000 }); } catch { return []; }
+  try { html = await fetchText(listUrl, { timeoutMs: TIMEOUT_DEFAULT }); } catch { return []; }
   if (!html) return [];
   const text = htmlToText(html, 30000);
   const i = text.toLowerCase().indexOf(p.name.toLowerCase());
@@ -136,7 +136,7 @@ export async function fetchPIBProjects(p) {
       await sleep(700); // polite pacing between PIB hits
       const body = isPdf(link.href)
         ? await fetchPdfText(link.href, { maxLen: 6000 })
-        : htmlToText(await fetchText(link.href, { timeoutMs: 12000 }), 6000);
+        : htmlToText(await fetchText(link.href, { timeoutMs: TIMEOUT_DEFAULT }), 6000);
       const excerpt = contextAround(body, p.name, 800);
       if (!excerpt) return null; // the release doesn't actually name the politician
       const proj = parseProject(excerpt, { title: link.title || `PIB release naming ${p.name}`, ministry: p.office || null });

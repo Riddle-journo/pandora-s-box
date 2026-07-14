@@ -5,7 +5,7 @@
 //
 // Maps p.party (e.g. "BJP") → MyNeta party id via the abbreviation MyNeta prints
 // in parentheses, e.g. "Bharatiya Janata Party (BJP)". Free, no key.
-import { fetchText, htmlToText, mapLimit } from "./http.js";
+import { fetchText, htmlToText, mapLimit , TIMEOUT_SLOW } from "./http.js";
 import { acquire } from "../util/host-limiter.js";
 
 const BASE = "https://www.myneta.info/party/index.php";
@@ -21,7 +21,7 @@ async function mynetaFetch(url, opts) {
 let mapPromise = null;
 async function partyMap() {
   if (!mapPromise) mapPromise = (async () => {
-    const html = await mynetaFetch("https://www.myneta.info/party/", { timeoutMs: 25000 });
+    const html = await mynetaFetch("https://www.myneta.info/party/", { timeoutMs: TIMEOUT_SLOW });
     const map = new Map();
     if (!html) return map;
     for (const m of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
@@ -115,7 +115,7 @@ function scrapeParty(entry) {
 }
 
 async function scrapePartyFresh(entry) {
-  const summaryHtml = await mynetaFetch(`${BASE}?action=summary&id=${entry.id}`, { timeoutMs: 20000 });
+  const summaryHtml = await mynetaFetch(`${BASE}?action=summary&id=${entry.id}`, { timeoutMs: TIMEOUT_SLOW });
   if (!summaryHtml) return null;
 
   let summary = trim(htmlToText(summaryHtml, 5000), 2500);
@@ -132,7 +132,7 @@ async function scrapePartyFresh(entry) {
   }
   years.sort((a, b) => Number(b.year) - Number(a.year));
   const blocks = await mapLimit(years.slice(0, DETAIL_YEARS), 2, async ({ year, label }) => {
-    const h = await mynetaFetch(`${BASE}?action=itr&year=${year}&id=${entry.id}`, { timeoutMs: 20000 });
+    const h = await mynetaFetch(`${BASE}?action=itr&year=${year}&id=${entry.id}`, { timeoutMs: TIMEOUT_SLOW });
     return h ? formatItr(h, label) : "";
   });
   const detail = blocks.filter(Boolean).join("\n");
@@ -141,7 +141,7 @@ async function scrapePartyFresh(entry) {
   let donations = "";
   const yr = summaryHtml.match(/action=donation&year=([\d-]+)&id=/)?.[1];
   if (yr) {
-    const dHtml = await mynetaFetch(`${BASE}?action=donation&year=${yr}&id=${entry.id}`, { timeoutMs: 20000 });
+    const dHtml = await mynetaFetch(`${BASE}?action=donation&year=${yr}&id=${entry.id}`, { timeoutMs: TIMEOUT_SLOW });
     if (dHtml) {
       const d = trim(htmlToText(dHtml, 4000), 2500);
       const dsi = d.search(/donat/i);

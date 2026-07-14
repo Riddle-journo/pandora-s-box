@@ -4,7 +4,7 @@
 // data that unblocks the relationship graph (server/graph.js): a real list of a
 // politician's relatives by name, so dynasty / family-network patterns become
 // computable instead of inferred.
-import { fetchJson } from "./http.js";
+import { fetchJson , TIMEOUT_DEFAULT } from "./http.js";
 
 const API = "https://www.wikidata.org/w/api.php";
 
@@ -16,14 +16,14 @@ const REL = {
 
 async function searchEntity(name) {
   const url = `${API}?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&type=item&limit=5&format=json&origin=*`;
-  const d = await fetchJson(url, { timeoutMs: 12000 });
+  const d = await fetchJson(url, { timeoutMs: TIMEOUT_DEFAULT });
   return d?.search ?? [];
 }
 
 async function getEntities(ids) {
   if (!ids.length) return {};
   const url = `${API}?action=wbgetentities&ids=${ids.join("|")}&props=labels|claims|descriptions&languages=en&format=json&origin=*`;
-  const d = await fetchJson(url, { timeoutMs: 15000 });
+  const d = await fetchJson(url, { timeoutMs: TIMEOUT_DEFAULT });
   return d?.entities ?? {};
 }
 

@@ -5,7 +5,7 @@
 // This is exactly what the report's "claims" / "hypocrisy" layer needs — a
 // documented record of statements found true/false/misleading — which GDELT's
 // generic news soup doesn't surface cleanly. Free, no key (Google News RSS).
-import { fetchText } from "./http.js";
+import { fetchText , TIMEOUT_DEFAULT } from "./http.js";
 
 const FC_OUTLETS = /alt\s*news|boom|factly|vishvas|webqoof|quint|newschecker|fact[\s-]*crescendo|the\s*logical\s*indian|pib\s*fact/i;
 
@@ -25,7 +25,7 @@ export async function fetchFactChecks(p) {
   const q = encodeURIComponent(`"${p.name}" (fact check OR fact-check OR fake OR misleading OR false claim)`);
   const url = `https://news.google.com/rss/search?q=${q}&hl=en-IN&gl=IN&ceid=IN:en`;
   let xml = "";
-  try { xml = await fetchText(url, { timeoutMs: 12000 }); } catch { return []; }
+  try { xml = await fetchText(url, { timeoutMs: TIMEOUT_DEFAULT }); } catch { return []; }
   if (!xml) return [];
 
   const hits = [];

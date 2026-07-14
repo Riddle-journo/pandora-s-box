@@ -10,7 +10,7 @@
 // Items are headline-level news leads (admissible:false, tier 9), same posture
 // as GDELT: corroborate against primary records before scoring. The existing
 // article-body enricher will fetch full text for the most recent ones.
-import { fetchText } from "./http.js";
+import { fetchText , TIMEOUT_DEFAULT } from "./http.js";
 
 // Indian state → primary regional language (Google News hl code).
 const STATE_LANG = {
@@ -72,7 +72,7 @@ export async function fetchMultilingualNews(p) {
     const q = encodeURIComponent(`"${p.name}"`);
     const url = `https://news.google.com/rss/search?q=${q}&hl=${lang}&gl=IN&ceid=IN:${lang}`;
     let xml = "";
-    try { xml = await fetchText(url, { timeoutMs: 12000 }); } catch { continue; }
+    try { xml = await fetchText(url, { timeoutMs: TIMEOUT_DEFAULT }); } catch { continue; }
     if (!xml) continue;
     let n = 0;
     for (const item of parseRss(xml)) {

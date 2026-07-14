@@ -9,7 +9,7 @@
 // document text before being accepted).
 //
 // Lead only — a mention in a filing is not an adjudicated finding.
-import { fetchText, fetchJsonEx, UA, contextAround } from "./http.js";
+import { fetchText, fetchJsonEx, UA, contextAround , TIMEOUT_SLOW } from "./http.js";
 import { logger } from "../util/log.js";
 
 const log = logger("sec-edgar");
@@ -39,7 +39,7 @@ export async function fetchSECEdgar(p) {
     const accession = accessionRaw.replaceAll("-", "");
     const docUrl = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accession}/${filename}`;
 
-    const html = await fetchText(docUrl, { timeoutMs: 20000 });
+    const html = await fetchText(docUrl, { timeoutMs: TIMEOUT_SLOW });
     if (!html) continue;
     const text = html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
     const ctx = contextAround(text, p.name, 900);
