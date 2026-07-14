@@ -100,7 +100,7 @@ export default [
     files: ["public/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",
-      sourceType: "script",
+      sourceType: "module",
       globals: browserGlobals,
     },
     rules: coreRules,

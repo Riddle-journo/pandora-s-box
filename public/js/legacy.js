@@ -1,74 +1,13 @@
-const $ = (sel) => document.querySelector(sel);
-
-// ── Theme: apply saved preference before first paint (no flash) ──
-(function applyStoredTheme() {
-  try {
-    const t = localStorage.getItem("pb_theme");
-    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
-  } catch {}
-})();
-function currentTheme() {
-  const forced = document.documentElement.getAttribute("data-theme");
-  if (forced) return forced;
-  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-function toggleTheme() {
-  const next = currentTheme() === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem("pb_theme", next); } catch {}
-  syncThemeToggle();
-}
-function syncThemeToggle() {
-  const btn = document.getElementById("theme-toggle");
-  if (btn) btn.textContent = currentTheme() === "dark" ? "☀️" : "🌙";
-}
-
-const GRADE_COLORS = {
-  A: "#168a52", B: "#5ba636", C: "#b97e0a",
-  D: "#cf6a1f", E: "#c5392c", F: "#9c2b21", INSUFFICIENT_DATA: "#97a0ad",
-};
-const GRADE_TEXT = {
-  A: "Strong documented record", B: "Good record, minor issues", C: "Mixed record",
-  D: "Significant documented concerns", E: "Serious documented concerns",
-  F: "Severe documented record", INSUFFICIENT_DATA: "Not enough evidence yet",
-};
-const CONF = {
-  high:   { dots: "●●●", label: "Strong evidence" },
-  medium: { dots: "●●○", label: "Moderate evidence" },
-  low:    { dots: "●○○", label: "Limited evidence" },
-};
-const AVATAR_COLORS = ["#1f3a93","#c2255c","#0b7285","#5f3dc4","#a61e4d","#2b8a3e","#d9480f"];
-
-let reps = [], methodology = null, currentId = null;
-let currentRep = null, currentEvidence = [];
-
-const api = async (path) => { try { const r = await fetch(path); return r.ok ? r.json() : null; } catch { return null; } };
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const avatarColor = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; };
-const initials = (name) => name.split(/\s+/).filter(w => /^[A-Za-z]/.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join("");
-
-function barColor(score) {
-  if (score < 0) return "var(--na)";
-  if (score >= 70) return "var(--good)";
-  if (score >= 45) return "var(--mid)";
-  return "var(--bad)";
-}
-
-function confChip(level, reason) {
-  const c = CONF[level] ?? CONF.low;
-  return `<span class="conf ${level}" title="${esc(reason)}"><span class="dots">${c.dots}</span>${c.label}</span><span class="conf-reason">${esc(reason ?? "")}</span>`;
-}
-
-// Convert [n] citation markers in text to superscript links.
-// citations: array of {n, url, title, admissible}
-function withCites(rawText, citations) {
-  const escaped = esc(rawText ?? "");
-  return escaped.replace(/\[(\d+)\]/g, (_, n) => {
-    const c = (citations ?? []).find((x) => x.n === parseInt(n));
-    if (c) return `<sup><a href="${esc(c.url)}" target="_blank" rel="noopener" class="cite-ref" title="${esc(c.title)}">[${n}]</a></sup>`;
-    return `<sup class="cite-ref">[${n}]</sup>`;
-  });
-}
+// legacy.js — the not-yet-extracted remainder of the old app.js (Task 9.1).
+// Each subsequent task moves a banner-comment section out into its own module
+// until this file is empty. Module scope, so nothing leaks to window.
+import {
+  $, currentTheme, toggleTheme, syncThemeToggle,
+  GRADE_COLORS, GRADE_TEXT, CONF, AVATAR_COLORS,
+  esc, avatarColor, initials, barColor, confChip, withCites,
+} from "./core.js";
+import { api } from "./api.js";
+import { state } from "./state.js";
 
 // ================= HOME =================
 // ================= SEARCH AUTOCOMPLETE =================
@@ -183,7 +122,7 @@ function fuzzyScore(hay, q) {
 // Representative suggestions with "(office · party · place)" descriptors.
 function repSuggestions(q) {
   const scored = [];
-  for (const p of reps) {
+  for (const p of state.reps) {
     const s = fuzzyScore(`${p.name} ${p.constituency ?? ""} ${p.party ?? ""} ${p.state ?? ""}`, q);
     if (s > 0) scored.push([s + (p.latest ? 5 : 0), p]); // small boost for reps with a dossier
   }
@@ -256,7 +195,7 @@ function renderHome(resetPage = true) {
     }
   };
 
-  const filtered = reps.filter((p) =>
+  const filtered = state.reps.filter((p) =>
     (!fState  || p.state  === fState) &&
     (!fParty  || p.party  === fParty) &&
     (!fOffice || p.office === fOffice) &&
@@ -301,9 +240,9 @@ function renderHome(resetPage = true) {
 
 
 function buildFilters() {
-  const states  = [...new Set(reps.map(p => p.state).filter(Boolean))].sort();
-  const parties = [...new Set(reps.map(p => p.party).filter(Boolean))].sort();
-  const offices = [...new Set(reps.map(p => p.office).filter(Boolean))].sort();
+  const states  = [...new Set(state.reps.map(p => p.state).filter(Boolean))].sort();
+  const parties = [...new Set(state.reps.map(p => p.party).filter(Boolean))].sort();
+  const offices = [...new Set(state.reps.map(p => p.office).filter(Boolean))].sort();
   $("#f-state").innerHTML  = '<option value="">All states</option>'  + states.map(s  => `<option>${esc(s)}</option>`).join("");
   $("#f-party").innerHTML  = '<option value="">All parties</option>' + parties.map(s => `<option>${esc(s)}</option>`).join("");
   $("#f-office").innerHTML = '<option value="">All offices</option>' + offices.map(s => `<option>${esc(s)}</option>`).join("");
@@ -317,8 +256,8 @@ function ringStyle(el, score, grade) {
 }
 
 function renderMethodology(report) {
-  if (!methodology) return;
-  const { scoring, parameters } = methodology;
+  if (!state.methodology) return;
+  const { scoring, parameters } = state.methodology;
   const params = report.scorecard?.parameters ?? report.parameters ?? [];
   const scored = params.filter(p => p.score >= 0);
   $("#methodology-body").innerHTML = `
@@ -790,8 +729,8 @@ function renderCardView(card) {
   );
 
   // Methodology — the card variant (no AI investigation step).
-  if (methodology) {
-    const { scoring, parameters } = methodology;
+  if (state.methodology) {
+    const { scoring, parameters } = state.methodology;
     $("#methodology-body").innerHTML = `
       <h4>1 · Data sources</h4>
       <p class="small">Sworn ECI affidavits, MPLADS fund records, MCA company registry, Digital Sansad, Wikidata, court/news archives — every fact links to its source.</p>
@@ -862,7 +801,7 @@ async function showOrgCard(kind, key, scope = "union") {
 }
 
 async function showReport(id) {
-  currentId = id;
+  state.currentId = id;
   hideAllViews();
   $("#report-view").hidden = false;
   window.scrollTo(0, 0);
@@ -886,7 +825,7 @@ async function showReport(id) {
     api(`/api/politicians/${id}/funding`),
   ]);
   if (!p) { location.hash = "#/"; return; }
-  currentRep = p; currentEvidence = evidence ?? [];
+  state.currentRep = p; state.currentEvidence = evidence ?? [];
 
   // Follow the money — the party's electoral-bond funding (shown regardless of report).
   if (funding && !funding.unavailable && funding.total_cr != null) {
@@ -928,7 +867,7 @@ async function showReport(id) {
   }
 
   // Related dossiers — same party first, then same state; report-havers ranked up.
-  const related = reps
+  const related = state.reps
     .filter((r) => r.id !== p.id && (r.party === p.party || r.state === p.state))
     .sort((a, b) =>
       (a.party === p.party ? 0 : 1) - (b.party === p.party ? 0 : 1) ||
@@ -1145,16 +1084,16 @@ function downloadFile(filename, text, mime) {
 function slugify(s) { return (s || "rep").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 function csvCell(s) { s = String(s ?? ""); if (/^[=+\-@]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 function exportEvidenceCsv() {
-  if (!currentEvidence.length) return;
+  if (!state.currentEvidence.length) return;
   const rows = [["#", "Date", "Type", "Title", "URL", "Summary"]];
-  currentEvidence.forEach((e, i) => rows.push([i + 1, e.date ?? "", e.admissible ? "official record" : "news lead", e.title ?? "", e.url ?? "", e.summary ?? ""]));
+  state.currentEvidence.forEach((e, i) => rows.push([i + 1, e.date ?? "", e.admissible ? "official record" : "news lead", e.title ?? "", e.url ?? "", e.summary ?? ""]));
   const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
-  downloadFile(`${slugify(currentRep?.name)}-sources.csv`, csv, "text/csv;charset=utf-8");
+  downloadFile(`${slugify(state.currentRep?.name)}-sources.csv`, csv, "text/csv;charset=utf-8");
 }
 function exportEvidenceBibtex() {
-  if (!currentEvidence.length) return;
-  const name = slugify(currentRep?.name);
-  const bib = currentEvidence.map((e, i) => {
+  if (!state.currentEvidence.length) return;
+  const name = slugify(state.currentRep?.name);
+  const bib = state.currentEvidence.map((e, i) => {
     const year = (e.date || "").match(/\d{4}/)?.[0] || "";
     return `@online{${name}-src${i + 1},\n  title = {${(e.title || "Untitled source").replace(/[{}]/g, "")}},\n  url = {${e.url || ""}},\n  note = {${(e.summary || "").replace(/[{}]/g, "")}${e.admissible ? " [official record]" : " [news lead]"}},${year ? `\n  year = {${year}},` : ""}\n  urldate = {${new Date().toISOString().slice(0, 10)}}\n}`;
   }).join("\n\n");
@@ -1232,15 +1171,15 @@ function showHome() {
 // Landing: live stats strip + a "spotlight" of striking findings.
 async function renderLanding() {
   // Stats strip
-  const withReport = reps.filter((p) => p.latest).length;
+  const withReport = state.reps.filter((p) => p.latest).length;
   $("#landing-stats").innerHTML = [
-    ["🧑‍⚖️", reps.length.toLocaleString(), "representatives tracked"],
+    ["🧑‍⚖️", state.reps.length.toLocaleString(), "representatives tracked"],
     ["📄", withReport.toLocaleString(), "dossiers generated"],
     ["🏛️", "—", "scandals documented"],
   ].map(([i, n, l]) => `<div class="lstat"><span class="lstat-i">${i}</span><span class="lstat-n" data-stat="${l}">${n}</span><span class="lstat-l">${l}</span></div>`).join("");
   // Nav-card count badges (best-effort, filled as data lands)
   const setCount = (key, n) => document.querySelectorAll(`.nc-count[data-count="${key}"]`).forEach((el) => el.textContent = n);
-  setCount("reps", reps.length.toLocaleString());
+  setCount("reps", state.reps.length.toLocaleString());
   // Fill scandal count + spotlight + feed from the APIs (best-effort).
   api("/api/scandals").then((s) => {
     if (Array.isArray(s)) {
@@ -1268,7 +1207,7 @@ async function renderFeed() {
   const box = $("#feed-grid");
   if (!box) return;
   box.innerHTML = Array.from({ length: 3 }, () => `<div class="feed-card skel"><span class="skel-line skel-tag"></span><span class="skel-line skel-name"></span></div>`).join("");
-  const recentReports = reps
+  const recentReports = state.reps
     .filter((p) => p.latest?.generated_at)
     .sort((a, b) => new Date(b.latest.generated_at) - new Date(a.latest.generated_at))
     .slice(0, 4);
@@ -1330,7 +1269,7 @@ function showCompare(idA, idB) {
   cmpSel = { a: idA || cmpSel.a, b: idB || cmpSel.b };
   // reflect current selection in the search boxes
   for (const side of ["a", "b"]) {
-    const rep = reps.find((p) => p.id === cmpSel[side]);
+    const rep = state.reps.find((p) => p.id === cmpSel[side]);
     if (rep) $(`#cmp-search-${side}`).value = rep.name;
   }
   if (cmpSel.a && cmpSel.b) loadComparison();
@@ -1343,7 +1282,7 @@ function wireComparePicker(side) {
   input.addEventListener("input", () => {
     const q = input.value.toLowerCase().trim();
     if (q.length < 2) { box.hidden = true; return; }
-    const hits = reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
+    const hits = state.reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
     box.innerHTML = hits.map((p) =>
       `<button class="cmp-hit" data-id="${p.id}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></button>`
     ).join("") || `<div class="cmp-hit muted">No match</div>`;
@@ -1357,7 +1296,7 @@ function wireComparePicker(side) {
     const other = side === "a" ? cmpSel.b : cmpSel.a;
     location.hash = `#/compare/${cmpSel.a ?? "_"}/${cmpSel.b ?? "_"}`;
     if (cmpSel.a && cmpSel.b) loadComparison();
-    else { const rep = reps.find((p) => p.id === cmpSel[side]); if (rep) $(`#cmp-search-${side}`).value = rep.name;
+    else { const rep = state.reps.find((p) => p.id === cmpSel[side]); if (rep) $(`#cmp-search-${side}`).value = rep.name;
            $("#compare-result").innerHTML = `<p class="muted center cmp-empty">Pick the second representative to compare.</p>`; }
   });
 }
@@ -2894,7 +2833,7 @@ function cmdkGather(q) {
     if (recent.length) groups.push({ label: "Recent", items: recent.map((r) => ({ ...r, recent: true })) });
     return groups;
   }
-  const people = reps.map((p) => [fuzzyScore(`${p.name} ${p.constituency ?? ""} ${p.party ?? ""} ${p.state ?? ""}`, q) + (p.latest ? 5 : 0), p])
+  const people = state.reps.map((p) => [fuzzyScore(`${p.name} ${p.constituency ?? ""} ${p.party ?? ""} ${p.state ?? ""}`, q) + (p.latest ? 5 : 0), p])
     .filter(([s]) => s > 0).sort((a, b) => b[0] - a[0]).slice(0, 6)
     .map(([, p]) => ({ type: "rep", id: p.id, label: p.name, sub: [p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · ") }));
   if (people.length) groups.push({ label: "Representatives", items: people });
@@ -2971,7 +2910,7 @@ $("#tip-form").addEventListener("submit", async (ev) => {
     const { challenge, difficulty_bits } = await api("/api/pow-challenge");
     const nonce = await solvePow(challenge, difficulty_bits, (n) => (status.textContent = `Solving… (${n.toLocaleString()} attempts)`));
     status.textContent = "Submitting…";
-    const res = await fetch(`/api/politicians/${currentId}/tips`, {
+    const res = await fetch(`/api/politicians/${state.currentId}/tips`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ challenge, nonce, category: $("#tip-category").value, text: $("#tip-text").value, website: document.querySelector(".hp").value }),
@@ -3015,8 +2954,8 @@ $("#landing-search")?.addEventListener("submit", (e) => {
     api("/api/methodology"),
     api("/api/tip-categories"),
   ]);
-  reps = list ?? [];
-  methodology = meth;
+  state.reps = list ?? [];
+  state.methodology = meth;
   $("#tip-category").innerHTML = (cats ?? []).map(c => `<option value="${c}">${c.replaceAll("_"," ")}</option>`).join("");
   buildFilters();
   wireComparePicker("a");
@@ -3152,14 +3091,14 @@ function wireTipPicker() {
   input.addEventListener("input", () => {
     const q = input.value.toLowerCase().trim();
     if (q.length < 2) { box.hidden = true; return; }
-    const hits = reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
+    const hits = state.reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
     box.innerHTML = hits.map((p) => `<div class="cmp-hit" data-tip-id="${p.id}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></div>`).join("");
     box.hidden = hits.length === 0;
   });
   box.addEventListener("click", (e) => {
     const hit = e.target.closest("[data-tip-id]");
     if (!hit) return;
-    tipRep = reps.find((p) => p.id === hit.dataset.tipId);
+    tipRep = state.reps.find((p) => p.id === hit.dataset.tipId);
     $("#tip-rep-chosen").textContent = tipRep ? `Tip about: ${tipRep.name}` : "";
     input.value = tipRep?.name ?? "";
     box.hidden = true;
