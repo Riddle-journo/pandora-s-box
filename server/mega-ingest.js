@@ -705,9 +705,9 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
             const u = res.url();
             if (!/json/i.test(ct) && !/\/api\/|\.json(\?|$)/i.test(u)) return;
             if (/google|gstatic|analytics|recaptcha|font|\.css|\.js(\?|$)/i.test(u)) return;
-            let sample = ""; try { sample = (await res.text()).slice(0, 600); } catch {}
+            let sample = ""; try { sample = (await res.text()).slice(0, 600); } catch (err) { console.warn("[mega-ingest] response body read failed:", err?.message ?? err); }
             captured.push({ url: u, status: res.status(), sample });
-          } catch {}
+          } catch (err) { console.warn("[mega-ingest] response capture failed:", err?.message ?? err); }
         });
         await page.goto(cfg.url, { waitUntil: "networkidle", timeout: cfg.timeoutMs ?? 45000 }).catch(() => {});
         for (const sel of (cfg.clicks ?? [])) { await page.click(sel).catch(() => {}); await page.waitForTimeout(1500).catch(() => {}); }
@@ -840,7 +840,7 @@ if (cmd === "--refresh" || cmd === "--rematch") {
   for (const s of MEGA_SOURCES) {
     const f = path.join(CACHE_DIR, `mega-${s.id}.json`);
     let line = "no cache — run: node server/mega-ingest.js --refresh " + s.id;
-    try { const c = JSON.parse(fs.readFileSync(f, "utf8")); line = `${c.count} matched rows (of ${c.total}), refreshed ${c.fetched_at}`; } catch {}
+    try { const c = JSON.parse(fs.readFileSync(f, "utf8")); line = `${c.count} matched rows (of ${c.total}), refreshed ${c.fetched_at}`; } catch (err) { console.warn(`[mega-ingest] cache status read failed for ${s.id}:`, err?.message ?? err); }
     console.log(`[mega] ${s.id}: ${line}`);
   }
   process.exit(0);

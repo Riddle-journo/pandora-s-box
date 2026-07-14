@@ -34,7 +34,7 @@ async function getDb() {
         try {
           const n = db.prepare(`SELECT COUNT(*) c FROM "${t}"`).get().c;
           if (n > bestRows) { bestRows = n; best = t; }
-        } catch {}
+        } catch (err) { console.warn("[cppp-procurement] row count failed for table:", err?.message ?? err); }
       }
       if (!best) return null;
       const cols = db.prepare(`PRAGMA table_info("${best}")`).all();
@@ -66,7 +66,7 @@ export async function fetchCPPPProcurement(p) {
     try {
       const r = h.db.prepare(`SELECT * FROM "${h.table}" WHERE ${where} LIMIT 25`).all(...params);
       for (const row of r) rows.push({ term, row });
-    } catch {}
+    } catch (err) { console.warn("[cppp-procurement] search query failed:", err?.message ?? err); }
     if (rows.length >= 50) break;
   }
   if (!rows.length) return [];
