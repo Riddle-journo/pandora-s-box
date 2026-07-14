@@ -16,15 +16,13 @@ import "dotenv/config";
 import { listPoliticians, upsertPolitician } from "./store.js";
 import { fetchText, mapLimit } from "./fetchers/http.js";
 import { fetchMyNetaProfile } from "./sources/myneta-full.js";
+import { NORM, nameScore } from "./util/names.js";
 
 const SEARCH = "https://www.myneta.info/search_myneta.php?q=";
 const args = process.argv.slice(2);
 const APPLY = args.includes("--apply");
 const ONLY_SUSPECT = args.includes("--only-suspect");
 const LIMIT = (() => { const i = args.indexOf("--limit"); return i >= 0 ? Number(args[i + 1]) : Infinity; })();
-
-const NORM = (s) => (s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
-const nameScore = (a, b) => { const A = NORM(a); const B = new Set(NORM(b)); const hit = A.filter((w) => B.has(w)).length; return A.length ? hit / A.length : 0; };
 const slugOf = (u) => (u ?? "").match(/myneta\.info\/([^/]+)\//)?.[1] ?? "";
 // Proper import slugs are CamelCase StateYear or LokSabhaYYYY; anything else (e.g. ls2014, gujarat2012) is legacy/suspect.
 const isSuspectSlug = (s) => !/^[A-Z][A-Za-z]+\d{4}$/.test(s);

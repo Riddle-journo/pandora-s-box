@@ -14,19 +14,13 @@
 import "dotenv/config";
 import { batchUpsertPoliticians, listPoliticians } from "./store.js";
 import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
+import { NORM, nameScore } from "./util/names.js";
 
 const RS_API   = "https://sansad.in/api_rs";
 const MYNETA   = "https://www.myneta.info";
 
 const APPLY      = process.argv.includes("--apply");
 const NO_MYNETA  = process.argv.includes("--no-myneta");
-
-const NORM = (s) => (s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
-const nameScore = (a, b) => {
-  const A = NORM(a); const B = new Set(NORM(b));
-  const hit = A.filter((w) => B.has(w)).length;
-  return A.length ? hit / A.length : 0;
-};
 
 // Sansad RS API returns names as "Lastname, Title Firstname" — normalize to "Firstname Lastname"
 // Titles can appear anywhere so strip without ^ anchor.

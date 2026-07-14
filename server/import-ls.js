@@ -15,6 +15,7 @@
 import "dotenv/config";
 import { batchUpsertPoliticians, listPoliticians } from "./store.js";
 import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
+import { NORM, nameScore } from "./util/names.js";
 
 const LS_API = "https://sansad.in/api_ls";
 const MYNETA = "https://www.myneta.info";
@@ -24,12 +25,6 @@ const APPLY     = process.argv.includes("--apply");
 const NO_MYNETA = process.argv.includes("--no-myneta");
 
 const clean = (s) => (s ?? "").replace(/\s+/g, " ").trim();
-const NORM = (s) => (s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
-const nameScore = (a, b) => {
-  const A = NORM(a); const B = new Set(NORM(b));
-  const hit = A.filter((w) => B.has(w)).length;
-  return A.length ? hit / A.length : 0;
-};
 // Constituency dedup key: strip the (SC)/(ST) reservation suffixes MyNeta appends
 // (e.g. "ADILABAD (ST)" vs Sansad "Adilabad"), then keep letters only.
 const consKey = (s) => clean(s).toLowerCase().replace(/\(s[ct]\)/g, "").replace(/[^a-z]/g, "");
