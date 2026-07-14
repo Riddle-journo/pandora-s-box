@@ -15,7 +15,7 @@
 //   node server/scandal-discovery.js --days 30      # widen the news window
 //   node server/scandal-discovery.js --list         # show the current queue
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, callWithRetry } from "./llm.js";
 import { upsertScandal, listProposals, listScandals, getMeta, setMeta } from "./store.js";
 import { SCANDAL_SEEDS } from "./data/scandal-seeds.js";
 import { gdeltJson } from "./sources/gdelt-fetch.js";
@@ -93,10 +93,10 @@ async function discover(days) {
 
   const client = makeClient();
 
-  const r = await client.chat.completions.create({
+  const r = await callWithRetry(client, {
     model: MODEL, messages: [{ role: "user", content: buildPrompt(headlines.slice(0, 120), existingTitles) }],
     temperature: 0.3, max_tokens: 6000, reasoning: { effort: "high" }, // task #15
-  });
+  }, { module: "scandal-discovery" });
   let raw = r.choices?.[0]?.message?.content ?? "";
   raw = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   let parsed; try { parsed = JSON.parse(raw); } catch { const m = raw.match(/\{[\s\S]*\}/); parsed = m ? JSON.parse(m[0]) : { proposals: [] }; }

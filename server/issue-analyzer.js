@@ -11,7 +11,7 @@
 //   node server/issue-analyzer.js seed --force   # regenerate all
 //   node server/issue-analyzer.js <slug>         # one issue
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
 import { listIssues, getIssue, upsertIssue } from "./store.js";
 import { fetchNews } from "./sources/news.js";
 import { freedomFor } from "./data/freedom-index.js";
@@ -100,10 +100,10 @@ export async function generateIssue(seed) {
   let analysis = null, lastErr = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const r = await client.chat.completions.create({
+      const r = await callWithRetry(client, {
         model: MODEL, messages: [{ role: "user", content: prompt }],
         temperature: attempt === 1 ? 0.3 : 0.15, max_tokens: 12000, reasoning: { effort: "high" },
-      });
+      }, { module: "issue-analyzer", attempts: 2 });
       const out = r.choices?.[0]?.message?.content ?? r.choices?.[0]?.message?.reasoning ?? "";
       if (!out) throw new Error("empty content");
       analysis = validate(out, seed);

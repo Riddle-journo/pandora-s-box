@@ -12,7 +12,7 @@
 // a source, and any sentence whose [n] doesn't resolve to the numbered registry
 // is stripped — never guessed.
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
 import {
   listLeads, listScandals, listEvidence, getPolitician, findPolitician, upsertStory,
 } from "./store.js";
@@ -214,13 +214,13 @@ export async function generateStory(incident, { dryRun = false } = {}) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     let raw = "";
     try {
-      const res = await client.chat.completions.create({
+      const res = await callWithRetry(client, {
         model: MODEL,
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
         temperature: attempt === 1 ? 0.15 : 0.1,
         max_tokens: 12000,
         reasoning: { effort: "high" },
-      });
+      }, { module: "story-generator", attempts: 2 });
       const msg = res.choices?.[0]?.message;
       raw = msg?.content ?? msg?.reasoning ?? "";
       if (!raw) throw new Error("Model returned empty content.");
