@@ -33,7 +33,10 @@ export function parseDealsCsv(csv, name) {
   const lines = String(csv ?? "").trim().split(/\r?\n/);
   if (lines.length < 2) return [];
   const header = lines[0].split(",").map((h) => h.replace(/^"|"$/g, "").trim().toLowerCase());
-  const iClient = header.findIndex((h) => /client|name/.test(h));
+  // "client" first: the real NSE header is Date,Symbol,Security Name,Client
+  // Name,… — a bare /name/ match would grab "Security Name" instead.
+  const iClientExact = header.findIndex((h) => /client/.test(h));
+  const iClient = iClientExact >= 0 ? iClientExact : header.findIndex((h) => /name/.test(h));
   const iSymbol = header.findIndex((h) => /symbol|security/.test(h));
   const iDate = header.findIndex((h) => /date/.test(h));
   const iQty = header.findIndex((h) => /quantity|qty/.test(h));
