@@ -29,6 +29,7 @@
     "db:maintain": "node server/db-maintenance.js all",
     "test": "node --test test/*.test.js",
     "typecheck": "tsc -p tsconfig.json",
+    "coverage": "c8 --reporter=text-summary --reporter=html --all --src server --exclude \"server/data/**\" node --test test/*.test.js",
     "smoke": "node scripts/smoke.js",
     "smoke:ui": "node scripts/smoke-ui.js",
     "lint": "eslint .",
@@ -58,6 +59,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "c8": "^11.0.0",
     "eslint": "^9.39.5",
     "pm2": "^7.0.3",
     "typescript": "^7.0.2"

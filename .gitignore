@@ -12,3 +12,4 @@ eng.traineddata
 data/db.json
 data/db.json.bak
 logs/
+coverage/
