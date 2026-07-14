@@ -37,10 +37,10 @@ function chainClient(entry) {
 }
 
 const _cooldownUntil = new Map(); // chain index → epoch ms until which it's skipped
-export function isRateLimit(err) {
-  const s = err?.status ?? err?.code;
-  return s === 429 || /rate.?limit|quota|resource_exhausted|too many requests/i.test(err?.message ?? "");
-}
+// Classifier moved to llm.js so the paid path shares it; imported for the
+// rotation below and re-exported so existing importers keep working.
+import { isRateLimit } from "./llm.js";
+export { isRateLimit };
 
 // Try the chain in order, skipping cooling-down entries, rotating on rate-limit.
 // Returns { text, model } on success, or null when every entry is unavailable

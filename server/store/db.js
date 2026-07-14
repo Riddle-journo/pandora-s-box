@@ -101,6 +101,24 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS meta ( key TEXT PRIMARY KEY, value TEXT );
 
+  -- Paid-LLM usage telemetry (append-only). Tokens, not rupees: pricing tables
+  -- go stale; cost is computed at display time if ever needed.
+  CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    module TEXT NOT NULL,
+    model TEXT,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    duration_ms INTEGER,
+    attempts INTEGER,
+    ok INTEGER NOT NULL,
+    error TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_llm_usage_at     ON llm_usage(at);
+  CREATE INDEX IF NOT EXISTS idx_llm_usage_module ON llm_usage(module, at);
+
   -- Maintenance ledger — one row per db-maintenance run (a tier sweep or a single
   -- task), so the health of the DB itself becomes a trend, not a surprise. status
   -- is the worst finding severity in the run: 'green' | 'warn' | 'red'. report is
