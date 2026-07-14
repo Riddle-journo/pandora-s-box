@@ -20,7 +20,7 @@ import { engineStatus, detectorById, runEngine } from "../engine.js";
 import { listFlags, flagCounts, getFlag } from "../flags.js";
 import { setSetting, coerceValue } from "../engine-settings.js";
 import { WORKER_TUNABLES, workerStatus } from "../worker.js";
-import { decideLeadShared } from "./util.js";
+import { decideLeadShared , pageParams } from "./util.js";
 
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const router = express.Router();
@@ -109,11 +109,7 @@ function rosterRows({ office, state, hasReport, hasEvidence, q } = {}) {
 
 // Clamp copy-pasted page/pageSize query params into a safe range and derive the
 // row offset. Preserves the previous inline Math.max/Math.min behavior exactly.
-function pageParams(query, { defLimit, maxLimit }) {
-  const page = Math.max(1, Number(query.page) || 1);
-  const pageSize = Math.max(1, Math.min(maxLimit, Number(query.pageSize) || defLimit));
-  return { page, pageSize, offset: (page - 1) * pageSize };
-}
+// pageParams moved to ./util.js (shared with public pagination).
 
 // Roster explorer: filter/paginate reps + per-rep evidence count and latest grade.
 router.get("/api/admin/ops/roster", requireAdmin, (req, res) => {
