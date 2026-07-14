@@ -17,6 +17,7 @@
 // extracted once by the LLM from the affidavit, then verified forever in code.
 import { latestReport } from "../store.js";
 import { fetchJson } from "./http.js";
+import { dataGovKey } from "../config.js";
 
 const RESOURCE = "4dbe5667-7b6b-41d7-82af-211562424d9a"; // RoC-wise Company Master Data
 const API = `https://api.data.gov.in/resource/${RESOURCE}`;
@@ -63,7 +64,7 @@ function nameVariants(name) {
 // Exported (Phase 3): the directorship graph reuses this to registry-check the
 // companies discovered from court/leak/press evidence, so the "declared-company"
 // path (this fetcher) and the "discovered-company" path share ONE MCA lookup.
-export async function verifyCompanyName(name, { key = process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_KEY, timeoutMs = 15000 } = {}) {
+export async function verifyCompanyName(name, { key = dataGovKey(), timeoutMs = 15000 } = {}) {
   if (!key || !name || String(name).trim().length < 6) return null;
   const seen = new Set();
   for (const q of nameVariants(name)) {
@@ -93,7 +94,7 @@ export async function verifyCompanyName(name, { key = process.env.DATA_GOV_IN_KE
 }
 
 export async function fetchCompanyRegistry(p) {
-  const key = process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_KEY;
+  const key = dataGovKey();
   if (!key || process.env.COMPANY_REGISTRY_DISABLE === "1") return [];
 
   // Company names the last investigation extracted from the sworn affidavit.

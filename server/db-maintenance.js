@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db } from "./store.js";
+import { dataGovKey } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.PANDOROS_DB_PATH || path.join(__dirname, "..", "data", "pandoros.db");
@@ -150,7 +151,7 @@ export async function optionalDatasets() {
   });
 
   // data.gov.in key — unlocks the json-api L1 sources (FCI, PMFBY, DILRMP, AQI…).
-  const dgiKey = process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_API_KEY || process.env.DATA_GOV_KEY;
+  const dgiKey = dataGovKey();
   checks.push({
     id: "data_gov_key", ok: !!dgiKey,
     detail: dgiKey ? "set" : "no data.gov.in key",

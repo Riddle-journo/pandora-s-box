@@ -15,6 +15,7 @@
 // (ogdResourceMeta) and schedule freshness checks per-resource, not assume live.
 
 import { UA } from "./http.js";
+import { dataGovKey } from "../config.js";
 
 // ── known portals ────────────────────────────────────────────────────────────
 // CKAN portals we target. Same code path works for any CKAN host; these are the
@@ -30,7 +31,7 @@ export const CKAN_PORTALS = {
 // for real reads. Prefer a private key via OGD_API_KEY (higher limits) when set.
 export const OGD_HOST = "https://api.data.gov.in";
 const OGD_SAMPLE_KEY = "579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b";
-export const ogdKey = () => process.env.OGD_API_KEY || OGD_SAMPLE_KEY;
+export const ogdKey = () => process.env.OGD_API_KEY || dataGovKey() || OGD_SAMPLE_KEY;
 
 // ── low-level JSON GET (own copy so we can vary timeout + tolerate non-2xx) ────
 // http.js#fetchJson is fine but fixes a 15s timeout and swallows the status; CKAN
