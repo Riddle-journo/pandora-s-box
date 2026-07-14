@@ -39,13 +39,4 @@ for (const [name, el] of Object.entries({
   issueDetail: "#issue-detail-view", tips: "#tips-view", org: "#org-view",
 })) registerView(name, { el });
 
-// Ops view teardown: leaving any view stops the ops auto-refresh + log polling
-// (restarted by showOps). The timer handles stay on window until Task 9.10
-// moves the whole ops console (and these handles) into ops.js.
-registerView("ops", {
-  el: "#ops-view",
-  teardown: () => {
-    if (window.__opsTimer) { clearInterval(window.__opsTimer); window.__opsTimer = null; }
-    if (window.__opsDrawerTimer) { clearInterval(window.__opsDrawerTimer); window.__opsDrawerTimer = null; }
-  },
-});
+// The ops view registers itself (with its polling-teardown) from ops.js.
