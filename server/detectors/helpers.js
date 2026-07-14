@@ -139,3 +139,26 @@ export function fmtVal(v) {
   if (Math.abs(n) >= L) return `₹${(n / L).toFixed(2)} L`;
   return n % 1 === 0 ? String(n) : n.toFixed(2);
 }
+
+// ── Tunable-metadata helpers ─────────────────────────────────────────────────
+// Moved verbatim from engine.js so batch-file detector literals (which call
+// T()/legacyTunables()/BASE_TUNABLES at module-load time) can build without a
+// circular import back into engine.js. engine.js imports these by name.
+
+// Common tunables every detector gets.
+export const BASE_TUNABLES = {
+  enabled: { label: "Enabled", type: "boolean", def: true, desc: "Turn this detector on/off." },
+  bigAt: { label: "Big-flag score", type: "number", def: 20, min: 1, max: 100, desc: "Score at/above which a flag is BIG (lead-worthy on its own)." },
+};
+export const T = (extra = {}) => ({ ...BASE_TUNABLES, ...extra });
+
+// Turn a legacy detector's DEFAULTS constant into tunable metadata (all numeric,
+// labelled by their constant name) so the ops console can edit them live. `labels`
+// optionally overrides the display label/desc for a given key.
+export function legacyTunables(defaults, labels = {}, base = {}) {
+  const out = { ...BASE_TUNABLES, ...base };
+  for (const [k, def] of Object.entries(defaults)) {
+    out[k] = { label: labels[k]?.label ?? k, type: "number", def, min: 0, desc: labels[k]?.desc ?? `Threshold ${k} (default ${def}).` };
+  }
+  return out;
+}
