@@ -13,6 +13,7 @@ import { showLeaderboard } from "./leaderboard.js";
 import { showIssues, showIssue } from "./issues.js";
 import { showTips } from "./tips.js";
 import { showOps } from "./ops.js";
+import { showOrgsDirectory } from "./orgs.js";
 
 function route() {
   if (location.hash === "#/admin") { showAdmin(); return; }
@@ -24,6 +25,9 @@ function route() {
   if (location.hash === "#/scorecards") { showScorecards(); return; }
   if (location.hash === "#/govwatch") { showGovWatch(); return; }
   if (location.hash === "#/ops") { showOps(); return; }
+  if (location.hash === "#/orgs") { showOrgsDirectory(); return; }
+  const org = location.hash.match(/^#\/org\/(.+)$/);
+  if (org) { showOrgCard("org", org[1]); return; }
   const iss = location.hash.match(/^#\/issue\/(.+)$/);
   if (iss) { showIssue(iss[1]); return; }
   const sc = location.hash.match(/^#\/scandal\/(.+)$/);
@@ -38,19 +42,19 @@ function route() {
   if (m) showReport(m[1]); else showHome();
 }
 
-// Highlight the active section in the persistent nav (browse+rep+compare all map to Representatives).
+// Highlight the active nav group (Representatives / Accountability / The Big Picture / Tip).
 function syncNav() {
   const h = location.hash || "#/";
   let key = null;
   if (h.startsWith("#/browse") || h.startsWith("#/rep/") || h.startsWith("#/compare") || h.startsWith("#/leaderboard")) key = "browse";
-  else if (h.startsWith("#/ministry/") || h.startsWith("#/party/")) key = "scorecards";
-  else if (h.startsWith("#/govwatch") || h.startsWith("#/scandal/")) key = "govwatch";
-  else if (h.startsWith("#/scorecards")) key = "scorecards";
-  else if (h.startsWith("#/funding")) key = "funding";
-  else if (h.startsWith("#/issues") || h.startsWith("#/issue/")) key = "issues";
+  else if (h.startsWith("#/govwatch") || h.startsWith("#/scandal/") || h.startsWith("#/scorecards") || h.startsWith("#/ministry/") || h.startsWith("#/party/") || h.startsWith("#/orgs") || h.startsWith("#/org/")) key = "accountability";
+  else if (h.startsWith("#/issues") || h.startsWith("#/issue/") || h.startsWith("#/funding")) key = "bigpicture";
   else if (h.startsWith("#/tips")) key = "tips";
-  else if (h.startsWith("#/ops")) key = "ops";
-  document.querySelectorAll("#appnav-links a").forEach((a) => a.classList.toggle("active", a.dataset.nav === key));
+  document.querySelectorAll("#appnav-links a[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === key));
+  document.querySelectorAll("#appnav-links .nav-group").forEach((g) => {
+    g.classList.toggle("active", g.dataset.nav === key);
+    g.removeAttribute("open"); // close dropdowns on navigate
+  });
   const links = document.getElementById("appnav-links");
   if (links) links.classList.remove("open"); // close mobile menu on navigate
   const tgl = document.getElementById("appnav-toggle");

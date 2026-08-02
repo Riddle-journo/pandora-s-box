@@ -35,7 +35,7 @@ function renderIssue(i) {
   const govs = (i.by_government ?? []).map((g) => `
     <div class="issue-gov">
       <div class="issue-gov-head"><strong>${esc(g.government || g.period)}</strong> <span class="muted small">${esc(g.period)}</span>
-        <span class="gw-verdict ${ASSESS_CLS[g.assessment] ?? ""}">${esc(g.assessment)}</span></div>
+        <span class="gw-verdict ${esc(ASSESS_CLS[g.assessment] ?? "")}">${esc(g.assessment)}</span></div>
       ${g.stance ? `<p class="small"><em>Stance:</em> ${esc(g.stance)}</p>` : ""}
       ${(g.key_measures ?? []).length ? `<ul class="issue-measures">${g.key_measures.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
       ${g.record ? `<p class="small">${esc(g.record)}</p>` : ""}

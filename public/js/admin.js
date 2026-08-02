@@ -1,7 +1,7 @@
 // admin.js — the private admin desk (Task 9.8), extracted from legacy.js:
 // scandal-proposal review queue, investigation leads, all-leads pipeline,
 // story drafts and the directorship-network explorer. Token-gated server side.
-import { $, esc } from "./core.js";
+import { $, esc, safeUrl } from "./core.js";
 import { hideAllViews } from "./views.js";
 import { renderRelationGraph } from "./report-sections.js";
 import { invalidateScandalsCache } from "./govwatch.js";
@@ -60,7 +60,7 @@ function directorBits(l) {
   if (l.beneficiary) parts.push(`<span><b>Company:</b> ${esc(l.beneficiary)}${l.beneficiary_cin ? ` (${esc(l.beneficiary_cin)})` : ""}</span>`);
   if (l.match_kind) parts.push(`<span><b>Match:</b> ${esc(MATCH_KIND_LABEL[l.match_kind] ?? l.match_kind)}</span>`);
   return {
-    chip: `<span class="adm-chip adm-chip-director">🔗 hidden directorship</span>`,
+    chip: `<span class="adm-chip adm-chip-director">hidden directorship</span>`,
     facts: parts.length ? `<div class="dir-facts">${parts.join("")}</div>` : "",
     cardClass: " lead-director",
   };
@@ -72,14 +72,14 @@ function renderDirnetLists(net) {
   if (net.companies?.length) {
     html += `<div class="rel-links">` + net.companies.map((c) => `
       <div class="rel-link">
-        <span class="rel-badge">🏢 ${esc((c.roles || []).join(", "))}</span>
+        <span class="rel-badge">${esc((c.roles || []).join(", "))}</span>
         <span>${esc(c.name)}${c.cin ? ` <span class="muted small">(${esc(c.cin)})</span>` : ""}${c.corroborated ? " ✓ corroborated" : ""}</span>
         <span class="muted small">${esc((c.sources || []).join(", "))}</span>
       </div>`).join("") + `</div>`;
   }
   if (net.codirectors?.length) {
     html += `<p class="muted small rel-fam-label">Others on the same boards:</p><div class="rel-chips">` +
-      net.codirectors.map((d) => `<span class="rel-chip">${d.is_relative ? "👪" : "🔗"} ${esc(d.name)} <em>${esc(d.role)} · ${esc(d.via_company)}</em>${d.politician_id ? ` <a class="rel-go" href="#/rep/${esc(d.politician_id)}">rep →</a>` : ""}</span>`).join("") + `</div>`;
+      net.codirectors.map((d) => `<span class="rel-chip">${d.is_relative ? "relative · " : ""}${esc(d.name)} <em>${esc(d.role)} · ${esc(d.via_company)}</em>${d.politician_id ? ` <a class="rel-go" href="#/rep/${esc(d.politician_id)}">rep →</a>` : ""}</span>`).join("") + `</div>`;
   }
   return html;
 }
@@ -106,7 +106,7 @@ async function loadAllLeads() {
   $("#conflict-list").innerHTML = leads.map((l) => {
     const inv = l.investigation ?? {};
     const dir = directorBits(l);
-    return `<div class="adm-card${dir.cardClass}">
+    return `<div class="adm-card${esc(dir.cardClass)}">
       <div class="adm-card-head">
         <span class="adm-chip">${esc((l.vector || "").replaceAll("_", " "))}</span>
         ${dir.chip}
@@ -117,7 +117,7 @@ async function loadAllLeads() {
       <h3 class="adm-title">${esc(l.headline ?? "")}</h3>
       <p class="adm-summary">${esc(inv.summary || l.detail || "")}</p>
       ${dir.facts}
-      ${(l.evidence_urls ?? []).filter(Boolean).length ? `<p class="small">Sources: ${l.evidence_urls.filter(Boolean).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>` : ""}
+      ${(l.evidence_urls ?? []).filter(Boolean).length ? `<p class="small">Sources: ${l.evidence_urls.filter(Boolean).map((u, i) => `<a href="${safeUrl(u)}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>` : ""}
     </div>`;
   }).join("");
 }
@@ -134,7 +134,7 @@ async function loadStories() {
       <summary><strong>${esc(s.headline ?? s.slug)}</strong> <span class="muted small">${esc(s.status)}</span></summary>
       ${s.dek ? `<p class="adm-summary">${esc(s.dek)}</p>` : ""}
       ${(s.sections ?? []).map((x) => `<h4>${esc(x.heading ?? "")}</h4><p class="small">${esc(x.body ?? "")}</p>`).join("")}
-      ${(s.sources ?? []).length ? `<p class="small">Sources: ${s.sources.map((c, i) => `<a href="${esc(c.url ?? "#")}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>` : ""}
+      ${(s.sources ?? []).length ? `<p class="small">Sources: ${s.sources.map((c, i) => `<a href="${safeUrl(c.url ?? "#")}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>` : ""}
     </details>`).join("");
 }
 
@@ -174,12 +174,12 @@ function renderLeads(leads) {
     const inv = l.investigation ?? {};
     const vd = { SUBSTANTIATED: "vd-full", SUGGESTIVE: "vd-partial" }[inv.verdict] ?? "";
     const dir = directorBits(l);
-    return `<div class="adm-card lead-card${dir.cardClass}" data-id="${esc(l.id)}">
+    return `<div class="adm-card lead-card${esc(dir.cardClass)}" data-id="${esc(l.id)}">
       <div class="adm-card-head">
         <span class="adm-chip">${esc(l.vector)}</span>
         ${dir.chip}
         <span class="adm-chip">score ${esc(l.signal_score)}</span>
-        <span class="gw-verdict ${vd}">${esc(inv.verdict ?? "—")}${inv.confidence != null ? ` · ${esc(inv.confidence)}%` : ""}</span>
+        <span class="gw-verdict ${esc(vd)}">${esc(inv.verdict ?? "—")}${inv.confidence != null ? ` · ${esc(inv.confidence)}%` : ""}</span>
         <span class="adm-date">${esc(l.actor_name)}</span>
       </div>
       <h3 class="adm-title">${esc(l.headline)}</h3>
@@ -231,12 +231,12 @@ function renderConflictCard(l, withActor) {
   const vd = { SUBSTANTIATED: "vd-full", SUGGESTIVE: "vd-partial" }[inv.verdict] ?? "";
   const urls = (l.evidence_urls ?? []).filter(Boolean);
   const sources = urls.length
-    ? `<p class="small conflict-sources">Sources: ${urls.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>`
+    ? `<p class="small conflict-sources">Sources: ${urls.map((u, i) => `<a href="${safeUrl(u)}" target="_blank" rel="noopener">[${i + 1}]</a>`).join(" ")}</p>`
     : "";
   return `<div class="conflict-card record-card">
     <div class="conflict-head">
       <span class="adm-chip">${esc((l.vector || "").replaceAll("_", " "))}</span>
-      <span class="gw-verdict ${vd}">${esc(inv.verdict ?? "—")}${inv.confidence != null ? ` · ${esc(inv.confidence)}%` : ""}</span>
+      <span class="gw-verdict ${esc(vd)}">${esc(inv.verdict ?? "—")}${inv.confidence != null ? ` · ${esc(inv.confidence)}%` : ""}</span>
       ${withActor && l.actor_name ? `<a class="conflict-actor" href="#/rep/${esc(l.actor_id)}">${esc(l.actor_name)}</a>` : ""}
     </div>
     <h4 class="conflict-title">${esc(l.headline)}</h4>

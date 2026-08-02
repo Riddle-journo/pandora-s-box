@@ -34,8 +34,8 @@ function attachAutocomplete(inputSel, boxSel, getItems, onPick, opts = {}) {
     if (!q) { close(); return; }
     items = getItems(q).slice(0, 10);
     const rows = items.map((it, i) =>
-      `<div class="ac-item" role="option" id="${listId}-o${i}" aria-selected="false" data-i="${i}"><span class="ac-main">${esc(it.label)}</span> <span class="ac-desc">(${esc(it.desc)})</span></div>`);
-    if (opts.seeAll) rows.push(`<div class="ac-item ac-seeall" role="option" id="${listId}-all" aria-selected="false" data-i="all">See all results for “${esc(input.value.trim())}” →</div>`);
+      `<div class="ac-item" role="option" id="${esc(listId)}-o${esc(i)}" aria-selected="false" data-i="${esc(i)}"><span class="ac-main">${esc(it.label)}</span> <span class="ac-desc">(${esc(it.desc)})</span></div>`);
+    if (opts.seeAll) rows.push(`<div class="ac-item ac-seeall" role="option" id="${esc(listId)}-all" aria-selected="false" data-i="all">See all results for “${esc(input.value.trim())}” →</div>`);
     box.innerHTML = rows.join("");
     active = -1;
     box.hidden = rows.length === 0;

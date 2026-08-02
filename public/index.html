@@ -4,27 +4,78 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pandoro's Box — Know your representative. With receipts.</title>
+  <link rel="preload" href="fonts/fraunces-var.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+  <!-- ============ SVG ICON SPRITE (Lucide, ISC license) ============ -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M5 12h14"/></symbol>
+    <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22M18 2H6v7a6 6 0 0 0 12 0V2Z"/></symbol>
+    <symbol id="i-landmark" viewBox="0 0 24 24"><path d="M3 22h18M6 18v-7M10 18v-7M14 18v-7M18 18v-7M12 2 3 7h18Z"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></symbol>
+    <symbol id="i-bar-chart" viewBox="0 0 24 24"><path d="M12 20V10M18 20V4M6 20v-4"/></symbol>
+    <symbol id="i-banknote" viewBox="0 0 24 24"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+    <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.54 9.46 3.9 20.1M21.85 2.15 15.7 21.6a.55.55 0 0 1-1.03.05L11.5 12.5l-9.15-3.17a.55.55 0 0 1 .05-1.03z"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></symbol>
+    <symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M11 18H8a2 2 0 0 1-2-2V9"/></symbol>
+  </svg>
 
   <!-- ============ PERSISTENT APP NAV ============ -->
   <header id="appnav">
     <div class="wrap appnav-in">
       <a href="#/" class="appnav-logo">Pandoro's <span>Box</span></a>
       <button class="appnav-search" id="global-search-btn" aria-label="Search everything">
-        <span>🔍</span><span class="gs-label">Search</span><kbd class="gs-kbd">Ctrl K</kbd>
+        <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg><span class="gs-label">Search</span><kbd class="gs-kbd">Ctrl K</kbd>
       </button>
-      <button class="appnav-theme" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
-      <button class="appnav-toggle" id="appnav-toggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
+      <button class="appnav-theme" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg></button>
+      <button class="appnav-toggle" id="appnav-toggle" aria-label="Toggle menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg></button>
       <nav class="appnav-links" id="appnav-links">
-        <a href="#/browse"     data-nav="browse">Representatives</a>
-        <a href="#/govwatch"   data-nav="govwatch">Government Watch</a>
-        <a href="#/scorecards" data-nav="scorecards">Scorecards</a>
-        <a href="#/funding"    data-nav="funding">Follow the Money</a>
-        <a href="#/issues"     data-nav="issues">Where India Stands</a>
-        <a href="#/tips"       data-nav="tips" class="appnav-tip">Submit a Tip</a>
-        <a href="#/ops"        data-nav="ops" class="appnav-ops">Ops</a>
+        <details class="nav-group" data-nav="browse">
+          <summary>Representatives <svg class="icon nav-chev" aria-hidden="true"><use href="#i-chevron-down"></use></svg></summary>
+          <div class="nav-menu">
+            <a href="#/browse">Browse all representatives</a>
+            <a href="#/leaderboard">Leaderboards</a>
+            <a href="#/compare">Compare two</a>
+          </div>
+        </details>
+        <details class="nav-group" data-nav="accountability">
+          <summary>Accountability <svg class="icon nav-chev" aria-hidden="true"><use href="#i-chevron-down"></use></svg></summary>
+          <div class="nav-menu">
+            <a href="#/govwatch">Government Watch</a>
+            <a href="#/orgs">Organizations</a>
+            <a href="#/scorecards">Scorecards</a>
+          </div>
+        </details>
+        <details class="nav-group" data-nav="bigpicture">
+          <summary>The Big Picture <svg class="icon nav-chev" aria-hidden="true"><use href="#i-chevron-down"></use></svg></summary>
+          <div class="nav-menu">
+            <a href="#/issues">Where India Stands</a>
+            <a href="#/funding">Follow the Money</a>
+          </div>
+        </details>
+        <a href="#/tips" data-nav="tips" class="appnav-tip">Submit a Tip</a>
       </nav>
     </div>
   </header>
@@ -46,7 +97,7 @@
         <p class="tag">Open it. <em>See what's inside.</em></p>
         <p class="sub">Investigative dossiers on every elected representative in India — and the governments they run — built <strong>only from public records</strong>. Court affidavits, audits, judgments, parliamentary data. Every claim cited. No spin, no party line.</p>
         <form class="landing-search" id="landing-search">
-          <input id="search" type="search" placeholder="🔍  Search any politician by name, constituency, or party…" autocomplete="off" />
+          <input id="search" type="search" placeholder="Search any politician by name, constituency, or party…" autocomplete="off" />
           <div class="ac-box" id="landing-ac" hidden></div>
         </form>
         <div class="landing-stats" id="landing-stats"></div>
@@ -55,24 +106,26 @@
 
     <main class="wrap">
       <h2 class="section-title">Where do you want to look?</h2>
-      <div class="nav-grid">
-        <a href="#/browse" class="nav-card nc-reps"><span class="nc-icon">🧑‍⚖️</span><span class="nc-count" data-count="reps"></span><span class="nc-title">Representatives</span><span class="nc-desc">Search MPs, MLAs &amp; MLCs — full cited dossiers &amp; scorecards.</span></a>
-        <a href="#/leaderboard" class="nav-card nc-board"><span class="nc-icon">🏆</span><span class="nc-title">Leaderboards</span><span class="nc-desc">Who's most charged, richest, fastest-growing, least accountable.</span></a>
-        <a href="#/govwatch" class="nav-card nc-gov"><span class="nc-icon">🏛️</span><span class="nc-count" data-count="scandals"></span><span class="nc-title">Government Watch</span><span class="nc-desc">Scandals &amp; failures, traced to the minister responsible.</span></a>
-        <a href="#/issues" class="nav-card nc-issues"><span class="nc-icon">🧭</span><span class="nc-count" data-count="issues"></span><span class="nc-title">Where India Stands</span><span class="nc-desc">Poverty, press freedom, climate, health — India vs the world.</span></a>
-        <a href="#/scorecards" class="nav-card nc-score"><span class="nc-icon">📊</span><span class="nc-title">Scorecards</span><span class="nc-desc">Accountability by party, government, ministry &amp; sector.</span></a>
-        <a href="#/funding" class="nav-card nc-money"><span class="nc-icon">💰</span><span class="nc-title">Follow the Money</span><span class="nc-desc">Electoral-bond funding by party &amp; industry.</span></a>
-        <a href="#/compare" class="nav-card nc-compare"><span class="nc-icon">⚖️</span><span class="nc-title">Compare</span><span class="nc-desc">Two representatives, side by side, on every metric.</span></a>
-        <a href="#/tips" class="nav-card nc-tips"><span class="nc-icon">🕵️</span><span class="nc-title">Submit a Tip</span><span class="nc-desc">Anonymous leads — proof-of-work, no identifying data stored.</span></a>
+      <div class="nav-grid nav-grid-3">
+        <a href="#/browse" class="nav-card nc-reps"><span class="nc-icon"><svg class="icon" aria-hidden="true"><use href="#i-users"></use></svg></span><span class="nc-count" data-count="reps"></span><span class="nc-title">Representatives</span><span class="nc-desc">Search MPs, MLAs &amp; MLCs — full cited dossiers, leaderboards &amp; side-by-side comparisons.</span></a>
+        <a href="#/govwatch" class="nav-card nc-gov"><span class="nc-icon"><svg class="icon" aria-hidden="true"><use href="#i-landmark"></use></svg></span><span class="nc-count" data-count="scandals"></span><span class="nc-title">Accountability</span><span class="nc-desc">Scandals &amp; failures traced to the minister responsible — plus party &amp; ministry scorecards.</span></a>
+        <a href="#/issues" class="nav-card nc-issues"><span class="nc-icon"><svg class="icon" aria-hidden="true"><use href="#i-compass"></use></svg></span><span class="nc-count" data-count="issues"></span><span class="nc-title">The Big Picture</span><span class="nc-desc">Where India stands on poverty, press freedom, climate &amp; health — and who funds the parties.</span></a>
+      </div>
+      <div class="quick-links">
+        <a href="#/leaderboard"><svg class="icon" aria-hidden="true"><use href="#i-trophy"></use></svg> Leaderboards</a>
+        <a href="#/compare"><svg class="icon" aria-hidden="true"><use href="#i-git-compare"></use></svg> Compare two</a>
+        <a href="#/scorecards"><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"></use></svg> Scorecards</a>
+        <a href="#/funding"><svg class="icon" aria-hidden="true"><use href="#i-banknote"></use></svg> Follow the Money</a>
+        <a href="#/tips"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg> Submit a Tip</a>
       </div>
 
       <section id="saved-rail" class="home-rail" hidden>
-        <h2 class="section-title">⭐ Saved dossiers</h2>
+        <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-bookmark"></use></svg> Saved dossiers</h2>
         <div class="rail-cards" id="saved-cards"></div>
       </section>
 
       <section id="recent-rail" class="home-rail" hidden>
-        <h2 class="section-title">🕘 Continue where you left off</h2>
+        <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-clock"></use></svg> Continue where you left off</h2>
         <div class="rail-cards" id="recent-cards"></div>
       </section>
 
@@ -112,7 +165,7 @@
           <option value="state">Group by state</option>
         </select>
         <button id="f-clear" class="ghost" type="button">Clear</button>
-        <a href="#/compare" class="compare-link" id="compare-cta">⚖ Compare two</a>
+        <a href="#/compare" class="compare-link" id="compare-cta"><svg class="icon" aria-hidden="true"><use href="#i-git-compare"></use></svg> Compare two</a>
       </div>
       <div class="quick-chips" id="quick-chips">
         <button class="qchip" data-chip="dossier" type="button">Has dossier</button>
@@ -132,7 +185,7 @@
       <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
     </header>
     <main class="wrap">
-      <h2 class="gw-title">🏆 Leaderboards</h2>
+      <h2 class="gw-title"><svg class="icon" aria-hidden="true"><use href="#i-trophy"></use></svg> Leaderboards</h2>
       <p class="muted small">Representatives ranked on the documented record. Only reps with a generated report appear; every figure traces to their dossier. Rankings describe the public record — they are not accusations.</p>
       <div class="lb-tabs" id="lb-tabs"></div>
       <div id="lb-body"></div>
@@ -145,7 +198,7 @@
       <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
     </header>
     <main class="wrap">
-      <h2 class="gw-title">🧭 Where India Stands</h2>
+      <h2 class="gw-title"><svg class="icon" aria-hidden="true"><use href="#i-compass"></use></svg> Where India Stands</h2>
       <p class="muted small">On the issues that matter: what the issue means for India, where India stands today and versus the world, and what successive parties &amp; governments have actually done — judged on the record, neutrally.</p>
       <div class="issue-grid" id="issue-grid"></div>
     </main>
@@ -164,7 +217,7 @@
       <div class="wrap"><a href="#/" class="back">← Home</a><h1 class="logo-small">Pandoro's <span>Box</span></h1></div>
     </header>
     <main class="wrap">
-      <h2 class="gw-title">🕵️ Submit an Anonymous Tip</h2>
+      <h2 class="gw-title"><svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg> Submit an Anonymous Tip</h2>
       <p class="muted small">Know something the records don't show yet? Send a lead. We store <strong>no IP, no device, no precise timestamp</strong> — only the week. Tips are human-reviewed and only influence a report once corroborated by verifiable records. A small anti-spam puzzle runs in your browser.</p>
       <div class="card tip-card">
         <div class="tip-rep-pick">
@@ -235,7 +288,7 @@
       <p class="muted small" id="gw-count"></p>
       <div id="gw-list"></div>
       <div id="gw-empty" class="empty-state" hidden>
-        <div class="empty-icon">🏛️</div>
+        <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-landmark"></use></svg></div>
         <p class="empty-title">Government Watch is being compiled</p>
         <p class="muted">Documented governance failures will appear here as our analyses are published. In the meantime, explore the representatives behind them.</p>
         <a href="#/browse" class="empty-cta">Browse representatives →</a>
@@ -274,7 +327,7 @@
       </div>
       <div id="scorecards-body"></div>
       <div id="scorecards-empty" class="empty-state" hidden>
-        <div class="empty-icon">📊</div>
+        <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"></use></svg></div>
         <p class="empty-title">Scorecards are being compiled</p>
         <p class="muted">Accountability rates roll up from documented cases in Government Watch. They'll appear here as those analyses are published.</p>
         <a href="#/govwatch" class="empty-cta">See Government Watch →</a>
@@ -586,13 +639,14 @@
   <section id="org-view" hidden>
     <header class="hero hero-slim">
       <div class="wrap">
-        <a href="#/scorecards" class="back">← Scorecards</a>
+        <a href="#/orgs" class="back">← Organizations</a>
         <h1 class="logo-small">Pandoro's <span>Box</span></h1>
       </div>
     </header>
     <main class="wrap">
       <div class="card report-head">
         <div class="report-meta">
+          <p id="org-breadcrumb" class="small" hidden></p>
           <h2 id="org-name"></h2>
           <p id="org-sub" class="muted"></p>
           <p id="org-headline" class="headline"></p>
@@ -600,6 +654,32 @@
       </div>
       <div id="org-scope-tabs" class="lb-tabs" hidden></div>
       <div id="org-sections"></div>
+    </main>
+  </section>
+
+  <!-- ============ ORGANIZATIONS DIRECTORY ============ -->
+  <section id="orgs-view" hidden>
+    <header class="hero hero-slim">
+      <div class="wrap">
+        <a href="#/" class="back">← Home</a>
+        <h1 class="logo-small">Pandoro's <span>Box</span></h1>
+      </div>
+    </header>
+    <main class="wrap">
+      <h2 class="gw-title"><svg class="icon" aria-hidden="true"><use href="#i-landmark"></use></svg> Organizations</h2>
+      <p class="muted small">Ministries, departments, public-sector undertakings and regulators — each with its own accountability page built from documented failures and evidence records.</p>
+      <div class="filters">
+        <div id="orgs-kind-chips" class="qchips" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="qchip active" type="button" data-kind="">All</button>
+          <button class="qchip" type="button" data-kind="ministry">Ministries</button>
+          <button class="qchip" type="button" data-kind="department">Departments</button>
+          <button class="qchip" type="button" data-kind="psu">PSUs &amp; Authorities</button>
+          <button class="qchip" type="button" data-kind="regulator">Regulators &amp; Watchdogs</button>
+        </div>
+        <select id="orgs-state"><option value="">All levels (union + states)</option></select>
+        <input id="orgs-search" type="search" placeholder="Search organizations…" autocomplete="off" style="border:1px solid var(--line);border-radius:var(--r-pill);padding:9px 16px;font:inherit;background:var(--card);color:var(--ink);" />
+      </div>
+      <div id="orgs-grid" class="orgs-grid"></div>
     </main>
   </section>
 
@@ -630,7 +710,7 @@
           <div id="evidence-summary" class="evidence-summary" hidden></div>
           <div class="report-actions">
             <button id="bookmark-btn" class="bookmark-btn" type="button" hidden>☆ Save</button>
-            <a id="compare-with-btn" class="compare-with-btn" hidden>⚖ Compare with another representative</a>
+            <a id="compare-with-btn" class="compare-with-btn" hidden><svg class="icon" aria-hidden="true"><use href="#i-git-compare"></use></svg> Compare with another representative</a>
           </div>
         </div>
       </div>
@@ -660,7 +740,7 @@
 
       <!-- Relationship graph -->
       <section class="record-section" id="relations-section" hidden>
-        <div class="section-head"><h3>🕸 Relationship Network</h3><span class="source-label">Source: Wikidata + cross-referenced roster</span></div>
+        <div class="section-head"><h3><svg class="icon" aria-hidden="true"><use href="#i-users"></use></svg> Relationship Network</h3><span class="source-label">Source: Wikidata + cross-referenced roster</span></div>
         <div id="relations-body"></div>
       </section>
 
@@ -701,10 +781,10 @@
       </section>
 
       <!-- Follow the money — the party's electoral-bond funding profile -->
-      <section class="record-section" id="funding-section" hidden>
-        <div class="section-head"><h3>Follow the Money — Party Funding</h3><span class="source-label">Source: Electoral Bonds disclosed by SBI on ECI/Supreme Court order</span></div>
+      <details class="record-section" id="funding-section" hidden>
+        <summary class="section-head"><h3>Follow the Money — Party Funding</h3><span class="source-label">Source: Electoral Bonds disclosed by SBI on ECI/Supreme Court order</span></summary>
         <div id="funding-body"></div>
-      </section>
+      </details>
 
       <section class="record-section" id="claims-section" hidden>
         <div class="section-head"><h3>Public Statements &amp; Verification</h3><span class="source-label">Source: Parliamentary debates, press releases, verified news archives</span></div>
@@ -717,10 +797,10 @@
       </section>
 
       <!-- Failures on their watch — scandals linked to this person as minister -->
-      <section class="record-section" id="ministerial-section" hidden>
-        <div class="section-head"><h3>Accountability On Their Watch</h3><span class="source-label">Source: Government Watch — documented failures during their ministerial tenure</span></div>
+      <details class="record-section" id="ministerial-section" hidden>
+        <summary class="section-head"><h3>Accountability On Their Watch</h3><span class="source-label">Source: Government Watch — documented failures during their ministerial tenure</span></summary>
         <div id="ministerial-body"></div>
-      </section>
+      </details>
 
       <!-- Pattern Analysis — the cross-referenced investigative layer -->
       <section class="pattern-section" id="pattern-section" hidden>
@@ -765,7 +845,7 @@
 
       <!-- Methodology -->
       <details class="card methodology" id="methodology" hidden>
-        <summary>🔍 How is this score generated? <span class="muted">(full transparency)</span></summary>
+        <summary><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg> How is this score generated? <span class="muted">(full transparency)</span></summary>
         <div id="methodology-body"></div>
       </details>
 
@@ -787,7 +867,7 @@
         <div class="evidence-tools">
           <button id="export-csv" class="ev-tool" type="button">⤓ CSV</button>
           <button id="export-bib" class="ev-tool" type="button">⤓ BibTeX</button>
-          <button id="cite-link" class="ev-tool" type="button">🔗 Cite this page</button>
+          <button id="cite-link" class="ev-tool" type="button"><svg class="icon" aria-hidden="true"><use href="#i-external-link"></use></svg> Cite this page</button>
         </div>
       </div>
       <p class="muted small" id="evidence-legend" hidden>Items marked <span class="badge adm">official record</span> are admissible public documents (ECI affidavits, CAG reports, court orders, fund audits). Items marked <span class="badge lead">news lead</span> are pointers — useful, but not proof on their own.</p>
@@ -821,6 +901,7 @@
 
   <footer class="wrap muted small">
     <p>Pandoro's Box aggregates and cites public records. AI-generated dossiers and scores are summaries of cited evidence, updated weekly — they are analytical opinions based on the cited sources, not assertions of guilt. Pending court cases are charges, not convictions. Every claim links to its source — check them. See a mistake? The sources are right there.</p>
+    <p class="foot-internal"><a href="#/ops">Ops console</a> · <a href="#/admin">Admin</a></p>
   </footer>
 
   <script type="module" src="js/main.js"></script>

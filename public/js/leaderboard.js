@@ -15,7 +15,7 @@ async function renderLeaderboard() {
   const data = await api(`/api/leaderboard?metric=${encodeURIComponent(lbMetric)}`);
   if (!data) { $("#lb-body").innerHTML = `<p class="muted center">No reports yet.</p>`; return; }
   $("#lb-tabs").innerHTML = data.metrics.map((m) =>
-    `<button class="lb-tab${m.key === lbMetric ? " active" : ""}" data-lb="${m.key}">${esc(m.label)}</button>`).join("");
+    `<button class="lb-tab${m.key === lbMetric ? " active" : ""}" data-lb="${esc(m.key)}">${esc(m.label)}</button>`).join("");
   const fmt = (r) => {
     switch (data.metric) {
       case "most_cases": return `${r.cases} case${r.cases !== 1 ? "s" : ""} declared`;
@@ -28,7 +28,7 @@ async function renderLeaderboard() {
     ? `<ol class="lb-list">` + data.rows.map((r, i) => `
         <li class="lb-row">
           <span class="lb-rank">${i + 1}</span>
-          <a class="lb-name" href="#/rep/${r.id}">${esc(r.name)}</a>
+          <a class="lb-name" href="#/rep/${esc(r.id)}">${esc(r.name)}</a>
           <span class="lb-meta">${esc(r.party ?? "")} · ${esc(r.office ?? "")}${r.state ? " · " + esc(r.state) : ""}</span>
           <span class="lb-fig">${esc(fmt(r))}</span>
         </li>`).join("") + `</ol>`

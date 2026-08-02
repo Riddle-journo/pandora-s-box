@@ -68,7 +68,7 @@ function wireTipPicker() {
     const q = input.value.toLowerCase().trim();
     if (q.length < 2) { box.hidden = true; return; }
     const hits = state.reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
-    box.innerHTML = hits.map((p) => `<div class="cmp-hit" data-tip-id="${p.id}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></div>`).join("");
+    box.innerHTML = hits.map((p) => `<div class="cmp-hit" data-tip-id="${esc(p.id)}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></div>`).join("");
     box.hidden = hits.length === 0;
   });
   box.addEventListener("click", (e) => {

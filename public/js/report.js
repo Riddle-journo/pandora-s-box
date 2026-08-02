@@ -1,6 +1,6 @@
 // report.js — showReport(id): the politician report/dossier page (Task 9.4),
 // extracted from legacy.js. Mutates state.currentRep / state.currentEvidence.
-import { $, esc, GRADE_COLORS, GRADE_TEXT, consequenceRank, SIGNAL_DOT, VERDICT_LABEL } from "./core.js";
+import { $, esc, safeUrl, GRADE_COLORS, GRADE_TEXT, consequenceRank, SIGNAL_DOT, VERDICT_LABEL } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { hideAllViews } from "./views.js";
@@ -31,6 +31,14 @@ async function showReport(id) {
   ].forEach((el) => { const e = $(  `#${el}`); if (e) e.hidden = true; });
   $("#no-report-msg").hidden = true;
 
+  // Loading skeleton while the dossier data is fetched.
+  const skelBox = $("#card-sections");
+  if (skelBox) {
+    skelBox.innerHTML = Array.from({ length: 3 }, () =>
+      `<div class="record-section skel"><span class="skel-line skel-tag"></span><span class="skel-line skel-name"></span><span class="skel-line skel-fig"></span></div>`).join("");
+    skelBox.hidden = false;
+  }
+
   const [p, card, evidence, ministerScandals, funding] = await Promise.all([
     api(`/api/politicians/${id}`),
     api(`/api/politicians/${id}/card`),
@@ -52,12 +60,12 @@ async function showReport(id) {
   if (ministerScandals?.length) {
     $("#ministerial-body").innerHTML = ministerScandals.map((s) => `
       <a href="#/scandal/${esc(s.slug)}" class="watch-item">
-        <span class="gw-signal">${SIGNAL_DOT[s.signal] ?? "⚪"}</span>
+        <span class="gw-signal">${SIGNAL_DOT[s.signal] ?? SIGNAL_DOT.GREY}</span>
         <div class="watch-main">
           <span class="watch-title">${esc(s.title)}</span>
           <span class="muted small">${esc(s.portfolio || s.ministry || "")} · ${esc(s.date || "")}</span>
         </div>
-        <span class="gw-verdict ${(VERDICT_LABEL[s.verdict]||{}).cls || ''}">${(VERDICT_LABEL[s.verdict]||{}).txt || "—"}</span>
+        <span class="gw-verdict ${esc((VERDICT_LABEL[s.verdict]||{}).cls || '')}">${(VERDICT_LABEL[s.verdict]||{}).txt || "—"}</span>
       </a>`).join("");
     $("#ministerial-section").hidden = false;
   }
@@ -107,6 +115,7 @@ async function showReport(id) {
     $("#headline").textContent = "";
     $("#how-scored").hidden = true;
     $("#no-report-msg").hidden = false;
+    $("#card-sections").hidden = true; // clear the loading skeleton
   }
 
   // ── Legacy dossier renderer (dead code: kept for reference during the
@@ -224,7 +233,7 @@ async function showReport(id) {
     $("#evidence").innerHTML = evidence.map((e) => `
       <li>
         ${e.date ? `<span class="date">${esc(e.date)}</span>` : ""}
-        <a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>
+        <a href="${safeUrl(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>
         <span class="badge ${e.admissible ? "adm" : "lead"}">${e.admissible ? "official record" : "news lead"}</span>
         <span class="src-sum">${esc(e.summary ?? "")}</span>
       </li>`
@@ -235,7 +244,7 @@ async function showReport(id) {
     const official = evidence.filter((e) => e.admissible).length;
     const leads = evidence.length - official;
     $("#evidence-summary").innerHTML =
-      `<a href="#" class="prov-chip prov-total" data-scroll="evidence-heading">📎 ${evidence.length} source${evidence.length !== 1 ? "s" : ""} cited</a>` +
+      `<a href="#" class="prov-chip prov-total" data-scroll="evidence-heading">${evidence.length} source${evidence.length !== 1 ? "s" : ""} cited</a>` +
       (official ? `<span class="prov-chip prov-official">${official} official record${official !== 1 ? "s" : ""}</span>` : "") +
       (leads ? `<span class="prov-chip prov-lead">${leads} news lead${leads !== 1 ? "s" : ""}</span>` : "");
     $("#evidence-summary").hidden = false;

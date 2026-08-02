@@ -11,9 +11,9 @@ import { renderHomeRails } from "./bookmarks.js";
 function repCardHTML(p) {
   const g = p.latest?.grade ?? "INSUFFICIENT_DATA";
   return `
-    <a class="rep-card" href="#/rep/${p.id}">
+    <a class="rep-card" href="#/rep/${esc(p.id)}">
       <div class="top">
-        <div class="avatar" style="background:${avatarColor(p.name)}">${initials(p.name)}</div>
+        <div class="avatar" style="background:${esc(avatarColor(p.name))}">${initials(p.name)}</div>
         <div>
           <div class="name">${esc(p.name)}</div>
           <div class="meta">${esc(p.constituency ?? "")} · ${esc(p.office ?? "")}</div>
@@ -25,7 +25,7 @@ function repCardHTML(p) {
       <div class="bottom">
         <span class="party-pill ${p.party === "Independent" ? "independent" : ""}">${esc(p.party ?? "—")}</span>
         <div class="card-badges">
-          <span class="grade-chip" style="background:${GRADE_COLORS[g]}" title="${GRADE_TEXT[g]}">${g === "INSUFFICIENT_DATA" ? "?" : g}</span>
+          <span class="grade-chip" style="background:${esc(GRADE_COLORS[g])}" title="${esc(GRADE_TEXT[g])}">${g === "INSUFFICIENT_DATA" ? "?" : g}</span>
         </div>
       </div>
     </a>`;
@@ -93,7 +93,7 @@ function renderHome(resetPage = true) {
   }
 
   // Reflect active chip in the UI
-  document.querySelectorAll(".qchip").forEach((c) => c.classList.toggle("active", c.dataset.chip === browseChip));
+  document.querySelectorAll("#browse-view .qchip").forEach((c) => c.classList.toggle("active", c.dataset.chip === browseChip));
   $("#no-results").hidden = filtered.length > 0;
 }
 
@@ -119,10 +119,10 @@ async function renderLanding() {
   // Stats strip
   const withReport = state.reps.filter((p) => p.latest).length;
   $("#landing-stats").innerHTML = [
-    ["🧑‍⚖️", state.reps.length.toLocaleString(), "representatives tracked"],
-    ["📄", withReport.toLocaleString(), "dossiers generated"],
-    ["🏛️", "—", "scandals documented"],
-  ].map(([i, n, l]) => `<div class="lstat"><span class="lstat-i">${i}</span><span class="lstat-n" data-stat="${l}">${n}</span><span class="lstat-l">${l}</span></div>`).join("");
+    [state.reps.length.toLocaleString(), "representatives tracked"],
+    [withReport.toLocaleString(), "dossiers generated"],
+    ["—", "scandals documented"],
+  ].map(([n, l]) => `<div class="lstat"><span class="lstat-n" data-stat="${esc(l)}">${n}</span><span class="lstat-l">${l}</span></div>`).join("");
   // Nav-card count badges (best-effort, filled as data lands)
   const setCount = (key, n) => document.querySelectorAll(`.nc-count[data-count="${key}"]`).forEach((el) => el.textContent = n);
   setCount("reps", state.reps.length.toLocaleString());
@@ -160,7 +160,7 @@ async function renderFeed() {
   const scandals = (await api("/api/scandals")) ?? [];
   const items = [];
   for (const p of recentReports.slice(0, 3))
-    items.push(`<a class="feed-card" href="#/rep/${p.id}">
+    items.push(`<a class="feed-card" href="#/rep/${esc(p.id)}">
       <span class="feed-kind kind-report">New dossier</span>
       <span class="feed-title">${esc(p.name)}</span>
       <span class="feed-sub">${esc([p.party, p.constituency].filter(Boolean).join(" · "))}</span>
@@ -186,9 +186,9 @@ async function renderSpotlight() {
   ]);
   const cards = [];
   const w = worst?.rows?.[0];
-  if (w) cards.push(`<a class="spot-card spot-red" href="#/rep/${w.id}"><span class="spot-tag">Lowest accountability score</span><span class="spot-name">${esc(w.name)}</span><span class="spot-fig">${w.score}/100 · ${esc(w.party ?? "")}</span></a>`);
+  if (w) cards.push(`<a class="spot-card spot-red" href="#/rep/${esc(w.id)}"><span class="spot-tag">Lowest accountability score</span><span class="spot-name">${esc(w.name)}</span><span class="spot-fig">${w.score}/100 · ${esc(w.party ?? "")}</span></a>`);
   const c = cases?.rows?.[0];
-  if (c) cards.push(`<a class="spot-card spot-amber" href="#/rep/${c.id}"><span class="spot-tag">Most criminal cases declared</span><span class="spot-name">${esc(c.name)}</span><span class="spot-fig">${c.cases} case${c.cases !== 1 ? "s" : ""} declared</span></a>`);
+  if (c) cards.push(`<a class="spot-card spot-amber" href="#/rep/${esc(c.id)}"><span class="spot-tag">Most criminal cases declared</span><span class="spot-name">${esc(c.name)}</span><span class="spot-fig">${c.cases} case${c.cases !== 1 ? "s" : ""} declared</span></a>`);
   if (Array.isArray(scandals) && scandals.length) {
     const noAcc = scandals.find((s) => s.verdict === "NONE") ?? scandals[0];
     cards.push(`<a class="spot-card spot-grey" href="#/scandal/${esc(noAcc.slug)}"><span class="spot-tag">From Government Watch</span><span class="spot-name">${esc(noAcc.title)}</span><span class="spot-fig">${esc(noAcc.minister || noAcc.sector || "")}</span></a>`);

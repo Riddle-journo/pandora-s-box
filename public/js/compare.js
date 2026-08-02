@@ -29,7 +29,7 @@ function wireComparePicker(side) {
     if (q.length < 2) { box.hidden = true; return; }
     const hits = state.reps.filter((p) => `${p.name} ${p.constituency ?? ""} ${p.party ?? ""}`.toLowerCase().includes(q)).slice(0, 8);
     box.innerHTML = hits.map((p) =>
-      `<button class="cmp-hit" data-id="${p.id}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></button>`
+      `<button class="cmp-hit" data-id="${esc(p.id)}">${esc(p.name)} <span class="ac-desc">(${esc([p.office, p.party, p.constituency || p.state].filter(Boolean).join(" · "))})</span></button>`
     ).join("") || `<div class="cmp-hit muted">No match</div>`;
     box.hidden = false;
   });
@@ -60,10 +60,10 @@ function renderComparison(A, B) {
   const head = (X) => {
     const g = X.summary?.overall_grade ?? "INSUFFICIENT_DATA";
     return `<div class="cmp-head">
-      <div class="avatar" style="background:${avatarColor(X.politician.name)}">${initials(X.politician.name)}</div>
-      <a href="#/rep/${X.politician.id}" class="cmp-name">${esc(X.politician.name)}</a>
+      <div class="avatar" style="background:${esc(avatarColor(X.politician.name))}">${initials(X.politician.name)}</div>
+      <a href="#/rep/${esc(X.politician.id)}" class="cmp-name">${esc(X.politician.name)}</a>
       <div class="muted small">${esc(X.politician.party ?? "")} · ${esc(X.politician.constituency ?? "")}</div>
-      <div class="grade-chip cmp-grade" style="background:${GRADE_COLORS[g]}" title="${GRADE_TEXT[g]}">${g === "INSUFFICIENT_DATA" ? "?" : g}</div>
+      <div class="grade-chip cmp-grade" style="background:${esc(GRADE_COLORS[g])}" title="${esc(GRADE_TEXT[g])}">${g === "INSUFFICIENT_DATA" ? "?" : g}</div>
     </div>`;
   };
 
@@ -81,10 +81,10 @@ function renderComparison(A, B) {
       ca = aWins ? "cmp-win" : ""; cb = aWins ? "" : "cmp-win";
     }
     return `<div class="cmp-rowlabel">${esc(label)}${hint ? `<span class="cmp-hint" title="${esc(hint)}">ⓘ</span>` : ""}</div>
-      <div class="cmp-cell ${ca}">${va}</div><div class="cmp-cell ${cb}">${vb}</div>`;
+      <div class="cmp-cell ${esc(ca)}">${va}</div><div class="cmp-cell ${esc(cb)}">${vb}</div>`;
   };
 
-  const sigCell = (s) => s ? `${SIGNAL_DOT[s.state] ?? "⚪"} <span class="cmp-sig-${(s.state||'GREY').toLowerCase()}">${s.state}</span>` : "—";
+  const sigCell = (s) => s ? `${SIGNAL_DOT[s.state] ?? SIGNAL_DOT.GREY} <span class="cmp-sig-${esc((s.state||'GREY').toLowerCase())}">${esc(s.state)}</span>` : "—";
   const scoreCell = (p) => (p && p.score >= 0) ? `<strong>${p.score}</strong>/100` : `<span class="muted">n/a</span>`;
   const SIG_LABELS = { criminal: "Criminal record", financial: "Financial integrity", legislative: "Legislative activity", interests: "Declared interests", promises: "Promises vs record" };
   const PARAM_KEYS = ["manifesto","corruption","favoritism","hypocrisy","abuse_of_power"];

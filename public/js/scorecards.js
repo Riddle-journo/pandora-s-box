@@ -23,7 +23,7 @@ function renderScorecardTab() {
   const rateBar = (r) => {
     if (r == null) return `<span class="muted small">n/a</span>`;
     const col = r >= 67 ? "var(--good)" : r >= 34 ? "var(--mid)" : "var(--bad)";
-    return `<div class="sc-bar-wrap"><div class="sc-bar" style="width:${r}%;background:${col}"></div><span class="sc-bar-val">${r}%</span></div>`;
+    return `<div class="sc-bar-wrap"><div class="sc-bar" style="width:${esc(r)}%;background:${esc(col)}"></div><span class="sc-bar-val">${r}%</span></div>`;
   };
   $("#scorecards-body").innerHTML = `
     <p class="muted small sc-count">${sc.total_scandals} documented failures analysed · accountability across the corpus: ${sc.totals.FULL} full · ${sc.totals.PARTIAL} partial · ${sc.totals.NONE} none</p>
@@ -35,7 +35,7 @@ function renderScorecardTab() {
       ${rows.map((b) => `
         <details class="sc-row-group">
           <summary class="sc-row">
-            <div class="sc-label">${esc(b.label)}${b.card_key ? ` <a class="prov-chip" href="${scActiveTab === "byParty" ? `#/party/${esc(b.card_key)}` : `#/ministry/${esc(b.card_key)}`}">report card →</a>` : ""}</div>
+            <div class="sc-label">${esc(b.label)}${b.card_key ? ` <a class="prov-chip" href="${scActiveTab === "byParty" ? `#/party/${esc(b.card_key)}` : `#/org/${esc(b.card_key)}`}">report card →</a>` : ""}</div>
             <div class="sc-c">${b.total}</div>
             <div class="sc-c">${b.resignations}</div>
             <div class="sc-c">${b.prosecutions}</div>
@@ -43,9 +43,9 @@ function renderScorecardTab() {
           </summary>
           <div class="sc-detail">
             ${b.scandals.map((s) => `<a href="#/scandal/${esc(s.slug)}" class="sc-scandal">
-              <span class="gw-signal">${SIGNAL_DOT[s.signal] ?? "⚪"}</span>
+              <span class="gw-signal">${SIGNAL_DOT[s.signal] ?? SIGNAL_DOT.GREY}</span>
               <span class="sc-sc-title">${esc(s.title)}</span>
-              <span class="gw-verdict ${(VERDICT_LABEL[s.verdict]||{}).cls || ''}">${(VERDICT_LABEL[s.verdict]||{}).txt || "—"}</span>
+              <span class="gw-verdict ${esc((VERDICT_LABEL[s.verdict]||{}).cls || '')}">${(VERDICT_LABEL[s.verdict]||{}).txt || "—"}</span>
             </a>`).join("")}
           </div>
         </details>`).join("")}

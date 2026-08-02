@@ -3,7 +3,7 @@
 // command palette and mobile nav, then routes. core.js evaluates first via the
 // import graph, so its theme IIFE still runs before first paint (no flash).
 // The old app.js monolith is gone — every view lives in its own module.
-import { $, toggleTheme, syncThemeToggle } from "./core.js";
+import { $, esc, toggleTheme, syncThemeToggle } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { exportEvidenceCsv, exportEvidenceBibtex, copyCiteLink } from "./export.js";
@@ -22,6 +22,7 @@ import { wireTipPicker, submitPageTip, submitReportTip } from "./tips.js";
 import { attachAutocomplete, repSuggestions, scandalSuggestions } from "./search.js";
 import { route, syncNav, initRouter } from "./router.js";
 import { initCmdk } from "./cmdk.js";
+import { initOrgsDirectory } from "./orgs.js";
 
 initRouter();
 
@@ -38,8 +39,8 @@ $("#f-clear")?.addEventListener("click", () => {
   setBrowseChip(null);
   renderHome(true);
 });
-// Quick-filter chips (toggle on/off)
-document.querySelectorAll(".qchip").forEach((c) => c.addEventListener("click", () => {
+// Quick-filter chips (toggle on/off) — scoped to browse; the orgs directory has its own chips.
+document.querySelectorAll("#browse-view .qchip").forEach((c) => c.addEventListener("click", () => {
   setBrowseChip(getBrowseChip() === c.dataset.chip ? null : c.dataset.chip);
   renderHome(true);
 }));
@@ -61,7 +62,7 @@ $("#landing-search")?.addEventListener("submit", (e) => {
   ]);
   state.reps = list ?? [];
   state.methodology = meth;
-  $("#tip-category").innerHTML = (cats ?? []).map(c => `<option value="${c}">${c.replaceAll("_"," ")}</option>`).join("");
+  $("#tip-category").innerHTML = (cats ?? []).map(c => `<option value="${esc(c)}">${esc(c.replaceAll("_"," "))}</option>`).join("");
   buildFilters();
   wireComparePicker("a");
   wireComparePicker("b");
@@ -164,11 +165,22 @@ $("#landing-search")?.addEventListener("submit", (e) => {
   $("#cite-link")?.addEventListener("click", (e) => copyCiteLink(e.currentTarget));
   // Global command-palette search (button, Ctrl/Cmd-K, list interaction)
   initCmdk();
+  // Organizations directory filters
+  initOrgsDirectory();
   // Mobile nav toggle
   $("#appnav-toggle")?.addEventListener("click", () => {
     const links = $("#appnav-links");
     const open = links.classList.toggle("open");
     $("#appnav-toggle").setAttribute("aria-expanded", String(open));
+  });
+  // Nav dropdown groups: only one open at a time; close on outside click
+  document.querySelectorAll("#appnav-links .nav-group").forEach((g) => {
+    g.addEventListener("toggle", () => {
+      if (g.open) document.querySelectorAll("#appnav-links .nav-group[open]").forEach((o) => { if (o !== g) o.removeAttribute("open"); });
+    });
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#appnav-links")) document.querySelectorAll("#appnav-links .nav-group[open]").forEach((o) => o.removeAttribute("open"));
   });
   route();
   syncNav();

@@ -21,8 +21,8 @@ function recordRecentView(item) {
 }
 function railCardHTML(it) {
   const g = it.grade ?? "INSUFFICIENT_DATA";
-  return `<a class="rail-card" href="#/rep/${it.id}">
-    <span class="rail-grade" style="background:${GRADE_COLORS[g] ?? "#97a0ad"}">${g === "INSUFFICIENT_DATA" ? "?" : g}</span>
+  return `<a class="rail-card" href="#/rep/${esc(it.id)}">
+    <span class="rail-grade" style="background:${esc(GRADE_COLORS[g] ?? "#97a0ad")}">${g === "INSUFFICIENT_DATA" ? "?" : esc(g)}</span>
     <span class="rail-body"><span class="rail-name">${esc(it.name)}</span><span class="rail-sub">${esc(it.sub ?? "")}</span></span>
   </a>`;
 }

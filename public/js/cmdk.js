@@ -1,12 +1,12 @@
 // cmdk.js — the global command-palette search (Ctrl/Cmd-K), Task 9.11,
 // extracted from legacy.js. initCmdk() wires the trigger button, keyboard
 // shortcuts and result-list interaction.
-import { $, esc } from "./core.js";
+import { $, esc, icon } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { fuzzyScore } from "./search.js";
 
-let cmdkScandals = null, cmdkIssues = null, cmdkActive = -1, cmdkRows = [];
+let cmdkScandals = null, cmdkIssues = null, cmdkOrgs = null, cmdkActive = -1, cmdkRows = [];
 const RECENT_KEY = "pb_recent_searches";
 function getRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; } }
 function pushRecent(item) {
@@ -20,6 +20,7 @@ async function openCmdk() {
   // lazy-load government + issues data once
   if (cmdkScandals === null) cmdkScandals = (await api("/api/scandals")) ?? [];
   if (cmdkIssues === null) { const iss = await api("/api/issues"); cmdkIssues = Array.isArray(iss) ? iss : (iss ? Object.values(iss) : []); }
+  if (cmdkOrgs === null) cmdkOrgs = (await api("/api/orgs")) ?? [];
   const inp = $("#cmdk-input"); inp.value = ""; inp.focus();
   cmdkRender("");
 }
@@ -43,6 +44,10 @@ function cmdkGather(q) {
   const issues = (cmdkIssues ?? []).filter((i) => `${i.title ?? i.name ?? ""} ${i.summary ?? ""}`.toLowerCase().includes(q))
     .slice(0, 4).map((i) => ({ type: "issue", id: i.slug ?? i.id, label: i.title ?? i.name, sub: "Where India Stands" }));
   if (issues.length) groups.push({ label: "Issues", items: issues });
+  const orgs = (cmdkOrgs ?? []).map((o) => [fuzzyScore(`${o.name} ${o.short ?? ""} ${o.scope}`, q) + (o.failures ? 3 : 0), o])
+    .filter(([sc]) => sc > 0).sort((a, b) => b[0] - a[0]).slice(0, 5)
+    .map(([, o]) => ({ type: "org", id: o.key, label: o.name, sub: [o.kind === "psu" ? "PSU" : o.kind, o.scope !== "union" ? o.scope : null].filter(Boolean).join(" · ") }));
+  if (orgs.length) groups.push({ label: "Organizations", items: orgs });
   return groups;
 }
 function cmdkGoto(item) {
@@ -51,6 +56,7 @@ function cmdkGoto(item) {
   if (item.type === "rep") location.hash = `#/rep/${item.id}`;
   else if (item.type === "scandal") location.hash = `#/scandal/${item.id}`;
   else if (item.type === "issue") location.hash = `#/issue/${item.id}`;
+  else if (item.type === "org") location.hash = `#/org/${item.id}`;
 }
 function cmdkRender(q) {
   const box = $("#cmdk-results");
@@ -62,8 +68,8 @@ function cmdkRender(q) {
     html += `<div class="cmdk-group">${esc(g.label)}</div>`;
     g.items.forEach((it) => {
       const idx = cmdkRows.length; cmdkRows.push(it);
-      const icon = it.type === "rep" ? "🧑‍⚖️" : it.type === "scandal" ? "🏛️" : "🧭";
-      html += `<div class="cmdk-item" role="option" data-idx="${idx}"><span class="cmdk-ic">${icon}</span><span class="cmdk-main">${esc(it.label)}</span><span class="cmdk-sub">${esc(it.sub ?? "")}</span></div>`;
+      const ic = it.type === "rep" ? icon("users") : it.type === "scandal" ? icon("landmark") : it.type === "org" ? icon("shield") : icon("compass");
+      html += `<div class="cmdk-item" role="option" data-idx="${esc(idx)}"><span class="cmdk-ic">${ic}</span><span class="cmdk-main">${esc(it.label)}</span><span class="cmdk-sub">${esc(it.sub ?? "")}</span></div>`;
     });
   });
   box.innerHTML = html;

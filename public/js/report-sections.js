@@ -1,6 +1,6 @@
 // report-sections.js — pure-ish (data) => html renderers for the politician
 // report page + org (ministry/party) cards (Task 9.4), extracted from legacy.js.
-import { $, esc, barColor, confChip, withCites, GRADE_COLORS, GRADE_TEXT } from "./core.js";
+import { $, esc, safeUrl, barColor, confChip, withCites, GRADE_COLORS, GRADE_TEXT } from "./core.js";
 import { api } from "./api.js";
 import { state } from "./state.js";
 import { hideAllViews } from "./views.js";
@@ -72,7 +72,7 @@ function renderCategories(categories) {
       <div class="cat-body-wrap">
         <p class="cat-body">${withCites(cat.body, cat.citations)}</p>
         ${cat.citations?.length ? `<p class="cites">${cat.citations.map(c =>
-          `[${c.n}] <a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
+          `[${c.n}] <a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
         ).join(" · ")}</p>` : ""}
       </div>
     </details>`
@@ -82,14 +82,14 @@ function renderCategories(categories) {
 function renderFlags(red_flags, positive_highlights) {
   const rfHtml = (red_flags ?? []).map((rf) => `
     <div class="flag-item sev-${esc(rf.severity)}">
-      <span class="flag-icon">${rf.severity === "high" ? "🔴" : rf.severity === "medium" ? "🟠" : "🟡"}</span>
+      <span class="flag-icon">${rf.severity === "high" ? '<span class="sig-dot sig-red"></span>' : rf.severity === "medium" ? '<span class="sig-dot sig-amber"></span>' : '<span class="sig-dot sig-amber"></span>'}</span>
       <span class="flag-text">${esc(rf.text)}</span>
     </div>`
   ).join("");
 
   const hlHtml = (positive_highlights ?? []).map((h) => `
     <div class="highlight-item">
-      <span class="flag-icon">✅</span>
+      <span class="flag-icon"><span class="sig-dot sig-green"></span></span>
       <span class="flag-text">${esc(typeof h === "string" ? h : h.text)}</span>
     </div>`
   ).join("");
@@ -102,14 +102,14 @@ function renderScorecard(parameters) {
     <div class="param">
       <div class="param-top">
         <span class="label">${esc(pm.label)}</span>
-        <span class="pts" style="color:${barColor(pm.score)}">${pm.score < 0 ? "not scored" : pm.score + "/100"}</span>
+        <span class="pts" style="color:${esc(barColor(pm.score))}">${pm.score < 0 ? "not scored" : pm.score + "/100"}</span>
       </div>
-      <div class="bar"><i data-w="${pm.score < 0 ? 0 : pm.score}" style="background:${barColor(pm.score)}"></i></div>
+      <div class="bar"><i data-w="${esc(pm.score < 0 ? 0 : pm.score)}" style="background:${esc(barColor(pm.score))}"></i></div>
       <p class="verdict">${esc(pm.verdict)}</p>
       <div>${confChip(pm.confidence, pm.confidence_reason)}</div>
       <p class="rationale">${withCites(pm.rationale, pm.citations)}</p>
       ${pm.citations?.length ? `<p class="cites">${pm.citations.map(c =>
-        `[${c.n}] <a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
+        `[${c.n}] <a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
       ).join(" · ")}</p>` : ""}`
     + `</div>`
   ).join("");
@@ -131,7 +131,7 @@ function renderSnapshot(p) {
 
   box.innerHTML = `
     <div class="snapshot-head">Sworn affidavit snapshot
-      <a href="${esc(p.myneta_url ?? "#")}" target="_blank" rel="noopener" class="snapshot-src">ECI filing ↗</a>
+      <a href="${safeUrl(p.myneta_url ?? "#")}" target="_blank" rel="noopener" class="snapshot-src">ECI filing ↗</a>
     </div>
     <div class="snapshot-grid">
       ${cells.map((c) => `
@@ -144,19 +144,19 @@ function renderSnapshot(p) {
 }
 
 // ===== Institutional report-card sections (NayaNeeta layout) =====
-const SIGNAL_ICON = { criminal: "⚖", financial: "₹", legislative: "▤", interests: "🏛", promises: "✓" };
+const SIGNAL_ICON = { criminal: "⚖", financial: "₹", legislative: "▤", interests: "◆", promises: "✓" };
 const SIGNAL_CLASS = { RED: "sig-red", AMBER: "sig-amber", GREEN: "sig-green", GREY: "sig-grey" };
 
 function citeList(citations) {
   if (!citations?.length) return "";
   return `<p class="cites">${citations.map((c) =>
-    `[${c.n}] <a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
+    `[${c.n}] <a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="badge ${c.admissible ? "adm" : "lead"}">${c.admissible ? "official record" : "news lead"}</span>`
   ).join(" · ")}</p>`;
 }
 
 function renderSignalBadges(signals) {
   return (signals ?? []).map((s) => `
-    <div class="signal ${SIGNAL_CLASS[s.state] ?? "sig-grey"}" title="${esc(s.label)} — ${esc(s.state)}">
+    <div class="signal ${esc(SIGNAL_CLASS[s.state] ?? "sig-grey")}" title="${esc(s.label)} — ${esc(s.state)}">
       <div class="sig-top"><span class="sig-icon">${SIGNAL_ICON[s.key] ?? "•"}</span><span class="sig-label">${esc(s.label)}</span></div>
       <div class="sig-phrase">${s.phrase ? withCites(s.phrase, s.citations) : '<span class="muted">Insufficient verified data</span>'}</div>
     </div>`
@@ -175,7 +175,7 @@ function renderVerifiedFindings(flags) {
       const cls = VF_SEV[f.severity] ?? "vf-note";
       const wn = Number(f.weight) || 0; // coerce — never inject a raw field into HTML
       const w = wn > 0 ? `+${wn}` : `${wn}`;
-      return `<div class="vf-item ${cls}">
+      return `<div class="vf-item ${esc(cls)}">
         <span class="vf-weight ${wn >= 0 ? "vf-pos" : "vf-neg"}">${w}</span>
         <div class="vf-main">
           <span class="vf-head">${esc(f.headline)}</span>
@@ -187,7 +187,7 @@ function renderVerifiedFindings(flags) {
 }
 
 // Relationship network — named relatives + dynasty / scandal ties.
-const REL_ICON = { spouse: "💍", father: "👨", mother: "👩", child: "🧒", sibling: "👥", relative: "👤" };
+const REL_ICON = { spouse: "", father: "", mother: "", child: "", sibling: "", relative: "" };
 // Radial SVG graph of the rep's network. Nodes clickable when they point at
 // another dossier/scandal. Colours come from CSS vars so it works in dark mode.
 function renderRelationGraph(centerName, relatives, links) {
@@ -207,12 +207,12 @@ function renderRelationGraph(centerName, relatives, links) {
     const a = -Math.PI / 2 + (i / shown.length) * Math.PI * 2;
     const x = cx + R * Math.cos(a), y = cy + R * Math.sin(a);
     edges += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="rg-edge"/>`;
-    const node = `<g class="rg-node ${n.cls} ${n.href ? "rg-clickable" : ""}">
+    const node = `<g class="rg-node ${esc(n.cls)} ${n.href ? "rg-clickable" : ""}">
       <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="38"/>
       <text x="${x.toFixed(1)}" y="${(y - 2).toFixed(1)}" class="rg-label">${esc(trunc(n.label, 14))}</text>
       ${n.sub ? `<text x="${x.toFixed(1)}" y="${(y + 12).toFixed(1)}" class="rg-sub">${esc(trunc(n.sub, 14))}</text>` : ""}
     </g>`;
-    circles += n.href ? `<a href="${esc(n.href)}">${node}</a>` : node;
+    circles += n.href ? `<a href="${safeUrl(n.href)}">${node}</a>` : node;
   });
   return `<div class="rel-graph-wrap"><svg viewBox="0 0 ${W} ${H}" class="rel-graph" role="img" aria-label="Relationship network for ${esc(centerName)}">
     ${edges}
@@ -220,7 +220,7 @@ function renderRelationGraph(centerName, relatives, links) {
       <text x="${cx}" y="${cy}" class="rg-label rg-center-label">${esc(trunc(centerName, 16))}</text></g>
     ${circles}
   </svg>
-  <div class="rg-legend"><span class="rg-key rg-k-dynasty">⚡ Dynasty</span><span class="rg-key rg-k-scandal">⚠ Scandal tie</span><span class="rg-key rg-k-family">👤 Family</span><span class="rg-hint">Coloured nodes with a border are clickable</span></div>
+  <div class="rg-legend"><span class="rg-key rg-k-dynasty">Dynasty</span><span class="rg-key rg-k-scandal">Scandal tie</span><span class="rg-key rg-k-family">Family</span><span class="rg-hint">Coloured nodes with a border are clickable</span></div>
   </div>`;
 }
 
@@ -239,7 +239,7 @@ function renderRelations(relations, centerName) {
   }
   if (relatives.length) {
     html += `<p class="muted small rel-fam-label">Named family on record (Wikidata):</p><div class="rel-chips">` +
-      relatives.map((r) => `<span class="rel-chip">${REL_ICON[r.relation] ?? "👤"} ${esc(r.name)} <em>${esc(r.relation)}</em></span>`).join("") + `</div>`;
+      relatives.map((r) => `<span class="rel-chip">${REL_ICON[r.relation] ?? ""}${esc(r.name)} <em>${esc(r.relation)}</em></span>`).join("") + `</div>`;
   }
   return html;
 }
@@ -251,7 +251,7 @@ function renderCriminal(cases) {
     <div class="rec-card">
       <div class="rec-card-head">
         <span class="rec-title">${esc(c.case_type)}</span>
-        <span class="status-pill ${pill[c.status] ?? "pill-grey"}">${esc(c.status)}</span>
+        <span class="status-pill ${esc(pill[c.status] ?? "pill-grey")}">${esc(c.status)}</span>
       </div>
       <div class="rec-meta">${[c.court && esc(c.court), c.year_filed && "Filed " + esc(c.year_filed)].filter(Boolean).join(" · ")}</div>
       ${c.source_citation ? `<div class="rec-source">${withCites(c.source_citation, c.citations)}</div>` : ""}
@@ -315,7 +315,7 @@ function renderPositions(positions) {
   return positions.map((p) => {
     const s = STANCE[p.stance] ?? STANCE.UNCLEAR;
     return `<div class="rec-card">
-      <div class="rec-card-head"><span class="rec-title">${esc(p.issue)}</span><span class="status-pill ${s.cls}">${s.t}</span></div>
+      <div class="rec-card-head"><span class="rec-title">${esc(p.issue)}</span><span class="status-pill ${esc(s.cls)}">${s.t}</span></div>
       <p class="pos-summary">${withCites(p.summary, p.citations)}</p>
       ${p.evidence ? `<div class="rec-meta">Basis: ${esc(p.evidence)}</div>` : ""}
       ${citeList(p.citations)}
@@ -355,7 +355,7 @@ function renderClaims(claims) {
     <div class="rec-card">
       <div class="claim-text">"${esc(c.claim_text)}"</div>
       <div class="rec-meta">${[c.claim_source, c.claim_date].filter(Boolean).map(esc).join(" · ")}</div>
-      <span class="status-pill ${pill[c.verdict] ?? "pill-grey"}">${label[c.verdict] ?? esc(c.verdict)}</span>
+      <span class="status-pill ${esc(pill[c.verdict] ?? "pill-grey")}">${label[c.verdict] ?? esc(c.verdict)}</span>
       ${c.evidence ? `<div class="claim-evidence">${esc(c.evidence)}</div>` : ""}
       ${citeList(c.citations)}
     </div>`).join("");
@@ -392,7 +392,7 @@ function renderPatterns(flags) {
     <div class="pattern-card">
       <div class="pattern-head">
         <span class="pattern-title">${esc(f.title || PATTERN_LABEL[f.flag_name] || f.flag_name)}</span>
-        <span class="sev-badge ${sev[f.severity] ?? "sev-notable"}">${esc(String(f.severity).replace(/_/g, " "))}</span>
+        <span class="sev-badge ${esc(sev[f.severity] ?? "sev-notable")}">${esc(String(f.severity).replace(/_/g, " "))}</span>
       </div>
       <ul class="pattern-points">
         ${f.supporting_data_points.map((d) => `<li><span class="dp-fact">${esc(d.fact)}</span> <span class="dp-src">(${[d.source, d.date].filter(Boolean).map(esc).join(", ")})</span></li>`).join("")}
@@ -417,27 +417,30 @@ function renderTransparencyFooter(report) {
 // Every number here was computed in code from public records; prose (when
 // present) was written by a free clerical model constrained to those facts.
 const CARD_SEV = { CLEAN: "vf-clean", INFO: "", NOTABLE: "vf-note", SIGNIFICANT: "vf-sig" };
-function renderCardSection(sec) {
+function renderCardSection(sec, idx = 0, open = idx === 0) {
   const stats = (sec.stats ?? []).map((st) => `
     <div class="snap-cell">
       <div class="snap-val">${esc(st.value)}</div>
       <div class="snap-label">${esc(st.label)}${st.trend ? `<span class="snap-note"> · ${esc(st.trend)}</span>` : ""}</div>
     </div>`).join("");
   const facts = (sec.facts ?? []).map((f) => `
-    <div class="vf-item ${CARD_SEV[f.severity] ?? ""}">
+    <div class="vf-item ${esc(CARD_SEV[f.severity] ?? "")}">
       <div class="vf-main">
         <span class="vf-head">${esc(f.text)}</span>
-        ${f.sources?.length ? `<span class="vf-meta">${f.sources.map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">source ${i + 1} ↗</a>`).join(" · ")}</span>` : ""}
+        ${f.sources?.length ? `<span class="vf-meta">${f.sources.map((u, i) => `<a href="${safeUrl(u)}" target="_blank" rel="noopener">source ${i + 1} ↗</a>`).join(" · ")}</span>` : ""}
+        ${f.politician_id ? `<span class="vf-meta"><a href="#/rep/${esc(f.politician_id)}">view their dossier →</a></span>` : ""}
       </div>
     </div>`).join("");
   const prose = sec.prose ?? sec.template_prose ?? "";
+  // Progressive disclosure: the first section opens by default, the rest are
+  // collapsed behind their heading so the reader sees a summary first.
   return `
-    <section class="record-section">
-      <div class="section-head"><h3>${esc(sec.title)}</h3></div>
+    <details class="record-section card-sec" id="cardsec-${esc(idx)}"${open ? " open" : ""}>
+      <summary class="section-head"><h3>${esc(sec.title)}</h3></summary>
       ${prose ? `<p class="section-sub">${esc(prose)}</p>` : ""}
       ${stats ? `<div class="snapshot-grid">${stats}</div>` : ""}
       ${facts}
-    </section>`;
+    </details>`;
 }
 
 function renderCardScorecard(card) {
@@ -445,9 +448,9 @@ function renderCardScorecard(card) {
     <div class="param">
       <div class="param-top">
         <span class="label">${esc(pm.label)}</span>
-        <span class="pts" style="color:${barColor(pm.score)}">${pm.score < 0 ? "not scored — insufficient data" : pm.score + "/100"}</span>
+        <span class="pts" style="color:${esc(barColor(pm.score))}">${pm.score < 0 ? "not scored — insufficient data" : pm.score + "/100"}</span>
       </div>
-      <div class="bar"><i data-w="${pm.score < 0 ? 0 : pm.score}" style="background:${barColor(pm.score)}"></i></div>
+      <div class="bar"><i data-w="${esc(pm.score < 0 ? 0 : pm.score)}" style="background:${esc(barColor(pm.score))}"></i></div>
       ${pm.contributions?.length ? `<ul class="calc-contribs">${pm.contributions.map((c) =>
         `<li><span class="${c.weight >= 0 ? "vf-pos" : "vf-neg"}">${c.weight >= 0 ? "+" : ""}${Number(c.weight) || 0}</span> ${esc(c.headline)}</li>`).join("")}</ul>`
       : pm.score >= 0 ? `<p class="rationale muted small">Clean baseline (70) — no adverse records computed for this parameter.</p>` : ""}
@@ -471,7 +474,7 @@ function renderCardView(card) {
   }
 
   const box = $("#card-sections");
-  box.innerHTML = (card.sections ?? []).map(renderCardSection).join("");
+  box.innerHTML = (card.sections ?? []).map((sec, i) => renderCardSection(sec, i)).join("");
   box.hidden = false;
 
   // Why this grade — deterministic scorecard with itemised contributions.
@@ -513,7 +516,12 @@ function renderCardView(card) {
   $("#transparency-footer").hidden = false;
 }
 
-// Ministry / party report card page (#/ministry/<key>, #/party/<key>[/<state>]).
+// Ministry / party / org report card page
+// (#/ministry/<key>, #/party/<key>[/<state>], #/org/<key>).
+const ORG_KIND_LABEL = {
+  ministry: "Union ministry", department: "Department",
+  psu: "Public-sector undertaking / authority", regulator: "Regulator / oversight body",
+};
 async function showOrgCard(kind, key, scope = "union") {
   hideAllViews();
   $("#org-view").hidden = false;
@@ -521,17 +529,30 @@ async function showOrgCard(kind, key, scope = "union") {
   $("#org-name").textContent = "Loading…";
   $("#org-sub").textContent = ""; $("#org-headline").textContent = "";
   $("#org-sections").innerHTML = "";
+  const crumb = $("#org-breadcrumb"); if (crumb) crumb.hidden = true;
 
-  const url = kind === "ministry"
-    ? `/api/ministries/${key}/card`
-    : `/api/parties/${encodeURIComponent(key)}/card${scope !== "union" ? `?scope=${encodeURIComponent(scope)}` : ""}`;
+  const url = kind === "org"
+    ? `/api/orgs/${key}/card`
+    : kind === "ministry"
+      ? `/api/ministries/${key}/card`
+      : `/api/parties/${encodeURIComponent(key)}/card${scope !== "union" ? `?scope=${encodeURIComponent(scope)}` : ""}`;
   const card = await api(url);
   if (!card) { $("#org-name").textContent = "Not found"; return; }
 
   $("#org-name").textContent = card.name;
-  $("#org-sub").textContent = kind === "ministry"
-    ? `${card.scope === "union" ? "Union ministry" : `${card.scope} state department`}${card.sectors?.length ? ` · ${card.sectors.join(", ")}` : ""}`
-    : card.scope === "union" ? "National party report card" : `Party report card — ${card.scope}`;
+  if (kind === "org") {
+    const kindLabel = card.kind === "department" && card.scope !== "union"
+      ? `${card.scope} state department` : (ORG_KIND_LABEL[card.kind] ?? "Organization");
+    $("#org-sub").textContent = `${kindLabel}${card.sectors?.length ? ` · ${card.sectors.join(", ")}` : ""}`;
+    if (crumb && card.parent) {
+      crumb.innerHTML = `Part of <a href="#/org/${esc(card.parent.key)}">${esc(card.parent.name)}</a>`;
+      crumb.hidden = false;
+    }
+  } else {
+    $("#org-sub").textContent = kind === "ministry"
+      ? `${card.scope === "union" ? "Union ministry" : `${card.scope} state department`}${card.sectors?.length ? ` · ${card.sectors.join(", ")}` : ""}`
+      : card.scope === "union" ? "National party report card" : `Party report card — ${card.scope}`;
+  }
   $("#org-headline").textContent = card.headline ?? "";
 
   // State scope is reachable via URL: #/party/<key>/<State Name>. A National
@@ -542,16 +563,21 @@ async function showOrgCard(kind, key, scope = "union") {
     tabs.hidden = false;
   } else tabs.hidden = true;
 
-  $("#org-sections").innerHTML = (card.sections ?? []).map((sec) => {
-    let html = renderCardSection(sec);
+  $("#org-sections").innerHTML = (card.sections ?? []).map((sec, i) => {
+    let html = renderCardSection(sec, i, true); // org cards are short — keep all sections open
     // Link failures to their Government Watch pages / ministers to dossiers.
     if (sec.slugs?.length) {
       const links = sec.slugs.slice(0, 12).map((s) => `<a class="prov-chip" href="#/scandal/${esc(s)}">${esc(s)}</a>`).join(" ");
-      html = html.replace("</section>", `<p class="small">Full analyses: ${links}</p></section>`);
+      html = html.replace("</details>", `<p class="small">Full analyses: ${links}</p></details>`);
     }
     if (sec.ministers?.length) {
       const links = sec.ministers.filter((x) => x.politician_id).map((x) => `<a class="prov-chip" href="#/rep/${esc(x.politician_id)}">${esc(x.name)} →</a>`).join(" ");
-      if (links) html = html.replace("</section>", `<p class="small">${links}</p></section>`);
+      if (links) html = html.replace("</details>", `<p class="small">${links}</p></details>`);
+    }
+    // Child organizations (departments/PSUs under a ministry) link to their own pages.
+    if (sec.orgs?.length) {
+      const links = sec.orgs.map((o) => `<a class="prov-chip" href="#/org/${esc(o.key)}">${esc(o.name)} →</a>`).join(" ");
+      html = html.replace("</details>", `<p class="small">${links}</p></details>`);
     }
     return html;
   }).join("");

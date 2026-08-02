@@ -36,7 +36,7 @@ for (const [name, el] of Object.entries({
   compare: "#compare-view", govwatch: "#govwatch-view", scandal: "#scandal-view",
   scorecards: "#scorecards-view", funding: "#funding-view", admin: "#admin-view",
   leaderboard: "#leaderboard-view", issues: "#issues-view",
-  issueDetail: "#issue-detail-view", tips: "#tips-view", org: "#org-view",
+  issueDetail: "#issue-detail-view", tips: "#tips-view", org: "#org-view", orgs: "#orgs-view",
 })) registerView(name, { el });
 
 // The ops view registers itself (with its polling-teardown) from ops.js.
