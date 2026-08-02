@@ -19,9 +19,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db, listEvidence } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { gatherNumbers, computeFlags } = await import("../server/analyzer.js");
+const { db, listEvidence } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { gatherNumbers, computeFlags } = await import("../server/detectors/analyzer.js");
 const { runDirectorshipExtraction } = await import("../server/extractors/directorships.js");
 const {
   verifyDirectorshipCompanies, runDirectorshipVerification,

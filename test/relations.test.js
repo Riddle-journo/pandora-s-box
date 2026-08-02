@@ -17,9 +17,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 process.env.PANDOROS_DB_PATH = DB_PATH;
 
-const store = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const rel = await import("../server/relations.js");
+const store = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const rel = await import("../server/entities/relations.js");
 const {
   upsertRelationship, upsertEvent, relationsOf, relationsAt, entitiesLinkedBy, eventsFor,
 } = rel;

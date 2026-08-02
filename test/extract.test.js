@@ -19,13 +19,13 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { factsFor, claimsFor, deleteByExtractorVersion } = await import("../server/ledger.js");
-const { eventsFor } = await import("../server/relations.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { factsFor, claimsFor, deleteByExtractorVersion } = await import("../server/store/ledger.js");
+const { eventsFor } = await import("../server/entities/relations.js");
 const {
   registerExtractor, extractFromEvidence, runExtraction, listExtractors, _clearRegistry,
-} = await import("../server/extract.js");
+} = await import("../server/extractors/extract.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

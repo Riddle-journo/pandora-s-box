@@ -21,7 +21,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
 }
 
-const { selectMynetaMatch } = await import("../server/import-rs.js");
+const { selectMynetaMatch } = await import("../server/entities/import-rs.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

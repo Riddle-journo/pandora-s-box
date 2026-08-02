@@ -18,10 +18,10 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { claimsFor } = await import("../server/ledger.js");
-const { eventsFor } = await import("../server/relations.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { claimsFor } = await import("../server/store/ledger.js");
+const { eventsFor } = await import("../server/entities/relations.js");
 const {
   parseKanoonDate, kanoonJudgments, runIndianKanoonExtraction, INDIAN_KANOON_VERSION,
 } = await import("../server/extractors/indian-kanoon.js");

@@ -15,10 +15,10 @@ for (const suffix of ["", "-wal", "-shm"]) {
 const {
   detectMgnregaWageOutliers, detectMgnregaPaymentDelay, detectSchemeOverspend,
   detectProcurementAboveMarket, runDenominatorDetectors, DENOM_DETECTOR_VERSION,
-} = await import("../server/denominator-detectors.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { upsertFact } = await import("../server/ledger.js");
-const store = await import("../server/store.js");
+} = await import("../server/detectors/denominator-detectors.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { upsertFact } = await import("../server/store/ledger.js");
+const store = await import("../server/store/store.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

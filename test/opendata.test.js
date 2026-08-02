@@ -10,7 +10,7 @@ const {
   ckanPackageSearch, ogdResource,
   composeSubject, coerceNumber, normPeriodValue, rowToFactSpecs,
 } = await import("../server/fetchers/opendata.js");
-const { scoreDataset, mergeHits, discover } = await import("../server/opendata-catalog.js");
+const { scoreDataset, mergeHits, discover } = await import("../server/catalogue/opendata-catalog.js");
 
 // ── CKAN URL + normalization ─────────────────────────────────────────────────
 test("ckanUrl builds action path + drops null params", () => {

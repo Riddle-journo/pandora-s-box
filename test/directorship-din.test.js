@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { extractDirectorships } from "../server/directorship-extract.js";
+import { extractDirectorships } from "../server/extractors/directorship-extract.js";
 
 test("core: captures a labelled DIN next to the director", () => {
   const rows = extractDirectorships("Shri Ramesh Kumar (DIN: 01234567), Managing Director of Alpha Build Private Limited.", { subjectName: "Ramesh Kumar" });
@@ -36,8 +36,8 @@ test("core: two different DINs in the window → refuse to guess (din null)", ()
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-din-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const { db } = await import("../server/store.js");
-const { ensureEntity, getEntity } = await import("../server/entities.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity, getEntity } = await import("../server/entities/entities.js");
 const { runDirectorshipExtraction } = await import("../server/extractors/directorships.js");
 
 test.after(() => {

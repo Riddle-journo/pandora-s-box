@@ -17,10 +17,10 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
 }
 
-const store = await import("../server/store.js");
+const store = await import("../server/store/store.js");
 const {
   assembleIncidents, incidentRegistry, validateAndRepairStory, canTransition,
-} = await import("../server/story-generator.js");
+} = await import("../server/publishing/story-generator.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(DB_PATH + suffix); } catch {} }

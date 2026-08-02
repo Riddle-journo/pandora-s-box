@@ -17,9 +17,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const store = await import("../server/store.js");
-const { runFetchers } = await import("../server/ingest.js");
-const { classifyHealth } = await import("../server/health.js");
+const store = await import("../server/store/store.js");
+const { runFetchers } = await import("../server/orchestration/ingest.js");
+const { classifyHealth } = await import("../server/platform/health.js");
 const { sourceHealth } = store;
 
 test.after(() => {

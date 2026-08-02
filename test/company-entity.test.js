@@ -10,9 +10,9 @@ import path from "node:path";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-coent-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const { getEntity } = await import("../server/entities.js");
-const { ensureCompanyEntity } = await import("../server/entities.js");
-const { findEntityByAlias, findEntityByStrongId } = await import("../server/entities.js");
+const { getEntity } = await import("../server/entities/entities.js");
+const { ensureCompanyEntity } = await import("../server/entities/entities.js");
+const { findEntityByAlias, findEntityByStrongId } = await import("../server/entities/entities.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }

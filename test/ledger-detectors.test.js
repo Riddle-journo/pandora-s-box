@@ -20,13 +20,13 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { upsertPolitician, listLeads } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { upsertFact } = await import("../server/ledger.js");
+const { upsertPolitician, listLeads } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { upsertFact } = await import("../server/store/ledger.js");
 const {
   detectIncomeGrowthOutliers, detectSpendVsIncome, detectMultiSourceAdverse,
   runLedgerDetectors, LEDGER_DETECTOR_VERSION,
-} = await import("../server/ledger-detectors.js");
+} = await import("../server/detectors/ledger-detectors.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

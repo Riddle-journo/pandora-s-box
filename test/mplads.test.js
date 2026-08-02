@@ -17,9 +17,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { factsFor } = await import("../server/ledger.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { factsFor } = await import("../server/store/ledger.js");
 const { mpladsFacts, runMpladsExtraction, MPLADS_VERSION } = await import("../server/extractors/mplads.js");
 
 test.after(() => {

@@ -18,9 +18,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const store = await import("../server/store.js");
-const worker = await import("../server/worker.js");
-const scheduler = await import("../server/scheduler.js");
+const store = await import("../server/store/store.js");
+const worker = await import("../server/orchestration/worker.js");
+const scheduler = await import("../server/orchestration/scheduler.js");
 const {
   enqueueJob, claimNextJob, completeJob, failJob, getJob, deleteAllJobs,
   cancelJob, updateJob, requeueJob, trimJobs, isQueuePaused, setQueuePaused,

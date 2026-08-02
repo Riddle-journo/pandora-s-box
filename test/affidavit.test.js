@@ -17,10 +17,10 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db, upsertPolitician } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { factsFor } = await import("../server/ledger.js");
-const { runExtraction, runPoliticianExtraction } = await import("../server/extract.js");
+const { db, upsertPolitician } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { factsFor } = await import("../server/store/ledger.js");
+const { runExtraction, runPoliticianExtraction } = await import("../server/extractors/extract.js");
 const {
   parseAffidavitRupees, electionYearFromUrl, affidavitRowFacts, eciAffidavitFacts,
   affidavitInterestLinks, runAffidavitExtraction, AFFIDAVIT_ROW_VERSION, ECI_AFFIDAVIT_VERSION,

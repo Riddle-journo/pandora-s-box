@@ -42,7 +42,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
   raw.close();
 }
 
-const store = await import("../server/store.js");
+const store = await import("../server/store/store.js");
 const { db } = await import("../server/store/db.js");
 
 test.after(() => {

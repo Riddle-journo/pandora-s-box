@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { logger } from "../server/util/log.js";
 import { jobLogContext } from "../server/util/job-context.js";
-import { tail, clear } from "../server/ops-log.js";
+import { tail, clear } from "../server/ops/ops-log.js";
 
 test("log inside a job context lands in that job's ops ring buffer", async () => {
   const log = logger("test");

@@ -18,9 +18,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db } = await import("../server/store.js");
-const { ensureEntity, resolveEntityIdForPolitician } = await import("../server/entities.js");
-const { relationsOf } = await import("../server/relations.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity, resolveEntityIdForPolitician } = await import("../server/entities/entities.js");
+const { relationsOf } = await import("../server/entities/relations.js");
 const {
   roleToRelType, subjectDirectorships, runDirectorshipExtraction, DIRECTORSHIP_VERSION,
 } = await import("../server/extractors/directorships.js");

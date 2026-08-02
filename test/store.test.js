@@ -17,7 +17,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
 }
 
-const store = await import("../server/store.js");
+const store = await import("../server/store/store.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

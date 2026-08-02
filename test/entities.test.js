@@ -16,8 +16,8 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 process.env.PANDOROS_DB_PATH = DB_PATH;
 
-const store = await import("../server/store.js");
-const ent = await import("../server/entities.js");
+const store = await import("../server/store/store.js");
+const ent = await import("../server/entities/entities.js");
 const {
   normName, ensureEntity, recordAssertion, listProposed, decideAssertion,
   findEntityByStrongId, findEntityByAlias,

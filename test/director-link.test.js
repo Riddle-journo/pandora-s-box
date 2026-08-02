@@ -17,10 +17,10 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const store = await import("../server/store.js");
-const { ensureEntity, getEntity, resolveEntityIdForPolitician } = await import("../server/entities.js");
-const { upsertRelationship, relationsOf } = await import("../server/relations.js");
-const { matchDirectorsToPoliticians, buildDirectorMatchIndex, matchDirector } = await import("../server/director-link.js");
+const store = await import("../server/store/store.js");
+const { ensureEntity, getEntity, resolveEntityIdForPolitician } = await import("../server/entities/entities.js");
+const { upsertRelationship, relationsOf } = await import("../server/entities/relations.js");
+const { matchDirectorsToPoliticians, buildDirectorMatchIndex, matchDirector } = await import("../server/enrichment/director-link.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

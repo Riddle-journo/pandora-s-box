@@ -14,16 +14,16 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
 }
 
-const { upsertPolitician, listLeads, deleteLead } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { upsertFact } = await import("../server/ledger.js");
-const { benfordStats, meanStd, runEngine, DETECTORS, ENGINE_GROUPS, engineStatus } = await import("../server/engine.js");
+const { upsertPolitician, listLeads, deleteLead } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { upsertFact } = await import("../server/store/ledger.js");
+const { benfordStats, meanStd, runEngine, DETECTORS, ENGINE_GROUPS, engineStatus } = await import("../server/detectors/engine.js");
 const { wikidataBirthYear } = await import("../server/extractors/wikidata.js");
-const { upsertFlag, listFlags, markStaleExcept, flagCounts, deleteFlags, activeFlagsBySubject } = await import("../server/flags.js");
-const { setSetting, getSetting, resolveSettings, coerceValue } = await import("../server/engine-settings.js");
-const { runLeadSynthesis, promoteBigFlags, clusterFlags } = await import("../server/lead-synthesis.js");
-const { recordLeadFeedback, detectorPrecision, upsertPolitician: _up } = await import("../server/store.js");
-const { upsertClaim } = await import("../server/ledger.js");
+const { upsertFlag, listFlags, markStaleExcept, flagCounts, deleteFlags, activeFlagsBySubject } = await import("../server/detectors/flags.js");
+const { setSetting, getSetting, resolveSettings, coerceValue } = await import("../server/detectors/engine-settings.js");
+const { runLeadSynthesis, promoteBigFlags, clusterFlags } = await import("../server/synthesis/lead-synthesis.js");
+const { recordLeadFeedback, detectorPrecision, upsertPolitician: _up } = await import("../server/store/store.js");
+const { upsertClaim } = await import("../server/store/ledger.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -254,7 +254,7 @@ test("legacy detector exposes its constants as tunables and honours overrides", 
   // Seed one under-utilised MPLADS record via evidence, then flip the threshold so
   // it no longer qualifies — proving the override reaches the pure detector.
   upsertPolitician({ id: "mp1", name: "MPLADS MP", office: "MP", state: "Testland" });
-  const { addEvidence } = await import("../server/store.js");
+  const { addEvidence } = await import("../server/store/store.js");
   addEvidence([{ politician_id: "mp1", source_type: "mplads", url: "http://x/mplads", title: "MPLADS",
     numbers: { utilization_pct: 10, allocated: 5e7 }, admissible: true }]);
   deleteFlags();
@@ -340,7 +340,7 @@ test("politician_linked_award: values a rep's firm's CPPP awards (skips cleanly 
   // With no CPPP flat DB in the test env, cpppBidderStats returns null → the
   // detector must produce zero flags without throwing (graceful gating).
   const ent = seedRep("awrep", "Award Rep", { assets: [[2024, 5e7]] });
-  const { upsertRelationship } = await import("../server/relations.js");
+  const { upsertRelationship } = await import("../server/entities/relations.js");
   const co = ensureEntity({ kind: "company", name: "Award Rep Constructions Pvt Ltd", source: "test" });
   upsertRelationship({ src_entity_id: ent, dst_entity_id: co, rel_type: "declared_business_interest", confidence: 0.7, source: "test", data: { company_name: "Award Rep Constructions Pvt Ltd" } });
   const r = await runEngine({ detectors: ["politician_linked_award"], synthesize: false, log: () => {} });

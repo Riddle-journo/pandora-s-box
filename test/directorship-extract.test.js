@@ -4,7 +4,7 @@
 // releases), plus the negative cases that must NOT manufacture a directorship.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractDirectorships, normalizeCompany } from "../server/directorship-extract.js";
+import { extractDirectorships, normalizeCompany } from "../server/extractors/directorship-extract.js";
 
 const find = (rows, coNormPart) => rows.find((r) => r.company_norm.includes(coNormPart));
 

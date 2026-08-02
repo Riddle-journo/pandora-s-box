@@ -8,7 +8,7 @@ import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { migrateFromJson, counts } from "../server/store.js";
+import { migrateFromJson, counts } from "../server/store/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const jsonPath = path.join(__dirname, "..", "data", "db.json");

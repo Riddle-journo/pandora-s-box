@@ -24,8 +24,8 @@ for (const suffix of ["", "-wal", "-shm"]) {
 const {
   detectAssetGrowthOutliers, detectUtilizationExtremes, detectTimingCorrelation,
   DETECTOR_VERSION,
-} = await import("../server/anomaly.js");
-const { upsertLead, getLead, listLeads } = await import("../server/store.js");
+} = await import("../server/detectors/anomaly.js");
+const { upsertLead, getLead, listLeads } = await import("../server/store/store.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

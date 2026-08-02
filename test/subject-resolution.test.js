@@ -19,11 +19,11 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db } = await import("../server/store.js");
+const { db } = await import("../server/store/store.js");
 const {
   ensureEntity, recordAssertion, getEntity,
   resolveEntityIdForPolitician, reconcilePoliticianStrongIds,
-} = await import("../server/entities.js");
+} = await import("../server/entities/entities.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

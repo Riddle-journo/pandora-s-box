@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 process.env.PANDOROS_DB_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pb-llm-")), "test.db");
 
-const { callWithRetry, isRateLimit } = await import("../server/llm.js");
+const { callWithRetry, isRateLimit } = await import("../server/synthesis/llm.js");
 const { db } = await import("../server/store/db.js");
 const { llmUsageSummary } = await import("../server/store/llm-usage.js");
 

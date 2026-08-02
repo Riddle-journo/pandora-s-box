@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { DETECTORS } = await import("../server/engine.js");
+const { DETECTORS } = await import("../server/detectors/engine.js");
 
 const EXPECTED_IDS = [
   "conflict",

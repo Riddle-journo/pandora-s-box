@@ -10,9 +10,9 @@ import path from "node:path";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-dnet-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const { ensureEntity, ensureCompanyEntity, resolveEntityIdForPolitician } = await import("../server/entities.js");
-const { upsertRelationship, updateRelationship, relationsOf } = await import("../server/relations.js");
-const { buildDirectorshipNetwork, directorshipNetworkForGraph } = await import("../server/directorship-network.js");
+const { ensureEntity, ensureCompanyEntity, resolveEntityIdForPolitician } = await import("../server/entities/entities.js");
+const { upsertRelationship, updateRelationship, relationsOf } = await import("../server/entities/relations.js");
+const { buildDirectorshipNetwork, directorshipNetworkForGraph } = await import("../server/synthesis/directorship-network.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }

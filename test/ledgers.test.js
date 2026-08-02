@@ -23,7 +23,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { db, id } = await import("../server/store.js");
+const { db, id } = await import("../server/store/store.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

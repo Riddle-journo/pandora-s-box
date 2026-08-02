@@ -13,10 +13,10 @@ import path from "node:path";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-committee-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const { ensureEntity } = await import("../server/entities.js");
-const { claimsFor } = await import("../server/ledger.js");
-const { relationsOf } = await import("../server/relations.js");
-const { extractFromEvidence } = await import("../server/extract.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { claimsFor } = await import("../server/store/ledger.js");
+const { relationsOf } = await import("../server/entities/relations.js");
+const { extractFromEvidence } = await import("../server/extractors/extract.js");
 const {
   parseCommitteeReports, findEntities, committeeRecords,
 } = await import("../server/extractors/parliament-committee.js");

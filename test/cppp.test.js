@@ -3,7 +3,7 @@
 // detector's grouping, so they're pinned independently.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normName, parseCpppDate, reliableKey } from "../server/cppp-index.js";
+import { normName, parseCpppDate, reliableKey } from "../server/store/cppp-index.js";
 
 test("normName: strips only corporate-form suffixes, keeps distinguishing words", () => {
   // Same firm, different spellings → one key.

@@ -17,9 +17,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {}
 }
 
-const { db } = await import("../server/store.js");
-const { getEntity, findEntityByStrongId } = await import("../server/entities.js");
-const { factsFor } = await import("../server/ledger.js");
+const { db } = await import("../server/store/store.js");
+const { getEntity, findEntityByStrongId } = await import("../server/entities/entities.js");
+const { factsFor } = await import("../server/store/ledger.js");
 const { partyFinanceFacts, runPartyFinanceExtraction, PARTY_FINANCE_VERSION } =
   await import("../server/extractors/party-finance.js");
 

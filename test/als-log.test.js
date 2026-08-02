@@ -13,9 +13,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
   try { fs.unlinkSync(DB_PATH + suffix); } catch {}
 }
 
-const { enqueueJob, claimNextJob } = await import("../server/store.js");
-const { runJob } = await import("../server/worker.js");
-const opsLog = await import("../server/ops-log.js");
+const { enqueueJob, claimNextJob } = await import("../server/store/store.js");
+const { runJob } = await import("../server/orchestration/worker.js");
+const opsLog = await import("../server/ops/ops-log.js");
 const { sleep } = await import("../server/util/timing.js");
 
 test.after(() => {

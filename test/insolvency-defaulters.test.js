@@ -22,7 +22,7 @@ const {
   INSOLVENCY_DEFAULTER_SOURCE_TYPES,
 } = await import("../server/extractors/insolvency-defaulters.js");
 
-const { listExtractors } = await import("../server/extract.js");
+const { listExtractors } = await import("../server/extractors/extract.js");
 
 // ── IBBI CIRP ────────────────────────────────────────────────────────────────
 test("parseIbbiCirp pulls debtor / applicant / IP / date from the fixed columns", () => {

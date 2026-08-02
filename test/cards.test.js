@@ -19,8 +19,8 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const store = await import("../server/store.js");
-const { buildPoliticianCard, buildPartyCard, gatherLegislative, CARD_VERSION } = await import("../server/cards.js");
+const store = await import("../server/store/store.js");
+const { buildPoliticianCard, buildPartyCard, gatherLegislative, CARD_VERSION } = await import("../server/publishing/cards.js");
 const { resolveMinistry, resolveParty } = await import("../server/data/ministries.js");
 
 test.after(() => {

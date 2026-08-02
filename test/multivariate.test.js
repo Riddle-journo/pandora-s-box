@@ -2,7 +2,7 @@
 // fixtures only, so the maths is pinned independently of the ledger wiring.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mahalanobisOutliers, changePoint, median, slog } from "../server/engine-multivariate.js";
+import { mahalanobisOutliers, changePoint, median, slog } from "../server/detectors/engine-multivariate.js";
 
 test("median + slog: basics", () => {
   assert.equal(median([3, 1, 2]), 2);

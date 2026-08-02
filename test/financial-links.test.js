@@ -10,11 +10,11 @@ import path from "node:path";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-finlinks-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const { db } = await import("../server/store.js");
-const { ensureEntity } = await import("../server/entities.js");
-const { claimsFor } = await import("../server/ledger.js");
-const { relationsOf, eventsFor } = await import("../server/relations.js");
-const { extractFromEvidence } = await import("../server/extract.js");
+const { db } = await import("../server/store/store.js");
+const { ensureEntity } = await import("../server/entities/entities.js");
+const { claimsFor } = await import("../server/store/ledger.js");
+const { relationsOf, eventsFor } = await import("../server/entities/relations.js");
+const { extractFromEvidence } = await import("../server/extractors/extract.js");
 const {
   parseSecEdgar, parseIcij, parseElectoralBonds, parseProcurement, parseAnyDate, parseMatchCount,
 } = await import("../server/extractors/financial-links.js");
@@ -83,7 +83,7 @@ test("parseMatchCount reads the header tallies", () => {
 test("integration: sec_edgar row → claim + event + company relationship", async () => {
   await import("../server/extractors/financial-links.js"); // registers
   const pid = "FL1";
-  const { upsertPolitician } = await import("../server/store.js");
+  const { upsertPolitician } = await import("../server/store/store.js");
   upsertPolitician({ id: pid, name: "Test Rep" });
   const eid = ensureEntity({ kind: "person", name: "Test Rep", strongIds: { politician_id: pid }, source: "seed" });
 

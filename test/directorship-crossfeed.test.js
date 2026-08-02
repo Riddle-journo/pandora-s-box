@@ -11,9 +11,9 @@ import path from "node:path";
 process.env.PANDOROS_DB_PATH = path.join(os.tmpdir(), `pandoros-test-crossfeed-${process.pid}.db`);
 for (const suffix of ["", "-wal", "-shm"]) { try { fs.unlinkSync(process.env.PANDOROS_DB_PATH + suffix); } catch {} }
 
-const store = await import("../server/store.js");
-const { ensureEntity, ensureCompanyEntity, resolveEntityIdForPolitician } = await import("../server/entities.js");
-const { relationsOf, upsertRelationship } = await import("../server/relations.js");
+const store = await import("../server/store/store.js");
+const { ensureEntity, ensureCompanyEntity, resolveEntityIdForPolitician } = await import("../server/entities/entities.js");
+const { relationsOf, upsertRelationship } = await import("../server/entities/relations.js");
 const { runDirectorshipExtraction } = await import("../server/extractors/directorships.js");
 const { seedCompaniesForCrossfeed, runDirectorshipCrossfeed } = await import("../server/extractors/directorship-crossfeed.js");
 

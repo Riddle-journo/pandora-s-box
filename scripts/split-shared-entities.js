@@ -23,9 +23,9 @@
 import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { db, listPoliticians } from "../server/store.js";
-import { ensureEntity, getEntity, resolveEntityIdForPolitician, findEntityByStrongId } from "../server/entities.js";
-import { upsertRelationship } from "../server/relations.js";
+import { db, listPoliticians } from "../server/store/store.js";
+import { ensureEntity, getEntity, resolveEntityIdForPolitician, findEntityByStrongId } from "../server/entities/entities.js";
+import { upsertRelationship } from "../server/entities/relations.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -19,9 +19,9 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 
 
-const { upsertLead, getLead } = await import("../server/store.js");
-const { investigateLead, setMockResponses } = await import("../server/investigator.js");
-const { setSetting } = await import("../server/engine-settings.js");
+const { upsertLead, getLead } = await import("../server/store/store.js");
+const { investigateLead, setMockResponses } = await import("../server/synthesis/investigator.js");
+const { setSetting } = await import("../server/detectors/engine-settings.js");
 
 // Pin the L2 step budget to the historical 4 so the cap test is deterministic
 // regardless of the (now higher) default. Other tests don't hit the cap.
@@ -137,7 +137,7 @@ test("(e) the investigator can follow the trail with the new internal tools", as
 });
 
 test("(f) a surviving investigation spawns a follow-up lead for the discovered entity", async () => {
-  const { listLeads } = await import("../server/store.js");
+  const { listLeads } = await import("../server/store/store.js");
   const lead = upsertLead({
     key: "f", vector: "DA_RATIO", actor_id: "pol-f", actor_name: "Spawn MP",
     instrument: "assets", beneficiary: "Spawn MP", detail: "big DA", headline: "Spawn MP DA", status: "detected",

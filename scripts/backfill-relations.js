@@ -6,10 +6,10 @@
 //
 //   node server/backfill-relations.js
 import "dotenv/config";
-import { db, listPoliticians, listEvidence } from "../server/store.js";
-import { ensureEntity } from "../server/entities.js";
-import { buildRelations } from "../server/graph.js";
-import { upsertRelationship, upsertEvent, relationshipCountsByType, eventCountsByKind } from "../server/relations.js";
+import { db, listPoliticians, listEvidence } from "../server/store/store.js";
+import { ensureEntity } from "../server/entities/entities.js";
+import { buildRelations } from "../server/publishing/graph.js";
+import { upsertRelationship, upsertEvent, relationshipCountsByType, eventCountsByKind } from "../server/entities/relations.js";
 import { PARTY_TOTALS, TOP_DONORS } from "../server/data/electoral-bonds.js";
 
 const abbrToParty = Object.fromEntries(PARTY_TOTALS.map((p) => [p.abbr, p.party]));

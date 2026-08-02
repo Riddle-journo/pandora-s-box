@@ -22,8 +22,8 @@ const {
   companyTargetsFromLead, parseToflerDirectors, companyKey, companyDirectorsUrl, isCin, slugify,
   fetchToflerDirectors,
 } = await import("../server/fetchers/tofler.js");
-const { enrichLeadsWithTofler } = await import("../server/tofler-enrich.js");
-const store = await import("../server/store.js");
+const { enrichLeadsWithTofler } = await import("../server/enrichment/tofler-enrich.js");
+const store = await import("../server/store/store.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {

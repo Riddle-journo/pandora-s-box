@@ -5,7 +5,7 @@
 // displayed excerpt is a window AROUND the name rather than the document preamble.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { l1Match } from "../server/ingest.js";
+import { l1Match } from "../server/orchestration/ingest.js";
 
 const CFG = { id: "cag-bihar", title: "CAG Bihar — audit reports", summary: "audit PDFs", match: "name", tier: 5 };
 

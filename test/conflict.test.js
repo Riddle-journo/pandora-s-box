@@ -22,7 +22,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "conflict.json"), "utf8"));
-const { detectConflicts, DETECTOR_VERSION } = await import("../server/conflict.js");
+const { detectConflicts, DETECTOR_VERSION } = await import("../server/detectors/conflict.js");
 
 test.after(() => {
   for (const suffix of ["", "-wal", "-shm"]) {
