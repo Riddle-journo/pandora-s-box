@@ -184,14 +184,14 @@ export function detectConflicts(politician, evidence, roster, scandals, override
     for (const ds of funding.sectors) {
       const sector = textToSector(ds.sector) ?? String(ds.sector).toLowerCase();
       if (!powerSectors.has(sector)) continue;
-      const signal_score = Math.min(Math.round(ds.total_cr / 100), 15) + powerWeight(sector);
+      const signal_score = Math.min(Math.round(ds.total_cr_all_parties / 100), 15) + powerWeight(sector);
       mk({
         vector: "DONOR_REWARD", instrument: `${sector}-sector office attention`,
         beneficiary: `${ds.sector} donors to ${funding.abbr}`, beneficiary_kind: "donor_sector",
         signal_score, severity: sev(signal_score),
         headline: `The party drew electoral-bond funding from the ${sector} sector, which the member's office also covers.`,
         evidence_urls: [g.power?.url].filter(Boolean),
-        detail: `${funding.abbr} received ₹${ds.total_cr} cr in disclosed electoral bonds from ${ds.sector}; the member's office weight on ${sector} is ${powerWeight(sector)}. Party-level funding is inherited, not personal — a context flag, not an allegation.`,
+        detail: `${ds.donor_count} disclosed bond buyer${ds.donor_count === 1 ? "" : "s"} from ${ds.sector} funded ${funding.abbr}; between them they bought ₹${ds.total_cr_all_parties} cr of bonds across all the parties they funded (India's disclosure does not itemise how much reached ${funding.abbr}). The member's office weight on ${sector} is ${powerWeight(sector)}. Party-level funding is inherited, not personal — a context flag, not an allegation.`,
       });
     }
   }

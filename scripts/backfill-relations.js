@@ -89,7 +89,15 @@ function backfillDonations() {
       const r = upsertRelationship({
         src_entity_id: donorEnt, dst_entity_id: partyEnt, rel_type: "donor_to",
         valid_from: d.date ?? null, confidence: 0.9, source: "electoral_bonds",
-        data: { total_cr: d.total_cr, sector: d.sector },
+        // NOT the amount to THIS party. The same total is stamped on every one
+        // of a donor's party edges because India's disclosure never itemised
+        // the split, so the key must say so — a bare `total_cr` on a
+        // donor→party edge reads as "gave this much to this party", and that
+        // misreading reached both a public card and a lead rationale.
+        data: {
+          total_cr_all_parties: d.total_cr, sector: d.sector,
+          recipient_parties: d.parties, recipient_count: d.parties.length,
+        },
       });
       if (r.inserted) donor++;
       // A dated purchase would become a bond_purchase event; the dataset is

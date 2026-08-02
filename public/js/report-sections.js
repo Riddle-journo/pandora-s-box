@@ -340,10 +340,11 @@ function renderPartyFunding(f, p) {
   const sectors = (f.sectors ?? []).slice(0, 6);
   return `
     <p class="fund-lead"><strong>${esc(p.party ?? "")}</strong> received <strong>₹${f.total_cr.toLocaleString()} crore</strong> in electoral bonds — ranked <strong>#${f.rank}</strong> of ${f.total_parties} disclosed parties. ${esc(p.name)} stands for election under this party, so this is the money behind their platform.</p>
-    ${top.length ? `<h4 class="fund-h">Top disclosed donors to ${esc(f.abbr)}</h4>
-    <div class="fund-list">${top.map((d) => `<div class="fund-row"><span class="fund-donor">${esc(d.donor)}</span><span class="fund-sector">${esc(d.sector)}</span><span class="fund-amt">₹${d.total_cr.toLocaleString()} cr</span></div>`).join("")}</div>` : ""}
-    ${sectors.length ? `<h4 class="fund-h">By industry</h4>
-    <div class="fund-chips">${sectors.map((s) => `<span class="fund-chip">${esc(s.sector)} · ₹${s.total_cr.toLocaleString()} cr</span>`).join("")}</div>` : ""}
+    ${top.length ? `<h4 class="fund-h">Disclosed bond buyers who funded ${esc(f.abbr)}</h4>
+    <div class="fund-list">${top.map((d) => `<div class="fund-row"><span class="fund-donor">${esc(d.donor)}</span><span class="fund-sector">${esc(d.sector)}</span><span class="fund-amt">₹${Number(d.total_cr_all_parties ?? 0).toLocaleString()} cr${d.shared ? ` · ${esc(d.recipient_count)} parties` : ""}</span></div>`).join("")}</div>
+    <p class="fund-note small muted">Each amount is that buyer's <strong>total bond purchase across every party it funded</strong>. SBI disclosed who bought and who encashed, never the split between them — so no figure here is an amount given to ${esc(f.abbr)}.</p>` : ""}
+    ${sectors.length ? `<h4 class="fund-h">Industries these buyers came from</h4>
+    <div class="fund-chips">${sectors.map((s) => `<span class="fund-chip">${esc(s.sector)} · ${esc(s.donor_count)} donor${s.donor_count === 1 ? "" : "s"}</span>`).join("")}</div>` : ""}
     <p class="section-foot"><a href="#/funding">See the full cross-party money trail →</a> · Source: Electoral Bonds disclosed by SBI on Supreme Court / ECI order. Figures approximate, in ₹ crore.</p>`;
 }
 

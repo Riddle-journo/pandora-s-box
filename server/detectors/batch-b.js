@@ -992,14 +992,22 @@ export const DETECTORS_B = [
         const stats = await cpppBidderStats(cpppNorm(donor.canonical_name));
         if (!stats || (stats.value || 0) < S.minAwardValue) continue;
         const score = Math.min(Math.round(14 + (stats.value / CR) * 2), 55);
+        // Accepts the legacy key too — rows written before the rename still say
+        // `total_cr`, and both mean the same (misleadable) national total.
+        const donationCr = d.total_cr_all_parties ?? d.total_cr ?? null;
         out.push({
           subject: { entity_id: e.src_entity_id, name: donor.canonical_name, kind: donor.kind },
           score,
           fingerprint: `roundtrip|${party}`,
           headline: `${donor.canonical_name} donated to ${party} (governs ${governs.slice(0, 2).join(", ")}${governs.length > 2 ? "…" : ""}) and won ≈${fmtVal(stats.value)} in government contracts.`,
-          rationale: `${donor.canonical_name}${d.total_cr ? ` gave ≈₹${d.total_cr} Cr to` : " is a donor to"} ${party}, which controls ${governs.join(", ")} (governance map, ${nowYear}); the same firm appears as a CPPP awardee with ≈${fmtVal(stats.value)} across ${stats.wins} awards. Donating to a ruling party and winning that government's contracts is the classic pay-to-play round-trip. Large diversified firms donate and win contracts routinely, and the award identity is name-matched — the investigator confirms the specific awarding authority falls under the party's government. Not a finding.`,
+          // The bond figure is the donor's purchase across EVERY party it
+          // funded — India's disclosure never itemised the per-party split, and
+          // the same total is stamped on each of a donor's party edges. Saying
+          // "gave ₹1,368 Cr to DMK" about a figure shared across four parties
+          // is a false statement about a named company.
+          rationale: `${donor.canonical_name}${donationCr ? ` bought ≈₹${donationCr} Cr of electoral bonds (its total across every party it funded — the per-party split was never disclosed) and is recorded as a donor to` : " is a donor to"} ${party}, which controls ${governs.join(", ")} (governance map, ${nowYear}); the same firm appears as a CPPP awardee with ≈${fmtVal(stats.value)} across ${stats.wins} awards. Donating to a ruling party and winning that government's contracts is the classic pay-to-play round-trip. Large diversified firms donate and win contracts routinely, and the award identity is name-matched — the investigator confirms the specific awarding authority falls under the party's government. Not a finding.`,
           evidence: [evidenceRef(e.evidence_id, `donation to ${party}`), { note: `CPPP: ${stats.wins} awards ≈${fmtVal(stats.value)}`, url: "https://eprocure.gov.in/cppp/" }],
-          data: { statistic: "donor_ruling_party_contractor", party, governs, award_value: stats.value, award_wins: stats.wins, donation_cr: d.total_cr ?? null },
+          data: { statistic: "donor_ruling_party_contractor", party, governs, award_value: stats.value, award_wins: stats.wins, donation_cr_all_parties: donationCr },
           severityOverride: (stats.value || 0) >= S.bigValue ? "big" : null,
         });
       }

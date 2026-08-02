@@ -82,17 +82,50 @@ export function fundingForParty(partyText) {
   const ranked = [...PARTY_TOTALS].sort((a, b) => b.total_cr - a.total_cr);
   const rank = ranked.findIndex((p) => p.abbr === party.abbr) + 1;
 
+  // CRITICAL: `total_cr` on a donor is that donor's total across EVERY party it
+  // funded. India's disclosure does not itemise the donor→party split, so there
+  // is no honest way to say how much of it reached this particular party.
+  //
+  // The old code returned that national figure as the donor's entry under a
+  // party, and the card and report rendered it as "top donors to INC — Megha
+  // Engineering ₹966 Cr". That is a false statement about a named company and a
+  // named party, and it was internally contradictory besides: INC's donor rows
+  // summed to ₹3,550 Cr against a disclosed party total of ₹1,422 Cr.
+  //
+  // The field is therefore renamed to something that cannot be misread, and
+  // carries the recipient list so any consumer can see the amount is shared.
   const donors = TOP_DONORS
     .filter((d) => d.parties.includes(party.abbr))
     .sort((a, b) => b.total_cr - a.total_cr)
-    .map((d) => ({ donor: d.donor, sector: d.sector, total_cr: d.total_cr }));
+    .map((d) => ({
+      donor: d.donor,
+      sector: d.sector,
+      total_cr_all_parties: d.total_cr,
+      recipient_parties: d.parties,
+      recipient_count: d.parties.length,
+      shared: d.parties.length > 1,
+      amount_to_this_party: null,      // not disclosed, and must never be inferred
+    }));
 
+  // Sector view for this party: how many disclosed donors it drew from each
+  // industry. A rupee sum per sector per party would repeat exactly the error
+  // above, so the countable thing is counted and the unattributable total is
+  // labelled for what it is.
   const bySector = {};
-  for (const d of donors) bySector[d.sector] = (bySector[d.sector] ?? 0) + d.total_cr;
-  const sectors = Object.entries(bySector).map(([sector, cr]) => ({ sector, total_cr: cr }))
-    .sort((a, b) => b.total_cr - a.total_cr);
+  for (const d of donors) {
+    const s = (bySector[d.sector] ??= { sector: d.sector, donor_count: 0, total_cr_all_parties: 0 });
+    s.donor_count++;
+    s.total_cr_all_parties += d.total_cr_all_parties;
+  }
+  const sectors = Object.values(bySector).sort((a, b) => b.total_cr_all_parties - a.total_cr_all_parties);
 
-  return { party: party.party, abbr: party.abbr, total_cr: party.total_cr, rank, total_parties: PARTY_TOTALS.length, donors, sectors };
+  return {
+    party: party.party, abbr: party.abbr,
+    total_cr: party.total_cr,          // this IS disclosed per party
+    rank, total_parties: PARTY_TOTALS.length,
+    donors, sectors,
+    disclosure_note: "SBI/ECI disclosed which companies bought bonds and which parties encashed them, but not how much of a given donor's purchase reached a given party. Donor amounts below are that donor's total across all the parties it funded.",
+  };
 }
 
 // Cross-party sector view: which industries gave the most, and to whom.

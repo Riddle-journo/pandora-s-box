@@ -693,8 +693,13 @@ export function buildPartyCard(key, scope = "union") {
       fu.stats.push({ label: "Total received", value: `₹${funding.total_cr.toLocaleString("en-IN")} Cr` });
       fu.stats.push({ label: "Rank", value: `#${funding.rank} of ${funding.total_parties}` });
       for (const d of (funding.donors ?? []).slice(0, 6))
-        fu.facts.push(fact(`${d.donor}${d.sector ? ` (${d.sector})` : ""} — ₹${d.total_cr.toLocaleString("en-IN")} Cr.`, "INFO", []));
-      fu.template_prose = `Electoral bonds disclosed by SBI on Supreme Court order (Apr 2019 – Jan 2024), at party level.`;
+        fu.facts.push(fact(
+          `${d.donor}${d.sector ? ` (${d.sector})` : ""} — bought ₹${d.total_cr_all_parties.toLocaleString("en-IN")} Cr of bonds in total`
+          + (d.shared
+            ? `, encashed across ${d.recipient_count} parties including this one. The per-party split was never disclosed.`
+            : `, with this the only party recorded as encashing them.`),
+          "INFO", []));
+      fu.template_prose = `Electoral bonds disclosed by SBI on Supreme Court order (Apr 2019 – Jan 2024). The party total is disclosed; how much of any one donor's purchase reached this party is not.`;
       sections.push(fu);
     }
   }
@@ -790,6 +795,10 @@ export async function generateCard(kind, subjectKey, { prose = true, persist = t
   if (kind === "politician") { await loadResolver(); card = buildPoliticianCard(subjectKey); }
   else if (kind === "ministry") card = buildMinistryCard(subjectKey);
   else if (kind === "party") card = buildPartyCard(subjectKey, scope);
+  // buildOrgCard existed but was never reachable through this entry point, so
+  // no org card had ever been generated — which is most of why the ministries
+  // and government pages read as empty.
+  else if (kind === "org") card = await buildOrgCard(subjectKey);
   else throw new Error(`unknown card kind: ${kind}`);
   if (prose) {
     try { await applyCardProse(card); }
