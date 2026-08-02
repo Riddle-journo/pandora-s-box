@@ -13,3 +13,18 @@ data/db.json
 data/db.json.bak
 logs/
 coverage/
+
+# Investigation-quality eval CORPUS (not the docs). labels.jsonl holds human
+# judgments about named living people, and eval/runs/*.json holds per-lead rows
+# whose lead_key embeds actor ids and beneficiary names — i.e. private
+# Investigator-branch material, which this repo's public remote must never carry.
+# Same rule as data/: the private corpus lives on disk, not in git. It is real
+# irreplaceable work, so back it up alongside the DB (scripts/backup.ps1 /
+# `npm run db:backup`) rather than relying on version control.
+eval/labels.jsonl
+eval/runs/
+
+# Harvested source corpora (GBs). Rebuildable by re-running ingest; backed up
+# with the DB, not with git.
+server/data/mega/
+server/data/l1-cache/
