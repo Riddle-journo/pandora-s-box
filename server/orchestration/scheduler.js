@@ -3,7 +3,7 @@
 // job whenever enough wall-clock has passed since it last did so. Last-enqueue
 // timestamps live in the existing `meta` table, so schedule state survives a
 // worker restart. No cron dependency — a single setInterval drives it.
-import { enqueueJob, getMeta, setMeta } from "./store.js";
+import { enqueueJob, getMeta, setMeta } from "../store/store.js";
 
 // everyMs = minimum spacing between enqueues of this type. The handlers
 // themselves self-rate-limit further (e.g. maybeDiscover's 12h meta cursor,

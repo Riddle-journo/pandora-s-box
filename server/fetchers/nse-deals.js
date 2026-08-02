@@ -12,8 +12,7 @@ const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36";
 
 import { fetchRaw } from "./http.js";
-import { logger } from "../util/log.js";
-const log = logger("nse-deals");
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 // Perform the NSE cookie handshake and return a Cookie header string, or "".
 async function nseCookies(timeoutMs = 12000) {
@@ -76,13 +75,17 @@ export async function searchDeals(name, { timeoutMs = 12000 } = {}) {
       timeoutMs,
     });
     if (!res) {
-      if (error) log.warn({ url, err: error.message }, "nse deals endpoint failed");
+      noteFetchFailure("nse_deals", "endpoint", error ?? "no response", { url });
       continue;
     }
     const ct = res.headers.get("content-type") || "";
     if (ct.includes("json")) {
-      const j = await res.json().catch(() => null);
+      const j = await res.json().catch((err) => { noteFetchFailure("nse_deals", "json_parse", err, { url }); return null; });
       const rows = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+      // JSON carrying no recognisable row array at all is a payload-shape change.
+      if (j && !Array.isArray(j?.data) && !Array.isArray(j)) {
+        noteParseMiss("nse_deals", "rows_shape", { url, expected: "a `data` array" });
+      }
       for (const row of rows) {
         const client = String(row.clientName ?? row.CLIENT_NAME ?? row.client ?? "").toLowerCase();
         if (client.includes(needle.toLowerCase())) {
@@ -90,7 +93,7 @@ export async function searchDeals(name, { timeoutMs = 12000 } = {}) {
         }
       }
     } else {
-      const csv = await res.text().catch(() => "");
+      const csv = await res.text().catch((err) => { noteFetchFailure("nse_deals", "csv_read", err, { url }); return ""; });
       matches.push(...parseDealsCsv(csv, needle));
     }
   }

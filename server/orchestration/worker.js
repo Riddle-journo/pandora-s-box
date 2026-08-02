@@ -25,25 +25,25 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { jobLogContext } from "./util/job-context.js";
-import { logger } from "./util/log.js";
+import { jobLogContext } from "../util/job-context.js";
+import { logger } from "../util/log.js";
 import {
   claimNextJob, peekNextJob, completeJob, failJob, enqueueJob,
   listPoliticians, getPolitician, sourceHealth, pruneFetchRuns,
   isQueuePaused, lastFetchByPolitician, reclaimRunningJobs,
-} from "./store.js";
+} from "../store/store.js";
 import { ingestFor, FETCHER_NAMES } from "./ingest.js";
-import { generateReport } from "./report-generator.js";
-import { maybeDiscover } from "./scandal-discovery.js";
-import { classifyHealth } from "./health.js";
+import { generateReport } from "../publishing/report-generator.js";
+import { maybeDiscover } from "../synthesis/scandal-discovery.js";
+import { classifyHealth } from "../platform/health.js";
 import { startScheduler } from "./scheduler.js";
-import { runAnomalyScan } from "./anomaly.js";
-import { push as pushLog } from "./ops-log.js";
-import { sleep } from "./util/timing.js";
-import { getSetting, listOverrides } from "./engine-settings.js";
+import { runAnomalyScan } from "../detectors/anomaly.js";
+import { push as pushLog } from "../ops/ops-log.js";
+import { sleep } from "../util/timing.js";
+import { getSetting, listOverrides } from "../detectors/engine-settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, "..");
+const REPO_ROOT = path.join(__dirname, "..", "..");
 
 const wlog = logger("worker");
 // Handlers accept an injectable {log} line-writer; route it through the
@@ -223,7 +223,7 @@ export const HANDLERS = {
   // Summarizer (Branch 1): build one public report card. Free — no paid LLM.
   // Payload accepts prose/ingest booleans, or noProse/reingest from the ops UI.
   async generate_card(payload = {}) {
-    const { summarizeOne } = await import("./summarize.js");
+    const { summarizeOne } = await import("../publishing/summarize.js");
     const prose = payload.prose ?? !payload.noProse;
     const ingest = payload.ingest ?? (payload.reingest !== undefined ? !!payload.reingest : true);
     const card = await summarizeOne(payload.politicianId, { prose, ingest });
@@ -254,8 +254,8 @@ export const HANDLERS = {
   // Investigator (Branch 2, admin-only output): Anomaly Engine for one rep, then
   // L2/L3 AI investigation of that rep's top detected leads. GLM budget lives here.
   async investigate_politician({ politicianId, top = 10 } = {}) {
-    const { investigateTop } = await import("./investigate.js");
-    const { runEngine } = await import("./engine.js");
+    const { investigateTop } = await import("../synthesis/investigate.js");
+    const { runEngine } = await import("../detectors/engine.js");
     const p = getPolitician(politicianId);
     if (!p) throw new Error(`Unknown politician: ${politicianId}`);
     const engine = await runEngine({ politicianId: p.id });
@@ -264,8 +264,8 @@ export const HANDLERS = {
   },
   // Population-wide engine (free) + L2/L3 on the global top leads (paid, capped).
   async investigate_all({ top = 50 } = {}) {
-    const { investigateTop } = await import("./investigate.js");
-    const { runEngine } = await import("./engine.js");
+    const { investigateTop } = await import("../synthesis/investigate.js");
+    const { runEngine } = await import("../detectors/engine.js");
     const engine = await runEngine({});
     const r = await investigateTop({ topN: top });
     return { engine: engine.synthesis, ...r };
@@ -274,7 +274,7 @@ export const HANDLERS = {
   // synthesis. Payload: { detectors: [ids], politicianId, dryRun, procurement } —
   // all optional. procurement:true also runs the slow CPPP detectors.
   async engine_scan(payload = {}) {
-    const { runEngine } = await import("./engine.js");
+    const { runEngine } = await import("../detectors/engine.js");
     const r = await runEngine({
       detectors: Array.isArray(payload.detectors) && payload.detectors.length ? payload.detectors
         : typeof payload.detector === "string" && payload.detector ? [payload.detector] : null,
@@ -289,24 +289,24 @@ export const HANDLERS = {
   // its own job so it never slows a normal engine pass. Payload: { rebuild }.
   async cppp_scan(payload = {}) {
     if (payload.rebuild) {
-      const { buildCpppIndex } = await import("./cppp-index.js");
+      const { buildCpppIndex } = await import("../store/cppp-index.js");
       const idx = await buildCpppIndex({ log: jobLine });
       if (!idx.ok) return { indexed: false, reason: idx.reason };
     }
-    const { runEngine } = await import("./engine.js");
-    const { CPPP_DETECTORS } = await import("./cppp-detectors.js");
+    const { runEngine } = await import("../detectors/engine.js");
+    const { CPPP_DETECTORS } = await import("../detectors/cppp-detectors.js");
     const r = await runEngine({ detectors: CPPP_DETECTORS.map((d) => d.id), procurement: true, log: jobLine });
     return { runId: r.runId, tookMs: r.tookMs, synthesis: r.synthesis };
   },
   // Re-run flags → leads synthesis alone (after tuning thresholds, no re-detect).
   async engine_synthesis() {
-    const { runLeadSynthesis } = await import("./lead-synthesis.js");
+    const { runLeadSynthesis } = await import("../synthesis/lead-synthesis.js");
     return await runLeadSynthesis({ log: jobLine });
   },
   // GLM investigation of ONE lead by id — the ops console's precision trigger.
   async investigate_lead({ leadId } = {}) {
-    const { getLead } = await import("./store.js");
-    const { investigateLead } = await import("./investigator.js");
+    const { getLead } = await import("../store/store.js");
+    const { investigateLead } = await import("../synthesis/investigator.js");
     const lead = getLead(leadId);
     if (!lead) throw new Error(`Unknown lead: ${leadId}`);
     const r = await investigateLead(lead);
@@ -314,13 +314,13 @@ export const HANDLERS = {
   },
   // L4 synthesis: cross-entity network hubs (pure code).
   async run_synthesis() {
-    const { runSynthesis } = await import("./synthesis.js");
+    const { runSynthesis } = await import("../synthesis/synthesis.js");
     return runSynthesis();
   },
   // L5: draft journalist-handoff stories from cleared/proposed leads (GLM).
   async draft_stories() {
-    const { assembleIncidents, generateStory } = await import("./story-generator.js");
-    const { listLeads, listScandals } = await import("./store.js");
+    const { assembleIncidents, generateStory } = await import("../publishing/story-generator.js");
+    const { listLeads, listScandals } = await import("../store/store.js");
     const incidents = assembleIncidents({ leads: listLeads({}), scandals: listScandals() });
     let ok = 0, fail = 0;
     for (const inc of incidents) {
@@ -352,7 +352,7 @@ export const HANDLERS = {
   // (facts/claims/events/relationships) then the ledger-native detectors, so new
   // evidence immediately becomes candidate leads. Pure code, no network, no LLM.
   async extract_all() {
-    const { runExtractAndDetect } = await import("./extract-all.js");
+    const { runExtractAndDetect } = await import("../extractors/extract-all.js");
     const r = runExtractAndDetect({ log: jobLine });
     return { extraction: r.extraction.totals, detectors: r.detectors?.counts ?? null };
   },
@@ -361,7 +361,7 @@ export const HANDLERS = {
   // full backfill (32k+ news rows — long, but free). Degrades to skips when the
   // free chain is exhausted.
   async extract_prose({ limit = 25, source = null, all = false } = {}) {
-    const { runAllProseExtractors, runProseExtractor } = await import("./extractors/prose-llm.js");
+    const { runAllProseExtractors, runProseExtractor } = await import("../extractors/prose-llm.js");
     const lim = all ? null : Number(limit);
     if (source) return await runProseExtractor(source, { limit: lim, log: jobLine });
     const results = await runAllProseExtractors({ limit: lim, log: jobLine });
@@ -377,7 +377,7 @@ export const HANDLERS = {
   // task. Composes db-maintenance.js — integrity/orphans/drift/backup/… — and writes
   // a maintenance_log row. Free: SQLite PRAGMAs + better-sqlite3 backup, no network.
   async db_maintenance(payload = {}, job) {
-    const { runMaintenance, runMaintenanceTask } = await import("./db-maintenance.js");
+    const { runMaintenance, runMaintenanceTask } = await import("../platform/db-maintenance.js");
     if (payload.tier) return await runMaintenance(payload.tier, { log: jobLine });
     if (payload.task) return await runMaintenanceTask(payload.task, payload, { log: jobLine });
     throw new Error("db_maintenance: need a tier or task in the payload");
@@ -391,7 +391,7 @@ export const HANDLERS = {
     if (payload.confirm !== true) throw new Error("db_maintenance_danger refused: confirm must be true.");
     const allowed = new Set(["vacuum", "drift_heal"]);
     if (!allowed.has(payload.task)) throw new Error(`db_maintenance_danger: task "${payload.task}" is not a danger task`);
-    const { runMaintenanceTask } = await import("./db-maintenance.js");
+    const { runMaintenanceTask } = await import("../platform/db-maintenance.js");
     return await runMaintenanceTask(payload.task, payload, { log: jobLine });
   },
 
@@ -439,6 +439,15 @@ export const HANDLERS = {
     if (apply) args.push("--apply");
     return await spawnCli(job.id, "reset-data.js", args);
   },
+  // Org catalogue → entities sync (idempotent). Run after editing
+  // server/data/orgs.js so new ministries/PSUs/regulators get canonical
+  // entities + aliases without a shell script.
+  async sync_org_entities() {
+    const { syncOrgEntities } = await import("../entities/entities.js");
+    const r = syncOrgEntities();
+    wlog.info(`[sync_org_entities] ensured ${r.synced}/${r.total} catalogue orgs`);
+    return r;
+  },
 };
 
 // Per-job log routing under CONCURRENT jobs. The old approach swapped the
@@ -451,7 +460,7 @@ export const HANDLERS = {
 // jobLogContext itself lives in util/job-context.js (dependency-free) so the
 // structured logger can import it without pulling in the whole worker;
 // re-exported here so existing importers keep working.
-export { jobLogContext } from "./util/job-context.js";
+export { jobLogContext } from "../util/job-context.js";
 
 let consolePatched = false;
 export function patchConsoleForJobs() {

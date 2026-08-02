@@ -15,7 +15,8 @@
 // (ogdResourceMeta) and schedule freshness checks per-resource, not assume live.
 
 import { UA } from "./http.js";
-import { dataGovKey } from "../config.js";
+import { dataGovKey } from "../platform/config.js";
+import { noteFetchFailure } from "./observe.js";
 
 // ── known portals ────────────────────────────────────────────────────────────
 // CKAN portals we target. Same code path works for any CKAN host; these are the
@@ -45,9 +46,15 @@ async function getJson(url, { timeoutMs = 25000, headers = {} } = {}) {
       signal: AbortSignal.timeout(timeoutMs),
     });
     let json = null;
-    try { json = await res.json(); } catch { /* html error page etc. */ }
+    try { json = await res.json(); }
+    catch (err) {
+      // A 200 that is not JSON is a portal serving an HTML error/consent page:
+      // "blocked" dressed as "empty". Callers only see json:null, so record it.
+      if (res.ok) noteFetchFailure("opendata", "json_parse", err, { url, status: res.status });
+    }
     return { ok: res.ok, status: res.status, json };
-  } catch {
+  } catch (err) {
+    noteFetchFailure("opendata", "fetch", err, { url });
     return { ok: false, status: 0, json: null };
   }
 }

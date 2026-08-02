@@ -20,12 +20,12 @@
 // its evidence, calls the model, and writes through the same ledger writers. This
 // keeps the LLM latency/rate-limit handling out of the deterministic pipeline.
 import "dotenv/config";
-import { db } from "../store.js";
-import { resolveEntityIdForPolitician, getEntity } from "../entities.js";
-import { upsertClaim, upsertFact } from "../ledger.js";
-import { upsertEvent } from "../relations.js";
-import { freeJson } from "../free-chain.js";
-import { getPolitician } from "../store.js";
+import { db } from "../store/store.js";
+import { resolveEntityIdForPolitician, getEntity } from "../entities/entities.js";
+import { upsertClaim, upsertFact } from "../store/ledger.js";
+import { upsertEvent } from "../entities/relations.js";
+import { freeJson } from "../synthesis/free-chain.js";
+import { getPolitician } from "../store/store.js";
 
 export const PROSE_LLM_VERSION = "prose-llm-v1";
 const safeJson = (s) => { try { return JSON.parse(s); } catch { return {}; } };

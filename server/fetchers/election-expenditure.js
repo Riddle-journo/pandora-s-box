@@ -5,6 +5,7 @@
 // Declared campaign spending; a large gap between this and observed campaign
 // activity is a classic undeclared-funding signal. Free, no key.
 import { fetchText, htmlToText , TIMEOUT_SLOW } from "./http.js";
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 // Strip inner markup + decode the handful of entities MyNeta emits, then collapse
 // whitespace — the same cell-cleaning idiom as sources/myneta-full.js.
@@ -66,6 +67,8 @@ export function parseExpenditureTable(html) {
     if (!items.length && grandTotal == null) return null;
     return { grand_total: grandTotal, items };
   } catch {
+    // Stays silent BECAUSE this function is pure and reused by tests; the
+    // caller below records the null so the failure is still observable.
     return null;
   }
 }
@@ -74,8 +77,8 @@ export async function fetchElectionExpenditure(p) {
   if (!p.myneta_url || !/candidate\.php/i.test(p.myneta_url)) return [];
   const url = p.myneta_url.replace(/candidate\.php/i, "expense.php");
 
-  const html = await fetchText(url, { timeoutMs: TIMEOUT_SLOW });
-  if (!html) return [];
+  const html = await fetchText(url, { timeoutMs: TIMEOUT_SLOW, source: "election_expenditure" });
+  if (!html) { noteFetchFailure("election_expenditure", "fetch", "empty expense page", { url, politician_id: p.id }); return []; }
 
   // Whole-page text (MyNeta uses legacy table layout, no <main>); then trim the
   // shared footer/disclaimer and start at the expense section.
@@ -92,6 +95,10 @@ export async function fetchElectionExpenditure(p) {
   // `numbers` and nothing that reads `content` today is affected.
   const parsed = parseExpenditureTable(html);
   const numbers = parsed && (parsed.items.length || parsed.grand_total != null) ? parsed : null;
+  // The page loaded but no itemized expenditure survived the parse. The text
+  // skim below still ships, so the evidence row looks normal — which is
+  // exactly why the loss of the STRUCTURED numbers has to be recorded.
+  if (!numbers) noteParseMiss("election_expenditure", "expense_table", { url, bytes: html.length, expected: "expenditure rows" });
 
   return [{
     politician_id: p.id,

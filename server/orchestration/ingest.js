@@ -10,30 +10,37 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
-import https from "node:https";
-import { listPoliticians, addEvidence, recordFetchRun } from "./store.js";
-import { dataGovKey } from "./config.js";
-import { fetchText, htmlToText, fetchPdfText, UA, fetchJson, sleep, mapLimit, isPdf } from "./fetchers/http.js";
-import { fetchMyNetaProfile } from "./sources/myneta-full.js";
-import { fetchWikipedia } from "./sources/wikipedia.js";
-import { fetchNews } from "./sources/news.js";
-import { enrichNewsBodies } from "./fetchers/article-body.js";
-import { fetchPressReleases } from "./fetchers/press-releases.js";
-import { fetchIndianKanoon } from "./fetchers/indian-kanoon.js";
-import { fetchICIJ } from "./fetchers/icij.js";
-import { fetchSEBIOrders } from "./fetchers/sebi-orders.js";
-import { fetchSansadMP } from "./fetchers/sansad-mp.js";
-import { fetchElectionExpenditure } from "./fetchers/election-expenditure.js";
-import { fetchPartyFunding } from "./fetchers/party-funding.js";
-import { fetchMPLADS } from "./fetchers/mplads.js";
-import { fetchCPPPProcurement } from "./fetchers/cppp-procurement.js";
-import { fetchMultilingualNews } from "./fetchers/news-multilingual.js";
-import { fetchFactChecks } from "./fetchers/factcheck.js";
-import { fetchWikidata } from "./fetchers/wikidata.js";
-import { fetchCompanyRegistry } from "./fetchers/company-registry.js";
-import { fetchPIBProjects } from "./fetchers/pib-projects.js";
-import { fetchSECEdgar } from "./fetchers/sec-edgar.js";
-import { writeFileAtomic } from "./util/fs-atomic.js";
+import { listPoliticians, addEvidence, recordFetchRun } from "../store/store.js";
+import { recordAssertion } from "../entities/entities.js";
+import { dataGovKey } from "../platform/config.js";
+import { fetchText, htmlToText, fetchPdfText, UA, fetchJson, sleep, mapLimit, isPdf } from "../fetchers/http.js";
+import { fetchMyNetaProfile } from "../sources/myneta-full.js";
+import { fetchWikipedia } from "../sources/wikipedia.js";
+import { fetchNews } from "../sources/news.js";
+import { enrichNewsBodies } from "../fetchers/article-body.js";
+import { fetchPressReleases } from "../fetchers/press-releases.js";
+import { fetchIndianKanoon } from "../fetchers/indian-kanoon.js";
+import { fetchICIJ } from "../fetchers/icij.js";
+import { fetchSEBIOrders } from "../fetchers/sebi-orders.js";
+import { fetchSansadMP } from "../fetchers/sansad-mp.js";
+import { fetchElectionExpenditure } from "../fetchers/election-expenditure.js";
+import { fetchPartyFunding } from "../fetchers/party-funding.js";
+import { fetchMPLADS } from "../fetchers/mplads.js";
+import { fetchCPPPProcurement } from "../fetchers/cppp-procurement.js";
+import { fetchMultilingualNews } from "../fetchers/news-multilingual.js";
+import { fetchFactChecks } from "../fetchers/factcheck.js";
+import { fetchWikidata } from "../fetchers/wikidata.js";
+import { fetchCompanyRegistry } from "../fetchers/company-registry.js";
+import { fetchPIBProjects } from "../fetchers/pib-projects.js";
+import { fetchSECEdgar } from "../fetchers/sec-edgar.js";
+import { writeFileAtomic } from "../util/fs-atomic.js";
+import { fetchBufferSecureFirst } from "../util/tls-policy.js";
+import { logger } from "../util/log.js";
+import {
+  LINKER_VERSION, buildRosterIndex, linkRowsForPolitician,
+} from "../util/linker.js";
+
+const log = logger("ingest");
 
 // We ONLY ingest sources that return real, readable content (or news leads,
 // whose headline IS the content). The old navigational "pointer" sources
@@ -154,33 +161,73 @@ export async function ingestAll({ office, state, mps = false } = {}) {
  * One engine + config array. Refreshed once per ingest run; matched per
  * politician from local cache. No new files: everything lives here by design.
  * ==========================================================================*/
-const L1_CACHE_DIR = path.join(process.cwd(), "server", "data", "l1-cache");
+// L1_CACHE_DIR (env) relocates the cache tree — used by tests so they never write
+// into the repo's real cache, and available to ops for a scratch/staging run.
+const L1_CACHE_DIR = process.env.L1_CACHE_DIR || path.join(process.cwd(), "server", "data", "l1-cache");
 const L1_TTL_MS = 7 * 24 * 3600 * 1000;
 
 const l1Path = (id) => { fs.mkdirSync(L1_CACHE_DIR, { recursive: true }); return path.join(L1_CACHE_DIR, `${id}.json`); };
-function l1Read(id) { try { return JSON.parse(fs.readFileSync(l1Path(id), "utf8")); } catch { return null; } }
+
+// Cache-size policy. A cache is read (and JSON.parse'd) once per politician per
+// source, so an unbounded file is a whole-ingest stall, not a slow read. Over
+// L1_MAX_BYTES the cache is treated as a MISS (recorded, never silent); over
+// L1_WARN_BYTES it still loads but its growth is made visible. Warned once per id
+// per process — this runs ~4,500 times per source, and 4,500 identical lines
+// would bury the log it is meant to surface.
+const L1_MAX_BYTES = Number(process.env.L1_MAX_BYTES) || 128 * 1024 * 1024;
+const L1_WARN_BYTES = 32 * 1024 * 1024;
+const l1SizeWarned = new Set();
+const l1ReadFailed = new Set();
+
+export function l1Read(id) {
+  const file = l1Path(id);
+  let bytes;
+  try { bytes = fs.statSync(file).size; } catch { return null; } // no cache yet
+  if (bytes > L1_MAX_BYTES) {
+    if (!l1SizeWarned.has(id)) {
+      l1SizeWarned.add(id);
+      log.warn({ id, bytes, limit: L1_MAX_BYTES }, "L1 cache exceeds L1_MAX_BYTES — treated as a cache MISS (raise L1_MAX_BYTES or shrink maxRows)");
+    }
+    return null;
+  }
+  if (bytes > L1_WARN_BYTES && !l1SizeWarned.has(id)) {
+    l1SizeWarned.add(id);
+    log.warn({ id, bytes }, "L1 cache is large — every politician pays this parse each run");
+  }
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch (err) {
+    // A truncated/corrupt cache is a cache miss, but never a silent one.
+    if (!l1ReadFailed.has(id)) {
+      l1ReadFailed.add(id);
+      log.warn({ id, err: err?.message ?? String(err) }, "L1 cache unreadable — treated as a cache MISS");
+    }
+    return null;
+  }
+}
 function l1Write(id, rows, meta = {}) { writeFileAtomic(l1Path(id), JSON.stringify({ fetched_at: new Date().toISOString(), count: rows.length, ...meta, rows })); }
 
-// Insecure buffer fetch for gov sites with broken TLS chains.
-function l1FetchInsecure(url, timeoutMs = 30000) {
-  return new Promise((resolve) => {
-    const req = https.get(url, { headers: UA, rejectUnauthorized: false, timeout: timeoutMs }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    });
-    req.on("error", () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
-  });
+// Buffer fetch for the handful of gov sites with broken TLS chains. Verification
+// is ALWAYS attempted first and is only dropped for a genuine certificate-trust
+// error, with the host recorded (util/tls-policy.js) — a chain fixed upstream
+// stops being fetched unverified, and STRICT_TLS=1 disables the fallback entirely.
+//
+// Returns { buffer, insecure }: tls-policy.js states that `insecure: true` means
+// the bytes arrived unauthenticated and callers must propagate that onto any
+// evidence derived from them. The flag used to be dropped here, so the only record
+// was the in-memory insecureTlsInventory — lost on restart and attached to no row.
+// It is now threaded into the cache meta (l1Write) and onto every evidence row
+// l1Match derives from that cache.
+async function l1FetchSecureFirst(url, timeoutMs = 30000) {
+  const { buffer, insecure } = await fetchBufferSecureFirst(url, { timeoutMs, headers: UA });
+  return { buffer, insecure: Boolean(insecure) };
 }
 async function l1FetchBuffer(url, { insecure = false, timeoutMs = 60000 } = {}) {
-  if (insecure) return l1FetchInsecure(url, timeoutMs);
+  if (insecure) return l1FetchSecureFirst(url, timeoutMs);
   try {
     const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
-    if (!res.ok) return null;
-    return Buffer.from(await res.arrayBuffer());
-  } catch { return null; }
+    if (!res.ok) return { buffer: null, insecure: false };
+    return { buffer: Buffer.from(await res.arrayBuffer()), insecure: false };
+  } catch { return { buffer: null, insecure: false }; }
 }
 
 // Parse all <table>s in HTML → array of tables, each an array of cell-text rows.
@@ -250,9 +297,14 @@ async function l1Refresh(cfg) {
     // Multi-page HTML formats accumulate rows across every expanded URL.
     if (cfg.format === "html-table" || cfg.format === "html-list") {
       const urls = l1Urls(cfg);
-      const rows = []; let emptyStreak = 0;
+      const rows = []; let emptyStreak = 0; let tlsUnverified = false;
       for (const u of urls) {
-        const html = cfg.insecure ? (await l1FetchInsecure(u))?.toString("utf8") ?? "" : await fetchText(u, { timeoutMs: cfg.timeoutMs ?? 30000 });
+        let html = "";
+        if (cfg.insecure) {
+          const got = await l1FetchSecureFirst(u);
+          if (got.insecure) tlsUnverified = true;
+          html = got.buffer?.toString("utf8") ?? "";
+        } else html = await fetchText(u, { timeoutMs: cfg.timeoutMs ?? 30000 });
         let pageRows = [];
         if (html) {
           if (cfg.format === "html-list") pageRows = l1AnchorRows(html, u, cfg.linkRe);
@@ -274,7 +326,7 @@ async function l1Refresh(cfg) {
       // cache, so a weekly refresh only fetches genuinely-new documents. Scanned
       // PDFs are handled too — fetchPdfText OCRs them when PDF_OCR=1.
       const finalRows = cfg.readBodies ? await l1ReadBodies(cfg, rows) : rows;
-      l1Write(cfg.id, finalRows, { url: cfg.url });
+      l1Write(cfg.id, finalRows, { url: cfg.url, ...(tlsUnverified ? { tls_unverified: true } : {}) });
       return { id: cfg.id, ok: true, count: finalRows.length };
     }
     if (cfg.format === "json-api") {
@@ -298,7 +350,7 @@ async function l1Refresh(cfg) {
       return { id: cfg.id, ok: true, count: rows.length };
     }
     if (cfg.format === "csv") {
-      let buf = await l1FetchBuffer(cfg.url, cfg);
+      let { buffer: buf, insecure } = await l1FetchBuffer(cfg.url, cfg);
       if (!buf) return { id: cfg.id, ok: false, why: "fetch failed" };
       if (cfg.csvInZip) {
         const z = await l1Zip(); if (!z) return { id: cfg.id, ok: false, why: "fflate missing" };
@@ -309,25 +361,26 @@ async function l1Refresh(cfg) {
         buf = Buffer.from(files[name]);
       }
       const rows = l1ParseCsv(buf.toString("utf8"), cfg.maxRows ?? 200000);
-      l1Write(cfg.id, rows, { url: cfg.url });
+      l1Write(cfg.id, rows, { url: cfg.url, ...(insecure ? { tls_unverified: true } : {}) });
       return { id: cfg.id, ok: true, count: rows.length };
     }
     if (cfg.format === "xlsx") {
-      const buf = await l1FetchBuffer(cfg.url, cfg);
+      const { buffer: buf, insecure } = await l1FetchBuffer(cfg.url, cfg);
       if (!buf) return { id: cfg.id, ok: false, why: "fetch failed" };
       const X = await l1Xlsx(); if (!X) return { id: cfg.id, ok: false, why: "xlsx missing" };
       const wb = X.read(buf, { type: "buffer" });
       const sheet = cfg.sheet ?? wb.SheetNames[0];
       const rows = X.utils.sheet_to_json(wb.Sheets[sheet], { header: 1, raw: false, defval: "" })
         .filter((r) => r.some((c) => String(c).trim() !== "")).slice(0, cfg.maxRows ?? 200000);
-      l1Write(cfg.id, rows, { url: cfg.url, sheet });
+      l1Write(cfg.id, rows, { url: cfg.url, sheet, ...(insecure ? { tls_unverified: true } : {}) });
       return { id: cfg.id, ok: true, count: rows.length };
     }
     if (cfg.format === "pdf") {
-      let text;
+      let text; let tlsUnverified = false;
       if (cfg.insecure) {
-        const buf = await l1FetchInsecure(cfg.url);
+        const { buffer: buf, insecure } = await l1FetchSecureFirst(cfg.url);
         if (!buf) return { id: cfg.id, ok: false, why: "fetch failed" };
+        tlsUnverified = insecure;
         try {
           const { PDFParse } = await import("pdf-parse");
           const parsed = await new PDFParse({ data: new Uint8Array(buf) }).getText();
@@ -335,7 +388,7 @@ async function l1Refresh(cfg) {
         } catch { return { id: cfg.id, ok: false, why: "pdf-parse failed" }; }
       } else text = await fetchPdfText(cfg.url, { maxLen: 100000 });
       if (!text) return { id: cfg.id, ok: false, why: "no text" };
-      l1Write(cfg.id, [[text.slice(0, 60000)]], { url: cfg.url });
+      l1Write(cfg.id, [[text.slice(0, 60000)]], { url: cfg.url, ...(tlsUnverified ? { tls_unverified: true } : {}) });
       return { id: cfg.id, ok: true, count: 1 };
     }
     return { id: cfg.id, ok: false, why: `unknown format ${cfg.format}` };
@@ -395,15 +448,43 @@ export async function refreshL1Caches() {
 // Per-politician matching against cached datasets (local-only, no network).
 const l1Norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 
-// Shared matcher: cfg supplies metadata, cache supplies rows. Used both for
-// L1_SOURCES caches and for mega caches written by server/mega-ingest.js
-// (mega caches embed their own cfg metadata under `meta`).
-export function l1Match(cfg, cache, p) {
+export const l1SourceType = (id) => `l1_${String(id).replaceAll("-", "_")}`;
+
+/**
+ * Shared matcher: cfg supplies metadata, cache supplies rows. Used both for
+ * L1_SOURCES caches and for mega caches written by server/mega-ingest.js
+ * (mega caches embed their own cfg metadata under `meta`).
+ *
+ * The identity DECISION is delegated to util/linker.js — an abstain-first ladder
+ * (strong id → name+context → distinctive name → abstain). It replaced a bare
+ * normalized-substring test that attributed any row containing a politician's
+ * name to that politician, which on ~192 L1 + ~78 mega sources meant every
+ * namesake in India inherited every other's adverse record.
+ *
+ * The returned evidence row keeps the exact shape (and header/bullet text
+ * format) downstream extractors, detectors and reports parse; the identity
+ * decision is carried in additive fields plus one trailing provenance line.
+ *
+ * @param opts.roster   roster index from linker.buildRosterIndex — the namesake
+ *                      guard is inert without it, so ingest always supplies one.
+ * @param opts.onAbstain called when a name matched but nothing corroborated it.
+ */
+export function l1Match(cfg, cache, p, opts = {}) {
   if (!cache?.rows?.length || cfg.match === "none") return null;
-  const needle = cfg.match === "party" ? l1Norm(p.party) : l1Norm(p.name);
-  if (!needle || needle.length < 4) return null;
-  const hits = cache.rows.filter((row) => l1Norm(row.join(" | ")).includes(needle));
-  if (!hits.length) return null;
+  const mode = cfg.match === "party" ? "party" : "name";
+  const link = linkRowsForPolitician(cache.rows, p, {
+    mode, roster: opts.roster ?? null, strongIds: opts.strongIds ?? null, maxHits: 12,
+  });
+  if (link.decision !== "match") {
+    // An abstention is a REVIEWABLE outcome, not a discard: the caller files it
+    // as a proposed entity assertion for human adjudication.
+    if (link.decision === "abstain" && typeof opts.onAbstain === "function") {
+      opts.onAbstain({ cfg, politician: p, link });
+    }
+    return null;
+  }
+  const needle = link.needle;
+  const hits = link.matched.map((m) => m.row);
   // Display: short cells print in full; a long cell (a PDF body from readBodies)
   // is shown as a ~360-char window around the matched name, not its opening 160
   // chars — so the excerpt is the relevant passage, not the document's preamble.
@@ -413,36 +494,138 @@ export function l1Match(cfg, cache, p) {
     const raw = String(cell);
     return "…" + raw.slice(Math.max(0, i - 160), i + needle.length + 200).replace(/\s+/g, " ").trim() + "…";
   };
-  const lines = hits.slice(0, 12).map((r) =>
+  const lines = hits.map((r) =>
     "• " + r.map((c) => (String(c).length > 200 ? snippetAround(c) : String(c).slice(0, 160))).join(" | "));
+  const n = link.matchedCount;
+  // Per-BULLET provenance. One blob can hold rows decided by different rungs, so a
+  // single method/confidence for the whole blob let the strongest row's provenance
+  // stand in for the weakest. The blob is stamped with the WEAKEST included row:
+  // every bullet in it is published together, so the claim is only as defensible as
+  // its worst-supported line. `match_rows` keeps the per-row detail (bullet order).
+  const perRow = link.matched.map((m, i) => ({
+    bullet: i, row_index: m.index, method: m.method, confidence: m.confidence,
+    reasons: m.reasons, context: m.context,
+  }));
+  const weakest = perRow.reduce((a, b) => (b.confidence < a.confidence ? b : a), perRow[0]);
   return {
     politician_id: p.id,
-    source_type: `l1_${cfg.id.replaceAll("-", "_")}`,
+    source_type: l1SourceType(cfg.id),
     tier: cfg.tier ?? 6,
     admissible: cfg.admissible ?? true,
     title: `${cfg.title} — ${cfg.match === "party" ? p.party : p.name}`,
     url: cfg.url ?? null,
     date: null,
     summary: cfg.summary,
-    content: `${cfg.title} (${hits.length} matching row${hits.length > 1 ? "s" : ""}, dataset of ${cache.total ?? cache.count}):\n${lines.join("\n")}`,
+    // Header + "• cell | cell" bullets are a parsed contract (see
+    // extractors/insolvency-defaulters.js contentRows, property-leases.js,
+    // parliament-committee.js). The provenance line is appended as a NON-bullet
+    // line so every one of those parsers ignores it.
+    content: `${cfg.title} (${n} matching row${n > 1 ? "s" : ""}, dataset of ${cache.total ?? cache.count}):\n${lines.join("\n")}`
+      + `\nIdentity: ${weakest.method} (confidence ${weakest.confidence}${perRow.length > 1 ? `, weakest of ${perRow.length} rows` : ""}) — ${weakest.reasons.join("; ")}`,
+    match_method: weakest.method,
+    match_confidence: weakest.confidence,
+    match_reasons: weakest.reasons,
+    match_best_method: link.method,
+    match_best_confidence: link.confidence,
+    match_rows: perRow,
+    matcher_version: LINKER_VERSION,
+    // The bytes behind this row arrived over a channel we could not authenticate
+    // (util/tls-policy.js) — a network attacker could have chosen them.
+    ...(cache.tls_unverified ? { tls_unverified: true } : {}),
   };
+}
+
+// Roster index for the namesake guard. Built once per process: it is a pure
+// function of the roster, and rebuilding it per politician would mean 4,500
+// scans of 4,500 names per ingest run.
+let L1_ROSTER = null;
+function l1Roster() {
+  if (!L1_ROSTER) L1_ROSTER = buildRosterIndex(listPoliticians().filter((x) => !x.is_demo));
+  return L1_ROSTER;
+}
+/** Test/ops seam: drop the memoized roster index after a roster change. */
+export function resetL1Roster() { L1_ROSTER = null; }
+
+/**
+ * The L1 registry entry behind an `l1_*` evidence source_type, or null for a mega
+ * cache (whose cfg lives in its own cache file's `meta`) / an unknown type.
+ * Exported for scripts/audit-l1-attributions.js, which re-decides stored evidence.
+ */
+export function l1CfgByType(sourceType) {
+  return L1_SOURCES.find((c) => l1SourceType(c.id) === sourceType) ?? null;
+}
+
+// Abstentions become PROPOSED entity assertions (entity_assertions, status
+// 'proposed', entity_id null) so the ambiguity is queued for a human instead of
+// being silently dropped. Deduped by the table's UNIQUE (source, source_ref,
+// raw_name, politician_id): source_ref is the linker's row key, so re-ingesting
+// the same cache is idempotent, and only the single best abstention per
+// (source, politician) is filed per run.
+// L1_ABSTAIN_ASSERTIONS=0 turns the queue off without touching the matching.
+//
+// subject_kind is L1_ABSTAIN_KIND, deliberately NOT "person". These records are
+// attribution questions ("is this ROW about this member?"), not entity-resolution
+// claims ("this raw name IS that entity"), and entities.js decideAssertion treats
+// every assertion as the latter: accepting a person-kind assertion with no strong
+// id resolves raw_name against whatever person entity already claims that name.
+// Since SOURCE_STRONG_KEY has no l1_* entry, strongIdsFrom returns {} and
+// strongIdsConflict cannot fire — so accepting one of these would have bound the
+// member to a NAMESAKE's entity (alias 'anil kumar' resolves to 3 distinct person
+// entities on the live DB), re-creating the shared-entity defect
+// scripts/split-shared-entities.js exists to repair, while STILL leaving the
+// adverse row unattributed. A non-person kind cannot collide with any person
+// entity; needs_attribution_handler records that no accept path re-emits the
+// withheld evidence yet, so accepting one is a no-op on the evidence table.
+const L1_ABSTAIN_KIND = "l1_attribution";
+
+function l1RecordAbstention({ cfg, politician, link }) {
+  if (process.env.L1_ABSTAIN_ASSERTIONS === "0") return;
+  try {
+    recordAssertion({
+      subject_kind: L1_ABSTAIN_KIND,
+      raw_name: politician.name,
+      source: l1SourceType(cfg.id),
+      source_ref: link.abstainKey ?? "row",
+      politician_id: politician.id,
+      confidence: link.confidence,
+      method: `l1_abstain:${link.method}`,
+      evidence_url: cfg.url ?? null,
+      detector_version: LINKER_VERSION,
+      data: {
+        source_title: cfg.title, reasons: link.reasons,
+        candidates: link.candidates, abstained_rows: link.abstainedCount,
+        // The excerpt MUST come from the same row as abstainKey/reasons — a reviewer
+        // adjudicating one row's text against another row's key decides nothing.
+        excerpt: link.abstainExcerpt ?? null,
+        row_index: link.abstainIndex ?? null,
+        needs_attribution_handler: true,
+      },
+    });
+  } catch (err) {
+    // Never let the review queue break an ingest — but never lose the fact either.
+    log.warn({ source: cfg.id, politician_id: politician.id, err: err?.message ?? String(err) },
+      "could not file L1 abstention for review");
+  }
 }
 
 export function fetchL1Datasets(p) {
   const out = [];
+  const matchOpts = { roster: l1Roster(), onAbstain: l1RecordAbstention };
   for (const cfg of L1_SOURCES) {
     if (!cfg.format) continue;
-    const row = l1Match(cfg, l1Read(cfg.id), p);
+    const row = l1Match(cfg, l1Read(cfg.id), p, matchOpts);
     if (row) out.push(row);
   }
   // Mega caches (written manually via `node server/mega-ingest.js --refresh …`).
   // Each file is { fetched_at, count, total, meta: {id,title,summary,match,tier,url}, rows }
-  // where rows are already pre-filtered to lines mentioning ANY politician.
+  // where rows are already pre-filtered to lines mentioning ANY politician — that
+  // pre-filter is candidate GENERATION only; the same linker ladder decides here
+  // which of those rows actually belong to this politician.
   try {
     for (const f of fs.readdirSync(L1_CACHE_DIR).filter((n) => n.startsWith("mega-") && n.endsWith(".json"))) {
-      const cache = JSON.parse(fs.readFileSync(path.join(L1_CACHE_DIR, f), "utf8"));
+      const cache = l1Read(path.basename(f, ".json"));
       if (!cache?.meta) continue;
-      const row = l1Match(cache.meta, cache, p);
+      const row = l1Match(cache.meta, cache, p, matchOpts);
       if (row) out.push(row);
     }
   } catch { /* no mega caches yet — fine */ }
@@ -677,6 +860,28 @@ const L1_SOURCES = [
     apiKeyEnv: "DATA_GOV_API_KEY", rowsPath: "records", match: "none",
     note: "Catalog: https://www.data.gov.in/resource/state-wise-details-various-components-activities-digital-india-land-records-modernization",
     summary: "State-wise land-record computerisation progress (aggregate)." },
+
+  // ==== Added 2026-07-15 — audit-source expansion (live-verified) ====
+  // ED: replaces the dead mega 'ed-press' PDF-listing harvest. ED retired its
+  // /press-release HTML page; releases now come from an Umbraco JSON API that
+  // returns the FULL release text inline (accused names + ₹ amounts in
+  // Description), so this is a clean json-api name-match — no PDF download. Root
+  // response is a JSON array, so rowsPath is empty. No auth/key.
+  { id: "ed-pmla-releases", title: "Enforcement Directorate PMLA press releases (attachments/arrests)", format: "json-api",
+    url: "https://enforcementdirectorate.gov.in/umbraco/backoffice/api/PressReleaseApi/GetPublic?language=en",
+    rowsPath: "", match: "name", tier: 3, maxRows: 5000,
+    note: "VERIFIED 2026-07-15: 1893 objects (~1.27MB), keys Id/Description/ReleaseDate/PdfUrl. Description holds accused persons/companies + Rs. crore/lakh amounts (name-matched). PdfUrl (prefix host + encodeURI for spaces) is the citation link. Hindi via language=hi. Supersedes mega ed-press (now skipped) and the retired ED entry in fetchers/press-releases.js.",
+    summary: "ED PMLA attachment/arrest releases (2022–present) — money-laundering signals, names + amounts inline." },
+  // PFMS: the portal itself is un-ingestable (pfms.nic.in = CAPTCHA single-
+  // beneficiary lookup; pfmsdashboard.gov.in = dead). The only clean public data
+  // is the Direct Benefit Transfer scheme/district aggregate mirrored on
+  // data.gov.in — match:none context (beneficiary counts, no names/amounts-per-
+  // person). Resolve the resource UUID once from the catalog (403s to plain fetch).
+  { id: "pfms-dbt", title: "PFMS / DBT scheme-wise beneficiary data (data.gov.in)", format: "json-api",
+    url: "https://api.data.gov.in/resource/a73fce06-9b66-42a7-95cb-b802eb492c11?api-key={key}&format=json&limit=5000",
+    apiKeyEnv: "DATA_GOV_API_KEY", rowsPath: "records", match: "none",
+    note: "UUID a73fce06-… is a live candidate (agent saw a rate-limited JSON body under the sample key) but UNCONFIRMED — verify it is the DBT scheme/district resource at https://www.data.gov.in/dataset-group-name/Direct%20Benefit%20Transfer and swap if wrong. Skips silently until DATA_GOV_API_KEY is set (same as fci-stock/pmfby-claims/dilrmp-progress). Columns: scheme, department, district, month, no. of beneficiaries, bank-account-seeded, Aadhaar-seeded. Aggregate only — PFMS exposes NO politician names or per-person amounts publicly.",
+    summary: "DBT scheme/district beneficiary counts (aggregate context; PFMS proper is not publicly ingestable)." },
 
   // ==== Batch I — GitHub / CKAN CSVs, R6 (6) ====
   { id: "hp-flood-tenders", title: "HP e-tender corpus (flood-data-ecosystem)", format: "csv",
@@ -1163,7 +1368,7 @@ const L1_SOURCES = [
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop())) {
   const argv = process.argv.slice(2);
   const getFlag = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-  const { startTimer } = await import("./util/timing.js");
+  const { startTimer } = await import("../util/timing.js");
   const stop = startTimer("Ingest");
   ingestAll({ office: getFlag("--office"), state: getFlag("--state"), mps: argv.includes("--mps") }).then((n) => { console.log(`\n[ingest] ${n} new evidence rows total.`); stop(); process.exit(0); });
 }

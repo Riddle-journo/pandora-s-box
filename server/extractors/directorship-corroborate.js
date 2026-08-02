@@ -14,10 +14,10 @@
 //
 // Read-only w.r.t. Tofler's leads (they are private journalist work-product); this
 // only annotates the extraction edges. `leads` is injectable for offline tests.
-import { listPoliticians, listLeads } from "../store.js";
-import { resolveEntityIdForPolitician, getEntity } from "../entities.js";
-import { relationsOf, updateRelationship } from "../relations.js";
-import { normalizeCompany } from "../directorship-extract.js";
+import { listPoliticians, listLeads } from "../store/store.js";
+import { resolveEntityIdForPolitician, getEntity } from "../entities/entities.js";
+import { relationsOf, updateRelationship } from "../entities/relations.js";
+import { normalizeCompany } from "./directorship-extract.js";
 import { isCin } from "../fetchers/tofler.js";
 
 export const CORROBORATION_VERSION = "directorship-corroborate-v1";

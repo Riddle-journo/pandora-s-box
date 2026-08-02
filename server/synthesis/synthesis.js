@@ -10,8 +10,8 @@
 // every other lead: it is a candidate, gated behind L2/L3 + human approval, never
 // auto-published. `synthesizeHubs({leads})` is pure/testable; `runSynthesis()`
 // reads the store and upserts.
-import { listLeads, upsertLead } from "./store.js";
-import { normName } from "./entities.js";
+import { listLeads, upsertLead } from "../store/store.js";
+import { normName } from "../entities/entities.js";
 
 const MIN_DISTINCT_ACTORS = 3; // a hub needs ≥3 distinct politicians to be notable
 

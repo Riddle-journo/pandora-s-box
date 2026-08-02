@@ -22,7 +22,7 @@
 // KEEP ALL DATA / universal subjects (hard rule): every matched row emits at least
 // a summary claim — a row is NEVER dropped for "not the politician". The parsed
 // specifics (debtor, directors, identifiers) live in `data` and on relationship edges.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const INSOLVENCY_DEFAULTERS_VERSION = "insolvency-defaulters-v1";
 

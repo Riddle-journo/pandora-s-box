@@ -28,7 +28,7 @@
 // big flags trigger the existing Tofler director lookup + director→politician
 // matching. Both persist what they learn as evidence rows — every network call
 // leaves a citable trail. No paid API is ever called from here.
-import { db, listPoliticians, listEvidence } from "./store.js";
+import { db, listPoliticians, listEvidence } from "../store/store.js";
 import { upsertFlag, markStaleExcept, flagCounts } from "./flags.js";
 import { resolveSettings } from "./engine-settings.js";
 import { detectConflicts, CONFLICT_DEFAULTS } from "./conflict.js";
@@ -47,10 +47,10 @@ import { CPPP_DETECTORS } from "./cppp-detectors.js";
 import {
   meanStd, benfordStats, evidenceRef,
   BASE_TUNABLES,
-} from "./detectors/helpers.js";
-export { meanStd, benfordStats, evidenceRef } from "./detectors/helpers.js";
-import { DETECTORS_A } from "./detectors/batch-a.js";
-import { DETECTORS_B } from "./detectors/batch-b.js";
+} from "./helpers.js";
+export { meanStd, benfordStats, evidenceRef } from "./helpers.js";
+import { DETECTORS_A } from "./batch-a.js";
+import { DETECTORS_B } from "./batch-b.js";
 
 export const ENGINE_VERSION = "engine-v1";
 
@@ -137,6 +137,12 @@ function buildCtx({ log = () => {} } = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // THE DETECTOR REGISTRY
 // ═══════════════════════════════════════════════════════════════════════════
+// The registry is heterogeneous by design: every detector carries id/label/desc
+// plus its own `tunables` shape (the CPPP entries append a `maxFlags` knob that
+// the hand-written ones do not have), so the element type is deliberately open.
+// Stated as prose rather than a JSDoc type annotation: this file is excluded
+// from tsconfig.json (its import closure carries pre-existing type errors), so
+// any type written here would be unchecked — see the tsconfig exclude comment.
 export const DETECTORS = [
   ...DETECTORS_A,
   ...DETECTORS_B,
@@ -162,6 +168,7 @@ const CPPP_LABELS = {
   cppp_date_integrity: ["Award date backdating", "Contracts dated before their tender was published — a chronological impossibility."],
   cppp_anonymous_winner: ["Unverifiable payee", "A materially-paid bidder that carries no address on any record."],
 };
+// defaults: { [threshold]: number } → tunable metadata, extended per detector.
 function cpppTunables(defaults) {
   const t = { ...BASE_TUNABLES, bigAt: { ...BASE_TUNABLES.bigAt, def: 100 } };
   for (const [k, def] of Object.entries(defaults))
@@ -281,7 +288,7 @@ export async function runEngine(opts = {}) {
   const enrichWanted = opts.enrich ?? ES.enabled;
   if (!dryRun && enrichWanted) {
     try {
-      const { enrichLeadsWithTofler } = await import("./tofler-enrich.js");
+      const { enrichLeadsWithTofler } = await import("../enrichment/tofler-enrich.js");
       // Company-bearing BIG flags become pseudo-leads for the existing enricher
       // (it reads beneficiary_kind + the lead body to find company targets).
       const companyFlags = allFlags.filter((f) => f.severity === "big" && f.lead && ["company", "company_cluster", "tender"].includes(f.lead.beneficiary_kind));
@@ -294,9 +301,9 @@ export async function runEngine(opts = {}) {
       // insider-trade / SAST / related-party filings from NSE and record them as
       // evidence. Fail-soft — a network/parse error never breaks enrichment.
       try {
-        const { fetchSebiDisclosures } = await import("./fetchers/sebi-disclosures.js");
-        const { companyTargetsFromLead } = await import("./fetchers/tofler.js");
-        const { addEvidence } = await import("./store.js");
+        const { fetchSebiDisclosures } = await import("../fetchers/sebi-disclosures.js");
+        const { companyTargetsFromLead } = await import("../fetchers/tofler.js");
+        const { addEvidence } = await import("../store/store.js");
         let sebiRows = 0;
         for (const lead of targets) {
           if (!lead?.actor_id) continue;
@@ -306,7 +313,7 @@ export async function runEngine(opts = {}) {
         enrichment.sebi_disclosures = sebiRows;
       } catch (err) { enrichment.sebi_disclosures = { error: err.message }; }
       try {
-        const { matchDirectorsToPoliticians } = await import("./director-link.js");
+        const { matchDirectorsToPoliticians } = await import("../enrichment/director-link.js");
         const dl = matchDirectorsToPoliticians();
         enrichment.director_link = { companies: dl.companies, directors: dl.directors, leads: dl.leads };
       } catch (err) { enrichment.director_link = { error: err.message }; }
@@ -316,7 +323,7 @@ export async function runEngine(opts = {}) {
   // ── Synthesis: flags → leads (with citations) ──
   let synthesis = null;
   if (!dryRun && (opts.synthesize ?? true)) {
-    const { runLeadSynthesis } = await import("./lead-synthesis.js");
+    const { runLeadSynthesis } = await import("../synthesis/lead-synthesis.js");
     synthesis = await runLeadSynthesis({ log });
   }
 

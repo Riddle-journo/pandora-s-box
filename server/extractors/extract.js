@@ -14,10 +14,10 @@
 // its own entity_id/subject_entity_id to attribute a fact to a DIFFERENT entity
 // (e.g. a company named in the doc) — that's how the universal-subject model flows
 // through extraction.
-import { db, listPoliticians } from "./store.js";
-import { resolveEntityIdForPolitician, getEntity, ensureEntity } from "./entities.js";
-import { upsertFact, upsertClaim } from "./ledger.js";
-import { upsertEvent, upsertRelationship } from "./relations.js";
+import { db, listPoliticians } from "../store/store.js";
+import { resolveEntityIdForPolitician, getEntity, ensureEntity, ensureOrgEntity, resolveOrgEntityId, resolveOrgEntityIdExact } from "../entities/entities.js";
+import { upsertFact, upsertClaim } from "../store/ledger.js";
+import { upsertEvent, upsertRelationship } from "../entities/relations.js";
 
 const REGISTRY = new Map(); // source_type -> { version, extract }
 const safeJson = (s) => { try { return JSON.parse(s); } catch { return {}; } };
@@ -87,8 +87,17 @@ export function extractFromEvidence(evidence = {}) {
     const src = rel.src_entity_id ?? subject.entity_id;
     if (!src || !rel.rel_type) { out.skipped++; continue; }
     let dst = rel.dst_entity_id;
+    if (!dst && rel.dst_org_key) dst = ensureOrgEntity(rel.dst_org_key) ?? null;
     if (!dst && rel.dst_name) {
-      dst = ensureEntity({ kind: rel.dst_kind ?? "person", name: rel.dst_name, strongIds: rel.dst_strong_ids ?? {}, source: sourceType });
+      // Government-org targets resolve against the curated catalogue first, so
+      // "NHAI" / "Karnataka Mines & Geology" land on the canonical org entity;
+      // unmatched names keep the historical name-keyed fallback.
+      if ((rel.dst_kind ?? "") === "org") dst = resolveOrgEntityId(rel.dst_name);
+      // Counterparties arriving as a company/other kind (audit parties,
+      // treasury payees, lease holders) may still BE a catalogue body — but
+      // only an exact identity match may claim them, never token scoring.
+      else if (!rel.dst_strong_ids?.cin) dst = resolveOrgEntityIdExact(rel.dst_name);
+      if (!dst) dst = ensureEntity({ kind: rel.dst_kind ?? "person", name: rel.dst_name, strongIds: rel.dst_strong_ids ?? {}, source: sourceType });
     }
     if (!dst || dst === src) { out.skipped++; continue; }
     const r = upsertRelationship({

@@ -12,7 +12,7 @@
 // that touches the store — it loads data, runs the detectors, and upserts leads.
 import {
   listPoliticians, listEvidence, upsertLead, db,
-} from "./store.js";
+} from "../store/store.js";
 
 // Detector identity — bump when any threshold/weight/formula below changes.
 export const DETECTOR_VERSION = "anomaly-v1";
@@ -232,7 +232,7 @@ function loadUtilizationRecords(politicians) {
 async function loadTimingInputs() {
   let relations;
   try {
-    relations = await import("./relations.js");
+    relations = await import("../entities/relations.js");
   } catch {
     return null; // relations.js absent → caller skips the timing detector
   }

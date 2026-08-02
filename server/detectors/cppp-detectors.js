@@ -11,7 +11,7 @@
 // ({ subject, score, fingerprint, headline, rationale, evidence, data,
 // severityOverride }); engine.js's CPPP category wraps them, resolves per-run
 // settings, and writes flags. Read-only over cppp_flat.db; gated on its presence.
-import { flatPath, reliableKey } from "./cppp-index.js";
+import { flatPath, reliableKey } from "../store/cppp-index.js";
 
 let _db = null, _tried = false;
 async function cpppDb() {

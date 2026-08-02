@@ -13,7 +13,7 @@
 // One lead-grade SUMMARY record per evidence row (not per line item): these blobs
 // hold up to dozens of near-identical rows, and the point is a candidate signal for
 // L2/L3 review, not a precise per-row ledger. The parsed specifics live in `data`.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const FINANCIAL_LINKS_VERSION = "financial-links-v1";
 

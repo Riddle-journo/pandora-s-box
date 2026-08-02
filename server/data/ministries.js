@@ -13,10 +13,13 @@
 // resolves to the state entry only when listed first… we instead match the
 // MOST SPECIFIC (highest token count) entry across all candidates.
 
-const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-const hasTok = (text, tok) => text.includes(tok);
+import { ORGS, getOrg, resolveOrg } from "./orgs.js";
 
-export const MINISTRIES = [
+const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+
+// Legacy list retained for reference/tests; the live catalogue is orgs.js.
+// (Entries below were migrated verbatim into orgs.js — edit THERE.)
+const LEGACY_MINISTRIES = [
   // ── Union ministries ───────────────────────────────────────────────────
   { key: "union/finance",          scope: "union", name: "Ministry of Finance",                sectors: ["Banking", "Taxation", "Political funding / Transparency"], tokens: ["finance"], any: ["ministry", "union", "fipb", "lic", "rbi", "sebi", "banks"] },
   { key: "union/home",             scope: "union", name: "Ministry of Home Affairs",           sectors: ["Internal security", "Policing"], tokens: ["home affairs"] },
@@ -54,24 +57,21 @@ export const MINISTRIES = [
   { key: "state/delhi/licensing",           scope: "Delhi",          name: "Delhi Licensing & Fire Authorities",   sectors: ["Public safety"], tokens: ["delhi"], any: ["licensing", "fire"] },
 ];
 
+// Live ministry/department view over the orgs.js catalogue — same shape the
+// scorecard/card consumers always had (key, scope, name, sectors, tokens, any).
+export const MINISTRIES = ORGS.filter((o) => o.kind === "ministry" || o.kind === "department");
+void LEGACY_MINISTRIES; // kept for reference only
+
 // Resolve free ministry text ("Ministry of Finance / RBI supervision") to the
-// most specific canonical entry, or null. Specificity = number of required
-// tokens matched (state entries carry the state name, so they win over union).
+// most specific canonical entry, or null. Delegates to the org catalogue,
+// restricted to ministry/department kinds so PSUs and regulators can't steal
+// scandal ministry strings.
 export function resolveMinistry(freeText) {
-  const t = norm(freeText);
-  if (!t) return null;
-  let best = null, bestScore = 0;
-  for (const m of MINISTRIES) {
-    if (!m.tokens.every((tok) => hasTok(t, tok))) continue;
-    if (m.any && m.any.length && !m.any.some((tok) => hasTok(t, tok))) continue;
-    const score = m.tokens.length + (m.scope !== "union" ? 1 : 0);
-    if (score > bestScore) { best = m; bestScore = score; }
-  }
-  return best;
+  return resolveOrg(freeText, { kinds: ["ministry", "department"] });
 }
 
 export function getMinistry(key) {
-  return MINISTRIES.find((m) => m.key === key) ?? null;
+  return getOrg(key);
 }
 
 // ── Party canonicalization ────────────────────────────────────────────────

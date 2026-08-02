@@ -17,10 +17,10 @@
 //   node server/bulk-import.js --ls-only     — Lok Sabha only
 //   node server/bulk-import.js --state-only  — state assemblies only
 import "dotenv/config";
-import { batchUpsertPoliticians, listPoliticians } from "./store.js";
-import { ingestFor } from "./ingest.js";
-import { sleep } from "./util/timing.js";
-import { consoleStyle } from "./util/log.js";
+import { batchUpsertPoliticians, listPoliticians } from "../store/store.js";
+import { ingestFor } from "../orchestration/ingest.js";
+import { sleep } from "../util/timing.js";
+import { consoleStyle } from "../util/log.js";
 const clog = consoleStyle("bulk-import");
 
 const MYNETA_BASE = "https://www.myneta.info";

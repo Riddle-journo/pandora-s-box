@@ -23,9 +23,9 @@
 // representative row per party — writing each shared fact once (still cited to a
 // real evidence row) instead of once per member — while a single-row extract()
 // still works for the generic framework and for tests.
-import { registerExtractor, extractFromEvidence } from "../extract.js";
-import { db } from "../store.js";
-import { ensureEntity } from "../entities.js";
+import { registerExtractor, extractFromEvidence } from "./extract.js";
+import { db } from "../store/store.js";
+import { ensureEntity } from "../entities/entities.js";
 
 export const PARTY_FINANCE_VERSION = "party-finance-v1";
 

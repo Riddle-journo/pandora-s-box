@@ -15,7 +15,7 @@
 // 'detected'), never a finding — it flows into the same L2/L3 review funnel.
 // actor_id is the politician_id (leads are keyed on politicians, like the existing
 // detectors), resolved from each fact's entity via strong_ids.politician_id.
-import { db, listPoliticians, upsertLead } from "./store.js";
+import { db, listPoliticians, upsertLead } from "../store/store.js";
 
 export const LEDGER_DETECTOR_VERSION = "ledger-detector-v1";
 

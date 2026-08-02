@@ -10,7 +10,7 @@
 //   node server/reset-data.js --evidence --apply   # only wipe evidence (for a clean re-ingest)
 //   node server/reset-data.js --demo --apply       # only remove demo reps (+ their data)
 import "dotenv/config";
-import { listPoliticians, listScandals, deleteAllReports, deleteAllEvidence, removeDemoPoliticians, counts } from "./store.js";
+import { listPoliticians, listScandals, deleteAllReports, deleteAllEvidence, removeDemoPoliticians, counts } from "../store/store.js";
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");

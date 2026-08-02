@@ -6,7 +6,7 @@
 //
 // Key convention: 'engine.<detectorId>.<param>' (e.g. 'engine.da_ratio.bigAt').
 // Values are stored as JSON so booleans and numbers round-trip losslessly.
-import { db } from "./store.js";
+import { db } from "../store/store.js";
 
 const getStmt = () => db.prepare("SELECT value FROM engine_settings WHERE key = ?");
 const setStmt = () => db.prepare(

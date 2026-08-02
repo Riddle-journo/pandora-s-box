@@ -12,10 +12,10 @@
 //   node server/issue-analyzer.js <slug>         # one issue
 import "dotenv/config";
 import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
-import { listIssues, getIssue, upsertIssue } from "./store.js";
-import { fetchNews } from "./sources/news.js";
-import { freedomFor } from "./data/freedom-index.js";
-import { ISSUE_SEEDS } from "./data/issues.js";
+import { listIssues, getIssue, upsertIssue } from "../store/store.js";
+import { fetchNews } from "../sources/news.js";
+import { freedomFor } from "../data/freedom-index.js";
+import { ISSUE_SEEDS } from "../data/issues.js";
 
 
 const ASSESS = ["STRONG", "MIXED", "WEAK", "UNCLEAR"];
@@ -121,7 +121,7 @@ export async function generateIssue(seed) {
 // ── CLI ────────────────────────────────────────────────────────────────
 const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("issue-analyzer.js");
 if (invokedDirectly) {
-  const { startTimer } = await import("./util/timing.js");
+  const { startTimer } = await import("../util/timing.js");
   const stop = startTimer("Issue analysis");
   const args = process.argv.slice(2);
   const force = args.includes("--force");

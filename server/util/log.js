@@ -16,7 +16,7 @@
 // stdout, which pm2 captures — `npm run prod:logs` keeps working).
 import pino from "pino";
 import { jobLogContext } from "./job-context.js";
-import { push as pushOpsLog } from "../ops-log.js";
+import { push as pushOpsLog } from "../ops/ops-log.js";
 
 const base = pino({
   level: process.env.LOG_LEVEL || "info",

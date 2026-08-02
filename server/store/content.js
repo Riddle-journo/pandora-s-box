@@ -76,16 +76,29 @@ const insLead = db.prepare(`INSERT OR REPLACE INTO investigation_leads
   (id, key, status, vector, actor_id, signal_score, detected_at, data)
   VALUES (@id, @key, @status, @vector, @actor_id, @signal_score, @detected_at, @data)`);
 
+// A REVIEWER'S DECISION IS TERMINAL. The merge below lets an incoming status win,
+// and three re-detection paths pass status:'detected' EXPLICITLY
+// (enrichment/director-link.js, synthesis/investigate.js detectFor, and the
+// investigator's malformed-response reset). Without this guard the next scan would
+// drag a human-rejected lead back into the queue — re-spending paid LLM calls to
+// re-decide what a human already killed, and re-proposing it forever — and would
+// silently UN-PUBLISH an approved lead. Detector candidates omit status entirely,
+// so they were never the risk; explicit resetters are. A deliberate human reversal
+// passes forceStatus:true (see decideLeadShared).
+const TERMINAL_LEAD_STATUS = new Set(["published", "rejected"]);
+
 // Dedupe on key = vector|actor_id|beneficiary. Re-detection refreshes the
-// detector fields but a passed status (from the AI layers) always wins, so an
-// already-investigated lead is never silently reset to 'detected'.
+// detector fields; a terminal human status survives it.
 export function upsertLead(lead) {
   const key = lead.key ?? `${lead.vector}|${lead.actor_id}|${lead.beneficiary}`;
   const now = new Date().toISOString();
   const existing = J(db.prepare("SELECT data FROM investigation_leads WHERE key = ?").get(key));
+  // forceStatus is a control flag for this call only — never persisted into the blob.
+  const { forceStatus, ...incoming } = lead;
   const row = existing
-    ? { ...existing, ...lead, key, updated_at: now }
-    : { ...lead, id: id(), key, status: lead.status ?? "detected", detected_at: now };
+    ? { ...existing, ...incoming, key, updated_at: now }
+    : { ...incoming, id: id(), key, status: incoming.status ?? "detected", detected_at: now };
+  if (existing && !forceStatus && TERMINAL_LEAD_STATUS.has(existing.status)) row.status = existing.status;
   if (!row.id) row.id = id();
   insLead.run({
     id: row.id, key: row.key, status: row.status ?? "detected", vector: row.vector ?? null,
@@ -99,11 +112,20 @@ export function getLead(idOrKey) {
   return J(db.prepare("SELECT data FROM investigation_leads WHERE id = ? OR key = ? LIMIT 1").get(idOrKey, idOrKey));
 }
 
-/** @param {{ status?: string }} [filter] */
-export function listLeads({ status } = {}) {
+// Rejected leads are SOFT-deleted (kept for the eval/label corpus), so the
+// unfiltered listing hides them — that is exactly what callers already assume,
+// because a rejection used to DELETE the row outright. This matters beyond
+// cosmetics: publishing/story-generator.js and synthesis/synthesis.js both build
+// output from listLeads({}), and a human-rejected lead resurfacing in a generated
+// story would be a serious editorial failure. Pass includeRejected for the eval
+// harness, or ask for { status: "rejected" } explicitly to read the corpus.
+/** @param {{ status?: string, includeRejected?: boolean }} [filter] */
+export function listLeads({ status, includeRejected = false } = {}) {
   const rows = status
     ? db.prepare("SELECT data FROM investigation_leads WHERE status = ? ORDER BY signal_score DESC").all(status)
-    : db.prepare("SELECT data FROM investigation_leads ORDER BY signal_score DESC").all();
+    : includeRejected
+      ? db.prepare("SELECT data FROM investigation_leads ORDER BY signal_score DESC").all()
+      : db.prepare("SELECT data FROM investigation_leads WHERE coalesce(status,'') <> 'rejected' ORDER BY signal_score DESC").all();
   return rows.map(J);
 }
 

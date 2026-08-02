@@ -16,7 +16,7 @@ import "dotenv/config";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startTimer } from "./util/timing.js";
+import { startTimer } from "../util/timing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APPLY = process.argv.includes("--apply");

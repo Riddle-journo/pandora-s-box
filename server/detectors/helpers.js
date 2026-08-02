@@ -3,7 +3,7 @@
 // are unchanged; only the `export` keyword was added to those that were
 // module-private in engine.js. engine.js imports these by name and re-exports
 // the ones that were part of its public surface (meanStd/benfordStats/evidenceRef).
-import { db } from "../store.js";
+import { db } from "../store/store.js";
 
 const CR = 1e7, L = 1e5;
 export { CR, L };
@@ -22,7 +22,7 @@ export function meanStd(xs) {
 // Deviation, so a deviation must clear BOTH a significance test and an effect-
 // size band before it flags. Returns null when there are too few numbers.
 const BENFORD_P = Array.from({ length: 9 }, (_, i) => Math.log10(1 + 1 / (i + 1)));
-/** First-digit Benford deviation. @param {number[]} values @param {{ minN?: number }} [opts] @returns {{ n: number, chi2: number, maxDev: number, digits: number[] } | null} null when the sample is below minN */
+/** First-digit Benford deviation. @param {number[]} values @param {{ minN?: number }} [opts] @returns {{ n: number, chi2: number, mad: number, counts: number[] } | null} null when the sample is below minN */
 export function benfordStats(values, { minN = 40 } = {}) {
   const digits = [];
   for (const v of values) {
@@ -48,7 +48,7 @@ export function benfordStats(values, { minN = 40 } = {}) {
 // says what the row shows, so the lead (and later GLM) can cite it directly.
 let _evStmt = null;
 const evUrlStmt = () => (_evStmt ??= db.prepare("SELECT url, data FROM evidence WHERE id = ?"));
-/** Citation stub every flag must carry. @param {string} evidence_id @param {string} note @returns {{ evidence_id: string, note: string }} */
+/** Citation stub every flag must carry. @param {string} evidence_id @param {string} note @returns {{ evidence_id?: string, url?: string|null, title?: string|null, note: string }} */
 export function evidenceRef(evidence_id, note) {
   if (!evidence_id) return { note };
   try {
@@ -88,7 +88,7 @@ export function fromLegacy(candidates, ctx) {
 
 // Stable identity for a declared property across affidavits: type + district +
 // owner (value is intentionally excluded — a revaluation must not read as a new item).
-/** Stable dedupe key for a flagged item. @param {object} it @returns {string} */
+/** Stable dedupe key for a flagged item. @param {Record<string, any>} it @returns {string} */
 export function propKey(it) {
   return [it.property_type, it.district, it.owner].map((x) => String(x ?? "").toLowerCase().trim()).join("|");
 }
@@ -121,7 +121,7 @@ export function gatherNexusLegs(ctx, p, awardees, selfEnt, interestEdges) {
 }
 
 // Longest control chain INTO a company (how many holder-hops deep), bounded.
-/** Depth of an ownership chain (shell-company laddering). @param {string} node @param {Map<string,string[]>} controlledBy @param {Set<string>} seen @param {number} depth @param {number} cap @returns {number} */
+/** Depth of an ownership chain (shell-company laddering). @param {string} node @param {Map<string,Set<string>>} controlledBy @param {Set<string>} seen @param {number} depth @param {number} cap @returns {number} */
 export function chainDepth(node, controlledBy, seen, depth, cap) {
   if (depth >= cap || seen.has(node)) return depth;
   seen.add(node);

@@ -14,7 +14,7 @@
 // young_wealth detector): the description line often reads "Indian politician
 // (1970–present)" or "(born 1970)". Conservative — an explicit birth phrase, a
 // plausible living-adult year only, else nothing.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const WIKIDATA_VERSION = "wikidata-v2"; // bumped: now also emits birth_year facts
 

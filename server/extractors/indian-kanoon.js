@@ -10,7 +10,7 @@
 //              once it is corroborated.
 //   • an EVENT court_judgment (dated) — the temporal footprint, identity_unverified
 //              flagged in data. (Same-date judgments for one person dedupe.)
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const INDIAN_KANOON_VERSION = "indian-kanoon-v1";
 

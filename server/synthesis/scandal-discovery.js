@@ -16,9 +16,9 @@
 //   node server/scandal-discovery.js --list         # show the current queue
 import "dotenv/config";
 import { AI_BASE, MODEL, AI_KEY, makeClient, callWithRetry } from "./llm.js";
-import { upsertScandal, listProposals, listScandals, getMeta, setMeta } from "./store.js";
-import { SCANDAL_SEEDS } from "./data/scandal-seeds.js";
-import { gdeltJson } from "./sources/gdelt-fetch.js";
+import { upsertScandal, listProposals, listScandals, getMeta, setMeta } from "../store/store.js";
+import { SCANDAL_SEEDS } from "../data/scandal-seeds.js";
+import { gdeltJson } from "../sources/gdelt-fetch.js";
 
 // Newly-surfaced ECONOMIC scandals (not already well-known named ones) must
 // clear this loss/theft threshold to be proposed. Named scandals already in the

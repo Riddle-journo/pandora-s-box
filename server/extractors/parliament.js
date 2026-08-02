@@ -5,7 +5,7 @@
 //   parliament_assurances — a bulleted list of assurances                → assurances_count
 // (parliament_ls / parliament_rs are bare membership records — no activity count —
 // so they get no fact here.) These pair with MPLADS to profile an MP's engagement.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const PARLIAMENT_VERSION = "parliament-v1";
 

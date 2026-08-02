@@ -9,8 +9,8 @@
 // the public report. The `*ForGraph` adapter shapes the data to the EXISTING family-graph
 // renderer's { relatives, links } contract (public/app.js renderRelationGraph) so the
 // admin UI reuses that visualization unchanged.
-import { resolveEntityIdForPolitician, getEntity } from "./entities.js";
-import { relationsOf } from "./relations.js";
+import { resolveEntityIdForPolitician, getEntity } from "../entities/entities.js";
+import { relationsOf } from "../entities/relations.js";
 
 const DIRECTORSHIP_REL_TYPES = new Set([
   "director_of", "promoter_of", "beneficial_owner_of", "partner_of",

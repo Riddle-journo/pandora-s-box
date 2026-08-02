@@ -9,6 +9,7 @@
 // ministry}. Parsing is best-effort — district names in free text are noisy — so
 // everything downstream treats a project as a LEAD input, never a finding.
 import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf, sleep , TIMEOUT_DEFAULT } from "./http.js";
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 // Indian states + UTs — used to anchor a location in free release text.
 export const STATES = [
@@ -102,7 +103,8 @@ export async function fetchPIBProjects(p) {
   // PIB search-by-name page (best-effort; returns [] silently on any failure).
   const listUrl = process.env.PIB_LIST_URL || "https://pib.gov.in/AllReleasem.aspx";
   let html;
-  try { html = await fetchText(listUrl, { timeoutMs: TIMEOUT_DEFAULT }); } catch { return []; }
+  try { html = await fetchText(listUrl, { timeoutMs: TIMEOUT_DEFAULT, source: "pib_projects" }); }
+  catch (err) { noteFetchFailure("pib_projects", "listing", err, { url: listUrl, politician_id: p.id }); return []; }
   if (!html) return [];
   const text = htmlToText(html, 30000);
   const i = text.toLowerCase().indexOf(p.name.toLowerCase());
@@ -154,8 +156,11 @@ export async function fetchPIBProjects(p) {
       };
     });
     deepItems = fetched.filter(Boolean);
-  } catch {
-    deepItems = []; // degrade silently to the listing-skim item
+  } catch (err) {
+    // Degrading to the listing-skim item drops every release BODY, which is
+    // the part the extractor actually reads — never do that silently.
+    noteFetchFailure("pib_projects", "release_bodies", err, { politician_id: p.id, url: listUrl });
+    deepItems = [];
   }
 
   const out = [];

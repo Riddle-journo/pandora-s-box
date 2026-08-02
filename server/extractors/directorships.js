@@ -18,10 +18,10 @@
 // director of Y Ltd", party unclear) is deliberately dropped rather than fabricate
 // a politician↔company link. Phase 3 will verify each surviving company against the
 // free MCA Company Master registry (status/CIN/struck-off).
-import { db, listPoliticians } from "../store.js";
-import { ensureCompanyEntity, resolveEntityIdForPolitician, attachStrongIds } from "../entities.js";
-import { upsertRelationship } from "../relations.js";
-import { extractDirectorships } from "../directorship-extract.js";
+import { db, listPoliticians } from "../store/store.js";
+import { ensureCompanyEntity, resolveEntityIdForPolitician, attachStrongIds } from "../entities/entities.js";
+import { upsertRelationship } from "../entities/relations.js";
+import { extractDirectorships } from "./directorship-extract.js";
 
 export const DIRECTORSHIP_VERSION = "directorship-v1";
 

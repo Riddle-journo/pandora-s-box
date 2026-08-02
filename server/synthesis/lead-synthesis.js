@@ -10,10 +10,10 @@
 // Leads land as status 'detected' in the SAME queue as always: GLM L2/L3
 // investigates, the referee filters, and the admin gate decides. upsertLead
 // preserves any human-advanced status, so re-synthesis never regresses a lead.
-import { upsertLead } from "./store.js";
-import { activeFlagsBySubject, listFlags } from "./flags.js";
-import { resolveSettings } from "./engine-settings.js";
-import { ENGINE_GROUPS } from "./engine-groups.js";
+import { upsertLead } from "../store/store.js";
+import { activeFlagsBySubject, listFlags } from "../detectors/flags.js";
+import { resolveSettings } from "../detectors/engine-settings.js";
+import { ENGINE_GROUPS } from "../detectors/engine-groups.js";
 
 const sev = (s) => (s >= 20 ? "SIGNIFICANT" : s >= 8 ? "NOTABLE" : "UNDER_REVIEW");
 

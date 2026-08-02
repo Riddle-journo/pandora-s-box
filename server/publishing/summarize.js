@@ -10,8 +10,8 @@
 //   ... --no-ingest                                     card from existing evidence only
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
-import { listPoliticians, getPolitician } from "./store.js";
-import { ingestFor } from "./ingest.js";
+import { listPoliticians, getPolitician } from "../store/store.js";
+import { ingestFor } from "../orchestration/ingest.js";
 import { generateCard, CARD_VERSION } from "./cards.js";
 
 function parseArgs(argv) {

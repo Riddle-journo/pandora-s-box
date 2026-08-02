@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import express from "express";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "./auth.js";
+import { requireAdmin } from "./platform/auth.js";
 import { logger } from "./util/log.js";
 const pkgVersion = createRequire(import.meta.url)("../package.json").version;
 const log = logger("http");
@@ -25,19 +25,19 @@ import {
   sourceHealth, listJobs, getJob, enqueueJob,
   cancelJob, updateJob, requeueJob, trimJobs, reclaimRunningJobs, isQueuePaused, setQueuePaused,
   recordLeadFeedback, detectorPrecision, pingDb,
-} from "./store.js";
-import { tail as opsLogTail } from "./ops-log.js";
-import { directorshipNetworkForGraph } from "./directorship-network.js";
-import { canTransition, STORY_STATUSES } from "./story-generator.js";
-import { issueChallenge, verifyPow, rateLimitTip, sanitizeTip, TIP_CATEGORIES } from "./safeguards.js";
-import { PARAMETERS, SCORING } from "./scoring.js";
-import { engineStatus, detectorById, runEngine } from "./engine.js";
-import { listFlags, flagCounts, getFlag } from "./flags.js";
-import { setSetting, coerceValue } from "./engine-settings.js";
+} from "./store/store.js";
+import { tail as opsLogTail } from "./ops/ops-log.js";
+import { directorshipNetworkForGraph } from "./synthesis/directorship-network.js";
+import { canTransition, STORY_STATUSES } from "./publishing/story-generator.js";
+import { issueChallenge, verifyPow, rateLimitTip, sanitizeTip, TIP_CATEGORIES } from "./platform/safeguards.js";
+import { PARAMETERS, SCORING } from "./publishing/scoring.js";
+import { engineStatus, detectorById, runEngine } from "./detectors/engine.js";
+import { listFlags, flagCounts, getFlag } from "./detectors/flags.js";
+import { setSetting, coerceValue } from "./detectors/engine-settings.js";
 import adminOpsRouter from "./routes/admin-ops.js";
 import adminRouter from "./routes/admin.js";
 import contentRouter from "./routes/content.js";
-import { decideLeadShared, asyncH, maybePaginate } from "./routes/util.js";
+import { decideLeadShared, asyncH, maybePaginate, vParam } from "./routes/util.js";
 
 process.on("unhandledRejection", (err) => log.error({ err }, "unhandledRejection"));
 process.on("uncaughtException", (err) => { log.fatal({ err }, "uncaughtException"); process.exit(1); });
@@ -71,6 +71,39 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// ---- API versioning ----
+// /api/v1 is the CANONICAL prefix (what public/js/api.js calls); bare /api is a
+// permanent alias. Every router below registers absolute "/api/..." path strings
+// with no mount prefix, so re-mounting them under /api/v1 is impossible — this
+// rewrites the URL instead, which leaves routing, handlers and response bodies
+// (including the opt-in ?page/?pageSize envelope) byte-identical on both
+// prefixes. Deliberately NOT `app.use("/api/v1", …)`: Express 4 restores the
+// stripped mount path when the middleware calls next(), so a mounted rewrite
+// yields "/api/v1/api/…" and 404s. Registered BEFORE the /api rate limiter so
+// the v1 prefix cannot be used to bypass it. req.originalUrl keeps the prefix
+// the client actually asked for, so the request log stays truthful.
+// Case: Express routes case-insensitively by default (caseSensitive is off), so
+// /API/parameters already resolves. A literal startsWith would make the CANONICAL
+// prefix stricter than its own alias (/API/v1/parameters 404s while /API/parameters
+// works) — an inconsistency for any client or proxy that normalizes path case. So
+// the prefix is matched case-insensitively; the remainder is passed through
+// untouched and Express handles its case exactly as it does on the bare alias.
+// Bare "/api/v1" is deliberately NOT rewritten: there is no terminal "/api" route,
+// so both spellings 404 identically and a rewrite would only imply that the bare
+// prefix is a discovery endpoint. Add a service document here if that ever changes.
+const API_VERSION = "v1";
+const V1_PREFIX = "/api/" + API_VERSION;
+app.use((req, _res, next) => {
+  const u = req.url;
+  if (u.slice(0, V1_PREFIX.length).toLowerCase() === V1_PREFIX) {
+    const rest = u.slice(V1_PREFIX.length);
+    if (rest.startsWith("/") || rest.startsWith("?")) req.url = "/api" + rest;
+  }
+  next();
+});
+// Unknown versions (/api/v2/…) are left unrewritten and fall through to 404.
+app.use("/api", (_req, res, next) => { res.set("X-API-Version", API_VERSION); next(); });
 
 // ---- Rate limiting ----
 // RATE_LIMIT=0 disables both limiters (the test suite and smoke scripts hammer
@@ -132,14 +165,14 @@ app.get("/api/politicians", (req, res) => {
   res.json(maybePaginate(items, req.query));
 });
 
-app.get("/api/politicians/:id", (req, res) => {
+app.get("/api/politicians/:id", vParam("id", "id"), (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   res.json(p);
 });
 
 // ---- Summarizer report card (Branch 1) — the public politician page ----
-app.get("/api/politicians/:id/card", (req, res) => {
+app.get("/api/politicians/:id/card", vParam("id", "id"), (req, res) => {
   const c = latestCard("politician", req.params.id);
   if (!c) return res.status(404).json({ error: "no card yet" });
   res.json(c);
@@ -151,7 +184,7 @@ app.get("/api/politicians/:id/card", (req, res) => {
 // register — so route order is preserved. The router keeps the full original
 // path strings, so no mount prefix.
 app.use(adminRouter);
-app.get("/api/politicians/:id/evidence", (req, res) => res.json(listEvidence(req.params.id)));
+app.get("/api/politicians/:id/evidence", vParam("id", "id"), (req, res) => res.json(listEvidence(req.params.id)));
 
 // ---- Head-to-head comparison ----
 // /api/compare?ids=a,b[,c]  → each politician + a flattened, comparable summary
@@ -294,7 +327,7 @@ app.get("/api/leaderboard", (req, res) => {
 // ---- Anonymous tips ----
 app.get("/api/pow-challenge", (_req, res) => res.json(issueChallenge()));
 
-app.post("/api/politicians/:id/tips", (req, res) => {
+app.post("/api/politicians/:id/tips", vParam("id", "id"), (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
 
@@ -321,12 +354,12 @@ app.post("/api/politicians/:id/tips", (req, res) => {
 });
 
 // ---- Admin: trigger report generation ----
-app.post("/api/politicians/:id/generate", requireAdmin, asyncH(async (req, res) => {
+app.post("/api/politicians/:id/generate", requireAdmin, vParam("id", "id"), asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   const mode = ["incremental", "full", "recheck"].includes(req.body?.mode) ? req.body.mode : "incremental";
   try {
-    const { generateReport } = await import("./report-generator.js");
+    const { generateReport } = await import("./publishing/report-generator.js");
     const report = await generateReport(p.id, { mode });
     res.json({ ok: true, overall_grade: report.overall_grade, overall_score: report.overall_score, headline: report.headline });
   } catch (err) {
@@ -353,7 +386,7 @@ app.use((err, req, res, next) => {
 });
 
 if (process.env.PB_NO_LISTEN !== "1") {
-  const { validateStartupConfig } = await import("./config.js");
+  const { validateStartupConfig } = await import("./platform/config.js");
   const { fatal, warnings } = validateStartupConfig();
   for (const w of warnings) log.warn(`[config] WARNING: ${w}`);
   if (fatal.length > 0) {
@@ -370,7 +403,7 @@ if (process.env.PB_NO_LISTEN !== "1") {
     // the worker entirely with OPS_INPROC_WORKER=0 (e.g. to run worker.js separately).
     if (process.env.OPS_INPROC_WORKER !== "0") {
       try {
-        const { startInProcessWorker } = await import("./worker.js");
+        const { startInProcessWorker } = await import("./orchestration/worker.js");
         stopWorker = startInProcessWorker({ scheduler: process.env.OPS_SCHEDULER === "1" });
         log.info(`[ops] in-process worker started (scheduler ${process.env.OPS_SCHEDULER === "1" ? "ON" : "OFF"}). Open /#/ops.`);
       } catch (err) {

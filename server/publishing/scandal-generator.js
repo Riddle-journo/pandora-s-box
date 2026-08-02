@@ -20,11 +20,11 @@
 //   node server/scandal-generator.js seed --force  # regenerate even if present
 //   node server/scandal-generator.js <slug>        # (re)generate one seed by slug
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
-import { listScandals, getScandal, upsertScandal, listPoliticians } from "./store.js";
-import { fetchNews } from "./sources/news.js";
-import { freedomFor } from "./data/freedom-index.js";
-import { SCANDAL_SEEDS } from "./data/scandal-seeds.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "../synthesis/llm.js";
+import { listScandals, getScandal, upsertScandal, listPoliticians } from "../store/store.js";
+import { fetchNews } from "../sources/news.js";
+import { freedomFor } from "../data/freedom-index.js";
+import { SCANDAL_SEEDS } from "../data/scandal-seeds.js";
 
 // Match a minister name to an existing politician dossier (token overlap). Many
 // historical ministers won't be in our DB (it holds current MPs/MLAs) — that's

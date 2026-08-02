@@ -10,18 +10,19 @@
 // Never included here: investigation leads, pattern flags, or anything from
 // the Investigator branch — those are admin-only by design.
 import "dotenv/config";
-import { formatRupees } from "./util/numbers.js";
-import { computeFlags, scoreFromFlags, gatherNumbers } from "./analyzer.js";
+import { formatRupees } from "../util/numbers.js";
+import { computeFlags, scoreFromFlags, gatherNumbers } from "../detectors/analyzer.js";
 import { relationsForPolitician } from "./graph.js";
 import { PARAMETERS, computeOverall } from "./scoring.js";
-import { freeJson } from "./free-chain.js";
+import { freeJson } from "../synthesis/free-chain.js";
 import {
   getPolitician, listEvidence, addCard, listScandals,
   listPoliticians, cardLeaderboardRows,
-} from "./store.js";
+} from "../store/store.js";
 import { blankBucket, addToBucket, finalize } from "./scorecard.js";
-import { getMinistry, resolveMinistry, getParty, resolveParty, PARTIES } from "./data/ministries.js";
-import { fundingForParty } from "./data/electoral-bonds.js";
+import { getMinistry, resolveMinistry, getParty, resolveParty, PARTIES } from "../data/ministries.js";
+import { getOrg, orgChildren, resolveOrg } from "../data/orgs.js";
+import { fundingForParty } from "../data/electoral-bonds.js";
 
 export const CARD_VERSION = 1;
 
@@ -339,6 +340,138 @@ export function buildMinistryCard(key) {
     name: m.name, sectors: m.sectors ?? [],
     score: bucket.accountability_rate, grade: null,
     headline: `${m.name}: ${bucket.total} documented failure${bucket.total !== 1 ? "s" : ""}${bucket.accountability_rate != null ? ` · ${bucket.accountability_rate}% accountability` : ""}`,
+    summary: null, sections,
+  };
+}
+
+// ── Org card (ministry / department / PSU / regulator) ─────────────────
+// Scandal-corpus aggregation (as buildMinistryCard) PLUS ledger-native
+// evidence: relationships, facts, claims and events attached to the org's
+// canonical entity (dynamic import of entities.js keeps this module loadable
+// without the DB in card-shape tests, mirroring the route pattern).
+export async function buildOrgCard(key) {
+  const org = getOrg(key);
+  if (!org) throw new Error(`unknown org key: ${key}`);
+  const children = orgChildren(key);
+  // Failures roll up: a department's scandals also count toward its ministry.
+  const keys = new Set([key, ...children.map((c) => c.key)]);
+  const hits = listScandals().filter((s) => keys.has(resolveMinistry(s.ministry)?.key));
+  const bucket = blankBucket(org.name);
+  for (const s of hits) addToBucket(bucket, s);
+  finalize({ [org.name]: bucket });
+
+  const sections = [];
+  const ov = section("overview", "Accountability Overview");
+  ov.stats.push({ label: "Documented failures", value: String(bucket.total) });
+  if (bucket.accountability_rate != null) ov.stats.push({ label: "Accountability rate", value: `${bucket.accountability_rate}%` });
+  ov.stats.push({ label: "Resignations", value: String(bucket.resignations) });
+  ov.stats.push({ label: "Prosecutions", value: String(bucket.prosecutions) });
+  ov.template_prose = bucket.total
+    ? `${bucket.total} documented governance failure${bucket.total > 1 ? "s" : ""} traced to ${org.name}; ${bucket.accountability_rate ?? 0}% of them saw real accountability (resignation, prosecution, or remedy).`
+    : `No documented failures traced to ${org.name} in the current corpus.`;
+  sections.push(ov);
+
+  if (bucket.scandals.length) {
+    const fs = section("failures", "Documented Failures");
+    for (const s of bucket.scandals)
+      fs.facts.push(fact(`${s.title}${s.date ? ` (${String(s.date).slice(0, 4)})` : ""}${s.minister ? ` — minister in charge: ${s.minister}` : ""} — accountability: ${s.verdict}.`,
+        s.signal === "RED" ? "SIGNIFICANT" : s.signal === "AMBER" ? "NOTABLE" : "INFO", []));
+    fs.slugs = bucket.scandals.map((s) => s.slug);
+    fs.template_prose = `Each failure links to its full, cited Government Watch analysis.`;
+    sections.push(fs);
+  }
+
+  // Ministers in charge over time (ministry/department kinds).
+  const ministers = [...new Map(hits.filter((s) => s.minister_in_charge?.name).map((s) => [
+    s.minister_in_charge.name,
+    { name: s.minister_in_charge.name, politician_id: s.minister_politician_id ?? null, scandals: hits.filter((x) => x.minister_in_charge?.name === s.minister_in_charge.name).length },
+  ])).values()];
+  if (ministers.length) {
+    const mi = section("ministers", "Ministers On Watch");
+    for (const x of ministers)
+      mi.facts.push(fact(`${x.name} — ${x.scandals} documented failure${x.scandals > 1 ? "s" : ""} on their watch.`, "INFO", []));
+    mi.ministers = ministers;
+    mi.template_prose = `Ministers who held the portfolio when documented failures occurred.`;
+    sections.push(mi);
+  }
+
+  // ── Ledger-native evidence trail ─────────────────────────────────────
+  try {
+    const { findEntityByStrongId, getEntity } = await import("../entities/entities.js");
+    const { db } = await import("../store/store.js");
+    const ent = findEntityByStrongId("org", { org_key: key });
+    if (ent) {
+      const REL_LABEL = {
+        named_in_government_contract: "Named in government contracts",
+        named_in_committee_report: "Named in parliamentary committee reports",
+        awarded_tender: "Tenders awarded",
+        audited_by: "Audit findings",
+      };
+      // A PSU is also a registered company: the registry/directorship sources
+      // file records against a separate `company` entity, linked by same_as
+      // (scripts/backfill-org-entities.js). Read both so the page shows the
+      // whole body, not half of it.
+      const linked = db.prepare(
+        "SELECT dst_entity_id AS id FROM relationships WHERE src_entity_id = ? AND rel_type = 'same_as'"
+      ).all(ent.id).map((r) => r.id);
+      const ids = [ent.id, ...linked];
+      const placeholders = ids.map(() => "?").join(",");
+      const rels = db.prepare(
+        `SELECT rel_type, src_entity_id, evidence_id, data FROM relationships
+         WHERE dst_entity_id IN (${placeholders}) AND rel_type <> 'same_as'
+         ORDER BY created_at DESC LIMIT 400`
+      ).all(...ids);
+      if (rels.length) {
+        const byType = new Map();
+        for (const r of rels) { if (!byType.has(r.rel_type)) byType.set(r.rel_type, []); byType.get(r.rel_type).push(r); }
+        const ev = section("evidence", "Evidence Trail — Records Naming This Organization");
+        for (const [type, rows] of byType) {
+          const label = REL_LABEL[type] ?? type.replace(/_/g, " ");
+          ev.stats.push({ label, value: String(rows.length) });
+          for (const r of rows.slice(0, 12)) {
+            const src = getEntity(r.src_entity_id);
+            const pid = src?.strong_ids?.politician_id ?? null;
+            let note = "";
+            try { const d = JSON.parse(r.data ?? "{}"); note = d.note ?? d.title ?? ""; } catch {}
+            ev.facts.push({
+              text: `${label}: ${src?.canonical_name ?? "record"}${note ? ` — ${String(note).slice(0, 160)}` : ""}`,
+              severity: "INFO", sources: [],
+              politician_id: pid, evidence_id: r.evidence_id ?? null,
+            });
+          }
+        }
+        ev.template_prose = `Records in the analysis ledgers that name ${org.name}. Counts are shown in full; the newest items are listed.`;
+        sections.push(ev);
+      }
+      const events = db.prepare(
+        `SELECT kind, at, data FROM events WHERE ${ids.map(() => "entity_ids LIKE ?").join(" OR ")} ORDER BY coalesce(at,'') DESC LIMIT 60`
+      ).all(...ids.map((i) => `%"${i}"%`));
+      const nonScandal = events.filter((e) => e.kind !== "governance_failure");
+      if (nonScandal.length) {
+        const evs = section("events", "Recorded Events");
+        for (const e of nonScandal.slice(0, 20)) {
+          let d = {}; try { d = JSON.parse(e.data ?? "{}"); } catch {}
+          evs.facts.push(fact(`${e.kind.replace(/_/g, " ")}${e.at ? ` (${String(e.at).slice(0, 10)})` : ""}${d.title ? ` — ${d.title}` : ""}`, "INFO", []));
+        }
+        sections.push(evs);
+      }
+    }
+  } catch { /* ledger sections are best-effort; the card must build without them */ }
+
+  // Structure: parent breadcrumb + children directory.
+  if (children.length) {
+    const ch = section("children", org.kind === "ministry" ? "Departments & Bodies Under This Ministry" : "Subordinate Bodies");
+    ch.orgs = children.map((c) => ({ key: c.key, name: c.name, kind: c.kind }));
+    ch.template_prose = "Each has its own accountability page.";
+    sections.push(ch);
+  }
+
+  return {
+    kind: org.kind, subject_key: key, scope: org.scope, card_version: CARD_VERSION,
+    name: org.name, short: org.short ?? null, sectors: org.sectors ?? [],
+    parent: org.parent ? { key: org.parent, name: getOrg(org.parent)?.name ?? org.parent } : null,
+    score: bucket.accountability_rate, grade: null,
+    headline: `${org.name}: ${bucket.total} documented failure${bucket.total !== 1 ? "s" : ""}${bucket.accountability_rate != null ? ` · ${bucket.accountability_rate}% accountability` : ""}`,
     summary: null, sections,
   };
 }

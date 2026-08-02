@@ -15,9 +15,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { CKAN_PORTALS, ckanPackageSearch, ogdListSearch } from "./fetchers/opendata.js";
-import { sleep } from "./fetchers/http.js";
-import { writeFileAtomic } from "./util/fs-atomic.js";
+import { CKAN_PORTALS, ckanPackageSearch, ogdListSearch } from "../fetchers/opendata.js";
+import { sleep } from "../fetchers/http.js";
+import { writeFileAtomic } from "../util/fs-atomic.js";
 
 const OUT = path.join(process.cwd(), "server", "data", "opendata-catalog.json");
 

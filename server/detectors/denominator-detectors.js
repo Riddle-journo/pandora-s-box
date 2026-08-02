@@ -16,7 +16,7 @@
 // subject ENTITY (actor_id = entity_id → upsertLead stores it, fromLegacy routes it
 // to a non-politician actor). A statistical outlier is a lead to verify, never a
 // finding.
-import { db, upsertLead } from "./store.js";
+import { db, upsertLead } from "../store/store.js";
 
 export const DENOM_DETECTOR_VERSION = "denominator-detector-v1";
 

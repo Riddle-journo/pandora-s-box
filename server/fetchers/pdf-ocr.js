@@ -16,6 +16,8 @@
 //   PDF_OCR_MAX_PAGES=8    cap pages OCR'd per document (default 8)
 
 const langs = () => process.env.PDF_OCR_LANGS || "eng";
+import { noteFetchFailure } from "./observe.js";
+
 const maxPages = () => Number(process.env.PDF_OCR_MAX_PAGES) || 8;
 
 export const ocrEnabled = () => process.env.PDF_OCR === "1";
@@ -47,6 +49,7 @@ async function worker() {
       return await createWorker(want.split("+"));
     } catch (e) {
       console.warn(`[pdf-ocr] tesseract.js unavailable — OCR disabled (${e.message}). Run: npm install tesseract.js`);
+      noteFetchFailure("pdf_ocr", "worker_init", e, { langs: want });
       return null;
     }
   })();
@@ -96,9 +99,15 @@ export async function ocrPdfBuffer(buf, { force = false, maxLen = 20000, pages =
       try {
         const { data: { text } } = await withOcrLock(() => w.recognize(png));
         if (text) out += text + "\n";
-      } catch { /* skip a bad page, keep going */ }
+      } catch (err) {
+        // Keep going, but a dropped page is dropped EVIDENCE, so count it.
+        noteFetchFailure("pdf_ocr", "page_recognize", err, { page: n });
+      }
       if (out.length >= maxLen) break;
     }
-  } catch { return ""; }
+  } catch (err) {
+    noteFetchFailure("pdf_ocr", "render", err, { bytes: buf.length });
+    return "";
+  }
   return out.replace(/\s+/g, " ").trim().slice(0, maxLen);
 }

@@ -15,8 +15,8 @@
 //
 // Keep-all / universal-subject: every disclosure row that carries a counterparty or
 // company yields a record; nothing is filtered to "politician-name matches".
-import { registerExtractor, runExtraction } from "../extract.js";
-import { ensureEntity } from "../entities.js";
+import { registerExtractor, runExtraction } from "./extract.js";
+import { ensureEntity } from "../entities/entities.js";
 
 export const SEBI_DISCLOSURES_VERSION = "sebi-disclosures-v1";
 

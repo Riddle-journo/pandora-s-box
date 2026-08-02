@@ -14,32 +14,32 @@
 // Directorship extraction has its own multi-stage runner (directorships-run-all.js)
 // and is likewise left to its dedicated job.
 import "dotenv/config";
-import { startTimer } from "./util/timing.js";
+import { startTimer } from "../util/timing.js";
 
-import { runAffidavitExtraction } from "./extractors/affidavit.js";
-import { runExpenditureExtraction } from "./extractors/expenditure.js";
-import { runIndianKanoonExtraction } from "./extractors/indian-kanoon.js";
-import { runMpladsExtraction } from "./extractors/mplads.js";
-import { runParliamentExtraction } from "./extractors/parliament.js";
-import { runPartyFinanceExtraction } from "./extractors/party-finance.js";
-import { runWikidataExtraction } from "./extractors/wikidata.js";
-import { runFinancialLinkExtraction, registerDynamicProcurement } from "./extractors/financial-links.js";
+import { runAffidavitExtraction } from "./affidavit.js";
+import { runExpenditureExtraction } from "./expenditure.js";
+import { runIndianKanoonExtraction } from "./indian-kanoon.js";
+import { runMpladsExtraction } from "./mplads.js";
+import { runParliamentExtraction } from "./parliament.js";
+import { runPartyFinanceExtraction } from "./party-finance.js";
+import { runWikidataExtraction } from "./wikidata.js";
+import { runFinancialLinkExtraction, registerDynamicProcurement } from "./financial-links.js";
 // Batch 2 — extractors that close the ledger gap for the bulk L1/mega sources that
 // were fetched-but-never-typed (vigilance/audit/insolvency/property/treasury). Each
 // emits low-confidence, identity-unverified, citation-bearing claims/relationships
 // for EVERY named party (universal subjects — see server/extractors/financial-links.js).
-import { runVigilanceCasesExtraction } from "./extractors/vigilance-cases.js";
-import { runAuditRegulatoryExtraction } from "./extractors/audit-regulatory.js";
-import { runInsolvencyDefaulterExtraction } from "./extractors/insolvency-defaulters.js";
-import { runPropertyLeaseExtraction } from "./extractors/property-leases.js";
-import { runTreasuryExtraction } from "./extractors/treasury-payments.js";
+import { runVigilanceCasesExtraction } from "./vigilance-cases.js";
+import { runAuditRegulatoryExtraction } from "./audit-regulatory.js";
+import { runInsolvencyDefaulterExtraction } from "./insolvency-defaulters.js";
+import { runPropertyLeaseExtraction } from "./property-leases.js";
+import { runTreasuryExtraction } from "./treasury-payments.js";
 // Batch 3 — new content sources: parliamentary standing-committee reports (PRS mirror)
 // and SEBI corporate disclosures (opt-in, relationship-triggered enrichment).
-import { runParliamentCommitteeExtraction } from "./extractors/parliament-committee.js";
-import { runSebiDisclosuresExtraction } from "./extractors/sebi-disclosures.js";
-import { db } from "./store.js";
-import { runLedgerDetectors } from "./ledger-detectors.js";
-import { runDenominatorDetectors } from "./denominator-detectors.js";
+import { runParliamentCommitteeExtraction } from "./parliament-committee.js";
+import { runSebiDisclosuresExtraction } from "./sebi-disclosures.js";
+import { db } from "../store/store.js";
+import { runLedgerDetectors } from "../detectors/ledger-detectors.js";
+import { runDenominatorDetectors } from "../detectors/denominator-detectors.js";
 
 // Pick up any tender/procurement-shaped source_types present in this DB that aren't
 // in the static list (mega corpora differ between installs).

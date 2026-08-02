@@ -13,9 +13,9 @@
 //
 // OFF by default. Enable with env TOFLER_ENRICH=1 (or pass { force:true }), so a
 // normal ingest never hits Tofler unless you opt in.
-import { sleep } from "./fetchers/http.js";
-import { companyTargetsFromLead, companyKey, fetchToflerDirectors } from "./fetchers/tofler.js";
-import { getToflerCompany, upsertToflerCompany, addEvidence } from "./store.js";
+import { sleep } from "../fetchers/http.js";
+import { companyTargetsFromLead, companyKey, fetchToflerDirectors } from "../fetchers/tofler.js";
+import { getToflerCompany, upsertToflerCompany, addEvidence } from "../store/store.js";
 
 const COMPANY_KINDS = new Set(["company", "company_cluster", "tender"]);
 

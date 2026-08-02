@@ -13,9 +13,9 @@
 //   node server/import-ls.js --apply        -- write the missing MPs to DB
 //   node server/import-ls.js --apply --no-myneta  -- skip MyNeta search (fast)
 import "dotenv/config";
-import { batchUpsertPoliticians, listPoliticians } from "./store.js";
-import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
-import { NORM, nameScore } from "./util/names.js";
+import { batchUpsertPoliticians, listPoliticians } from "../store/store.js";
+import { fetchText, fetchJson, mapLimit } from "../fetchers/http.js";
+import { NORM, nameScore } from "../util/names.js";
 
 const LS_API = "https://sansad.in/api_ls";
 const MYNETA = "https://www.myneta.info";

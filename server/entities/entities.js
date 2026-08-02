@@ -7,7 +7,8 @@
 //
 // Uses the shared better-sqlite3 handle from store.js so there is ONE connection
 // and ONE schema init (PANDOROS_DB_PATH honoured).
-import { db, id } from "./store.js";
+import { db, id } from "../store/store.js";
+import { ORGS, getOrg, resolveOrg, resolveOrgExact } from "../data/orgs.js";
 
 // ── normName — the single canonical name normalizer ─────────────────────────
 // Uppercase, strip punctuation, drop leading honorifics, and fold the common
@@ -190,6 +191,53 @@ export function attachStrongIds(entityId, ids = {}) {
   const before = JSON.stringify(ent.strong_ids ?? {});
   mergeStrongIds(ent, ids);
   return JSON.stringify(getEntity(entityId)?.strong_ids ?? {}) !== before;
+}
+
+// ── Government-organization entities ────────────────────────────────────────
+// A catalogue org's reliable identity is its catalogue key (org_key) — the
+// curated server/data/orgs.js entry. Names/aliases drift; the key does not.
+// Kind is always "org" (the org's ministry/psu/regulator kind lives in the
+// catalogue + entity data, not in the entity kind, so alias lookups stay in
+// one namespace).
+export function ensureOrgEntity(orgKey) {
+  const org = getOrg(orgKey);
+  if (!org) return null;
+  const strongIds = { org_key: org.key };
+  const eid = ensureEntity({ kind: "org", name: org.name, strongIds, source: "org_catalogue" });
+  if (org.short) ensureEntity({ kind: "org", name: org.short, strongIds, source: "org_catalogue" });
+  for (const a of org.aliases ?? []) ensureEntity({ kind: "org", name: a, strongIds, source: "org_catalogue" });
+  return eid;
+}
+
+// Resolve free org text ("Karnataka Mines & Geology", "NHAI") to the canonical
+// org entity id via the catalogue matcher; null when no confident match —
+// precision over recall, callers keep their name-only fallback.
+// Strict variant for counterparty names that arrive with a NON-org kind
+// (audit parties, treasury payees, lease holders): only an exact, company-
+// suffix-insensitive identity match resolves. Returns null otherwise, so the
+// caller keeps its normal company/person entity path.
+export function resolveOrgEntityIdExact(freeText) {
+  const org = resolveOrgExact(freeText);
+  return org ? ensureOrgEntity(org.key) : null;
+}
+
+export function resolveOrgEntityId(freeText, opts = {}) {
+  const org = resolveOrg(freeText, opts);
+  if (org) return ensureOrgEntity(org.key);
+  // Exact-alias fallback: spellings registered on catalogue entities (e.g.
+  // "IndianOil") that the token matcher can't score. Only trusts entities that
+  // carry an org_key — never a name-keyed orphan.
+  const byAlias = findEntityByAlias("org", freeText);
+  return byAlias?.strong_ids?.org_key ? byAlias.id : null;
+}
+
+// Idempotent catalogue → entities sync. NOT called at import time (top-level
+// DB side effects in the import graph risk the known ESM/TLA deadlock) — call
+// from server startup, the ops console, or scripts.
+export function syncOrgEntities() {
+  let n = 0;
+  for (const org of ORGS) { if (ensureOrgEntity(org.key)) n++; }
+  return { synced: n, total: ORGS.length };
 }
 
 function strongIdsFrom(a) {

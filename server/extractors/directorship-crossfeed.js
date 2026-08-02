@@ -15,9 +15,9 @@
 // (cache), matchDirectorsToPoliticians (Phase-4: writes director_of edges + leads for
 // self AND relatives). The board fetch is INJECTABLE (fetchBoard) so tests stay offline.
 // Network use is opt-in by the caller (this is an on-demand step, like the Tofler path).
-import { db, upsertToflerCompany } from "../store.js";
+import { db, upsertToflerCompany } from "../store/store.js";
 import { fetchToflerDirectors, companyKey } from "../fetchers/tofler.js";
-import { matchDirectorsToPoliticians } from "../director-link.js";
+import { matchDirectorsToPoliticians } from "../enrichment/director-link.js";
 
 const DIRECTORSHIP_REL_TYPES = [
   "director_of", "promoter_of", "beneficial_owner_of", "partner_of",

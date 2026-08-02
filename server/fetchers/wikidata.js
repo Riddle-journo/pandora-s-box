@@ -5,6 +5,7 @@
 // politician's relatives by name, so dynasty / family-network patterns become
 // computable instead of inferred.
 import { fetchJson , TIMEOUT_DEFAULT } from "./http.js";
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 const API = "https://www.wikidata.org/w/api.php";
 
@@ -56,7 +57,8 @@ function looksPolitical(ent) {
 export async function fetchWikidata(p) {
   if (!p?.name || process.env.WIKIDATA_DISABLE === "1") return [];
   let hits;
-  try { hits = await searchEntity(p.name); } catch { return []; }
+  try { hits = await searchEntity(p.name); }
+  catch (err) { noteFetchFailure("wikidata", "search", err, { politician_id: p.id, name: p.name }); return []; }
   hits = hits.filter((h) => labelMatches(h.label ?? h.display?.label?.value ?? "", p.name));
   if (!hits.length) return [];
 
@@ -64,7 +66,8 @@ export async function fetchWikidata(p) {
   // hits[0] — the political-claims check below is the real gate either way.
   const cand = hits.find((h) => /politic|\bMP\b|MLA|minister|member of|lok sabha|rajya sabha/i.test(h.description ?? "")) ?? hits[0];
   let entities;
-  try { entities = await getEntities([cand.id]); } catch { return []; }
+  try { entities = await getEntities([cand.id]); }
+  catch (err) { noteFetchFailure("wikidata", "get_entity", err, { politician_id: p.id, qid: cand.id }); return []; }
   const ent = entities[cand.id];
   if (!ent || !looksPolitical(ent)) return [];
 
@@ -82,8 +85,14 @@ export async function fetchWikidata(p) {
   // good fetch downstream. No data beats degraded data.
   let related = {};
   if (relatedIds.size) {
-    try { related = await getEntities([...relatedIds].slice(0, 50)); } catch { return []; }
-    if (!Object.keys(related).length) return [];
+    try { related = await getEntities([...relatedIds].slice(0, 50)); }
+    catch (err) { noteFetchFailure("wikidata", "get_relatives", err, { politician_id: p.id, qid: cand.id, wanted: relatedIds.size }); return []; }
+    // Bailing out here is correct (no data beats degraded data) but it is a
+    // DROP of known-present relatives, so it has to be recorded as one.
+    if (!Object.keys(related).length) {
+      noteParseMiss("wikidata", "get_relatives", { url: API, expected: `${relatedIds.size} relative label(s)` });
+      return [];
+    }
   }
   const nameOf = (id) => labelOf(related[id]) ?? id;
 

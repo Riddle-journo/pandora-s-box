@@ -12,10 +12,10 @@
 // After importing, run:
 //   node server/report-generator.js all --tier 2 --office RS
 import "dotenv/config";
-import { batchUpsertPoliticians, listPoliticians } from "./store.js";
-import { fetchText, fetchJson, mapLimit } from "./fetchers/http.js";
-import { NORM, nameScore } from "./util/names.js";
-import { consoleStyle } from "./util/log.js";
+import { batchUpsertPoliticians, listPoliticians } from "../store/store.js";
+import { fetchText, fetchJson, mapLimit } from "../fetchers/http.js";
+import { NORM, nameScore } from "../util/names.js";
+import { consoleStyle } from "../util/log.js";
 const clog = consoleStyle("import-rs");
 
 const RS_API   = "https://sansad.in/api_rs";

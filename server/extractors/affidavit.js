@@ -16,7 +16,7 @@
 // "Rs 3,09,16,833 ~ 3 Crore+" format correctly (it cuts the "~ N Crore+" approximation
 // before parsing). We keep our own parseAffidavitRupees() here because it adds
 // affidavit-specific semantics parseRupees() does not: "Nil"/"None"/"N/A" → 0.
-import { registerExtractor, runExtraction, runPoliticianExtraction } from "../extract.js";
+import { registerExtractor, runExtraction, runPoliticianExtraction } from "./extract.js";
 
 export const AFFIDAVIT_ROW_VERSION = "affidavit-row-v1";
 export const ECI_AFFIDAVIT_VERSION = "eci-affidavit-v1";

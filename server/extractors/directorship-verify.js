@@ -19,9 +19,9 @@
 // Identity caveat carried through: a directorship mention is a lead; the registry
 // check confirms the COMPANY exists and its status, not that this politician is truly
 // its director — the confidence from Phase 2 rides along on the edge for weighting.
-import { listPoliticians, listEvidence, addEvidence } from "../store.js";
-import { resolveEntityIdForPolitician, getEntity, ensureCompanyEntity } from "../entities.js";
-import { relationsOf } from "../relations.js";
+import { listPoliticians, listEvidence, addEvidence } from "../store/store.js";
+import { resolveEntityIdForPolitician, getEntity, ensureCompanyEntity } from "../entities/entities.js";
+import { relationsOf } from "../entities/relations.js";
 import { verifyCompanyName } from "../fetchers/company-registry.js";
 
 // The rel_types Phase 2 writes for a person→company directorship link.

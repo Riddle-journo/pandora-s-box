@@ -3,8 +3,8 @@
 // parties and findings are invented — deliberately, so the repository never
 // ships claims about a real person that haven't gone through the evidence
 // pipeline. Real Indian states are used so the home-page filters feel real.
-import { upsertPolitician, addEvidence, addReport, listPoliticians } from "./store.js";
-import { computeOverall } from "./report-generator.js";
+import { upsertPolitician, addEvidence, addReport, listPoliticians } from "../store/store.js";
+import { computeOverall } from "../publishing/report-generator.js";
 
 if (listPoliticians().length > 0) {
   console.log("Store already has politicians — skipping seed. Delete data/db.json to reseed.");

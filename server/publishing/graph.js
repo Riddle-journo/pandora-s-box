@@ -5,9 +5,9 @@
 // politician? do they appear in a documented scandal?). This catches political
 // dynasties and family-network overlaps deterministically, in code — no LLM
 // guessing, every edge traceable to a source.
-import { listPoliticians, listScandals } from "./store.js";
-import { findEntityByStrongId, getEntity } from "./entities.js";
-import { relationsOf } from "./relations.js";
+import { listPoliticians, listScandals } from "../store/store.js";
+import { findEntityByStrongId, getEntity } from "../entities/entities.js";
+import { relationsOf } from "../entities/relations.js";
 
 const HON = new Set(["dr", "shri", "smt", "kumari", "ms", "mr", "mrs", "prof", "adv", "shrimati", "sardar", "km"]);
 const toks = (s) => (s ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((t) => t.length >= 3 && !HON.has(t));

@@ -27,7 +27,7 @@
 // where each "• " line is one matched row, cells joined by " | ". For the body-text
 // sources (cag-bihar/odisha, the mega *-body / *-orders caches) a long cell is a
 // ~360-char window around the matched name — report/order prose, not the preamble.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 import { parseMatchCount, parseAnyDate } from "./financial-links.js";
 
 export const AUDIT_REGULATORY_VERSION = "audit-regulatory-v1";

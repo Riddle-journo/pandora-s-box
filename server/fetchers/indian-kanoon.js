@@ -18,6 +18,7 @@
 
 import { fetchText, fetchJsonEx, htmlToText, mapLimit, sleep , TIMEOUT_SLOW } from "./http.js";
 import { logger } from "../util/log.js";
+import { noteFetchFailure } from "./observe.js";
 
 const log = logger("indian-kanoon");
 
@@ -75,8 +76,8 @@ async function fetchViaWeb(p) {
   const searchUrl = `${IK_WEB}?formInput=${encodeURIComponent(`"${p.name}" doctypes:judgments`)}`;
   let html;
   try {
-    html = await fetchText(searchUrl, { timeoutMs: TIMEOUT_SLOW });
-  } catch { return []; }
+    html = await fetchText(searchUrl, { timeoutMs: TIMEOUT_SLOW, source: "indian_kanoon" });
+  } catch (err) { noteFetchFailure("indian_kanoon", "web_search", err, { url: searchUrl, politician_id: p.id }); return []; }
 
   // Real results live in <div class="result_title"><a href="/docfragment/NUM/…">
   // Title</a></div>, followed by a snippet block. (The old parser matched bare
@@ -140,7 +141,10 @@ async function enrichWithFullText(lines, targets, fetchOne) {
   try {
     const bodies = await fetchBodies(targets, limit, fetchOne);
     return mergeFullText(lines, bodies, { limit });
-  } catch {
+  } catch (err) {
+    // Snippet-only output is a legitimate degradation, but it is a LOSS of
+    // judgment prose the extractor needs — so say so.
+    noteFetchFailure("indian_kanoon", "fulltext_enrich", err, { targets: targets.length, limit });
     return lines;
   }
 }
@@ -153,7 +157,8 @@ async function fetchBodies(targets, limit, fetchOne) {
   if (!pick.length) return [];
   return mapLimit(pick, 3, async (t, i) => {
     if (i > 0) await sleep(700); // polite spacing between fetches
-    try { return await fetchOne(t); } catch { return ""; }
+    try { return await fetchOne(t); }
+    catch (err) { noteFetchFailure("indian_kanoon", "judgment_body", err, { tid: t?.tid ?? t?.href ?? null }); return ""; }
   });
 }
 

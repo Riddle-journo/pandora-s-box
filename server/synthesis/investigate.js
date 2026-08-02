@@ -19,9 +19,9 @@
 //   node server/investigate.js --top 20           cap the L2/L3 spend (default 50)
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
-import { listPoliticians, getPolitician, listEvidence, listLeads, upsertLead, listScandals } from "./store.js";
-import { detectConflicts } from "./conflict.js";
-import { mapLimit } from "./fetchers/http.js";
+import { listPoliticians, getPolitician, listEvidence, listLeads, upsertLead, listScandals } from "../store/store.js";
+import { detectConflicts } from "../detectors/conflict.js";
+import { mapLimit } from "../fetchers/http.js";
 
 function parseArgs(argv) {
   const flags = {};
@@ -90,7 +90,7 @@ async function main() {
   // enriches company-bearing big flags (Tofler + director-link, both free and
   // evidence-recording), and synthesises leads with citations.
   try {
-    const { runEngine } = await import("./engine.js");
+    const { runEngine } = await import("../detectors/engine.js");
     const r = await runEngine({ politicianId: flags.id ? reps[0].id : null });
     const totals = Object.values(r.detectors).reduce(
       (a, d) => ({ big: a.big + (d.big ?? 0), small: a.small + (d.small ?? 0) }), { big: 0, small: 0 });
@@ -115,7 +115,7 @@ async function main() {
   // ── L5: story drafts for journalist handoff (GLM) ──
   if (flags.stories) {
     try {
-      const { assembleIncidents, generateStory } = await import("./story-generator.js");
+      const { assembleIncidents, generateStory } = await import("../publishing/story-generator.js");
       const incidents = assembleIncidents({ leads: listLeads({}), scandals: listScandals() });
       console.log(`[investigate] drafting ${incidents.length} story incident(s)…`);
       let ok = 0, fail = 0;

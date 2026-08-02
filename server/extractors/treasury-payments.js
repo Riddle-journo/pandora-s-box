@@ -16,7 +16,7 @@
 //
 // Unlike the once-per-evidence summary in financial-links.js, treasury evidence is
 // a small set of near-independent payment rows, so we emit ONE record set PER ROW.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 import { parseAnyDate } from "./financial-links.js";
 
 export const TREASURY_VERSION = "treasury-payments-v1";

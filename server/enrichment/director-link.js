@@ -15,10 +15,10 @@
 // rather than guessed. DIN, being a hard id, overrides name noise.
 //
 // Pure-ish & code-only (no network, no LLM). Reads the store, upserts leads.
-import { listPoliticians, listToflerCompanies, upsertLead, db } from "./store.js";
-import { entitiesLinkedBy, upsertRelationship } from "./relations.js";
-import { getEntity, ensureEntity, ensureCompanyEntity } from "./entities.js";
-import { sameName, candidateTokens } from "./graph.js";
+import { listPoliticians, listToflerCompanies, upsertLead, db } from "../store/store.js";
+import { entitiesLinkedBy, upsertRelationship } from "../entities/relations.js";
+import { getEntity, ensureEntity, ensureCompanyEntity } from "../entities/entities.js";
+import { sameName, candidateTokens } from "../publishing/graph.js";
 
 export const DETECTOR_VERSION = "director-link-v1";
 

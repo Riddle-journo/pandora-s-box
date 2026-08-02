@@ -10,6 +10,7 @@
 // thousands of reps is far too slow. Use this on-demand for a specific portal
 // page, or in a targeted enrichment pass. Example at the bottom.
 import { htmlToText } from "./http.js";
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 let browserPromise = null;
 let pwWarned = false;
@@ -20,8 +21,9 @@ export async function getBrowser() {
     let chromium;
     try {
       ({ chromium } = await import("playwright"));
-    } catch {
+    } catch (err) {
       if (!pwWarned) { console.warn("[fetchers] playwright not installed — JS-portal fetcher disabled. Run: npm install playwright && npx playwright install chromium"); pwWarned = true; }
+      noteFetchFailure("playwright_portal", "browser_launch", err, {});
       return null;
     }
     return chromium.launch({ headless: true });
@@ -33,15 +35,22 @@ export async function getBrowser() {
 // (e.g. a results table) before extracting.
 export async function renderPageText(url, { waitForSelector = null, timeoutMs = 30000, maxLen = 3000 } = {}) {
   const browser = await getBrowser();
-  if (!browser) return "";
+  // No browser means every JS-rendered portal silently yields "" for the whole
+  // run — a class of source disappearing, not a set of empty pages.
+  if (!browser) { noteFetchFailure("playwright_portal", "no_browser", "playwright unavailable", { url }); return ""; }
   let page;
   try {
     page = await browser.newPage({ userAgent: "Mozilla/5.0 (PandorosBox research)" });
     await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
     if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: timeoutMs }).catch(() => {});
     const html = await page.content();
-    return htmlToText(html, maxLen);
-  } catch { return ""; }
+    const text = htmlToText(html, maxLen);
+    if (!text) noteParseMiss("playwright_portal", "render", { url, bytes: html.length, expected: "characters" });
+    return text;
+  } catch (err) {
+    noteFetchFailure("playwright_portal", "render", err, { url, waitForSelector });
+    return "";
+  }
   finally { if (page) await page.close().catch(() => {}); }
 }
 

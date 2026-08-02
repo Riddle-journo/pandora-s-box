@@ -12,7 +12,7 @@
 //
 // as_of_date = the snapshot date (MPLADS is a running term total; a later re-fetch
 // yields a new dated snapshot, giving a utilisation time series for free).
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const MPLADS_VERSION = "mplads-v1";
 

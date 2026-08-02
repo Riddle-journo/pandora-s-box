@@ -7,7 +7,7 @@
 //
 // election_expenditure pairs with declared_assets for the cross-check that matters:
 // a candidate whose declared campaign spend is implausible against their wealth.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const EXPENDITURE_VERSION = "eci-expenditure-v1";
 

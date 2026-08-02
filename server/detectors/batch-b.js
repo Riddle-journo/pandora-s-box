@@ -3,10 +3,10 @@
 // engine.js splices these back into the DETECTORS array via  ...DETECTORS_B,  at
 // the same position, so element order is unchanged. Bodies are byte-for-byte
 // identical to their former engine.js form.
-import { db } from "../store.js";
-import { mahalanobisOutliers, changePoint } from "../engine-multivariate.js";
-import { cpppBidderStats } from "../cppp-detectors.js";
-import { normName as cpppNorm } from "../cppp-index.js";
+import { db } from "../store/store.js";
+import { mahalanobisOutliers, changePoint } from "./engine-multivariate.js";
+import { cpppBidderStats } from "./cppp-detectors.js";
+import { normName as cpppNorm } from "../store/cppp-index.js";
 import { jurisdictionsGovernedBy, canonParty } from "../data/governance-map.js";
 import {
   CR, evidenceRef, propKey, gatherNexusLegs, chainDepth, fmtVal,

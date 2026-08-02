@@ -9,7 +9,8 @@
 
 import { parseRupees } from "../util/numbers.js";
 import { textToSector } from "../data/sectors.js";
-import { recordAssertion } from "../entities.js";
+import { recordAssertion } from "../entities/entities.js";
+import { noteFetchFailure, noteParseMiss } from "../fetchers/observe.js";
 
 const UA = { "User-Agent": "Mozilla/5.0 (PandorosBox public-accountability research)" };
 
@@ -156,9 +157,15 @@ export async function fetchMyNetaProfile(p) {
   let html;
   try {
     const res = await fetch(p.myneta_url, { headers: UA, signal: AbortSignal.timeout(20000) });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      noteFetchFailure("myneta", "fetch", `HTTP ${res.status}`, { url: p.myneta_url, politician_id: p.id });
+      return [];
+    }
     html = await res.text();
-  } catch { return []; }
+  } catch (err) {
+    noteFetchFailure("myneta", "fetch", err, { url: p.myneta_url, politician_id: p.id });
+    return [];
+  }
 
   const lines = [];
 
@@ -212,7 +219,13 @@ export async function fetchMyNetaProfile(p) {
   const pan = fieldAfter(html, "PAN and status of Income Tax return", ["Movable Assets", "Immovable", "Liabilities Details"], 300);
   if (pan) lines.push(`INCOME-TAX RETURN HISTORY: ${pan.replace(/^Relation Type PAN Given.*?ITR\s*/i, "")}.`);
 
-  if (!lines.length) return [];
+  // The affidavit page downloaded fine but every regex/table selector missed.
+  // On a page this structurally stable that means MyNeta changed its markup, not
+  // that a candidate filed a blank affidavit — record it, don't return silence.
+  if (!lines.length) {
+    noteParseMiss("myneta", "affidavit_parse", { url: p.myneta_url, bytes: html.length, expected: "affidavit fields" });
+    return [];
+  }
 
   // Entity layer (additive — return value unchanged): the myneta_url is a strong
   // binding to this politician's ECI record, so record it as an auto-accepted
@@ -223,7 +236,12 @@ export async function fetchMyNetaProfile(p) {
       source_ref: p.myneta_url, politician_id: p.id, confidence: 0.9,
       method: "strong_id", evidence_url: p.myneta_url,
     });
-  } catch { /* additive only */ }
+  } catch (err) {
+    // Additive only — the evidence row still ships. But a failing assertion write
+    // means the entity layer is losing identity bindings, which is exactly the
+    // kind of rot that must not be invisible.
+    noteFetchFailure("myneta", "assertion", err, { politician_id: p.id });
+  }
 
   // Structured numbers for the deterministic computed-flags layer (analyzer.js).
   // These are parsed ONCE, in code, so downstream arithmetic never relies on the

@@ -6,21 +6,21 @@
 // "/api/admin/ops/..." paths and their original relative registration order.
 // ════════════════════════════════════════════════════════════════════════════
 import express from "express";
-import { requireAdmin } from "../auth.js";
+import { requireAdmin } from "../platform/auth.js";
 import {
   statsSummary, evidenceCoverage, politiciansMissing, jobCounts, evidenceCounts,
   listPoliticiansWithLatest, listPoliticiansWithCard,
   sourceHealth, listJobs, getJob, enqueueJob,
   cancelJob, updateJob, requeueJob, trimJobs, reclaimRunningJobs, isQueuePaused, setQueuePaused,
   listLeads, getLead, upsertLead, recordLeadFeedback, detectorPrecision,
-} from "../store.js";
-import { tail as opsLogTail } from "../ops-log.js";
+} from "../store/store.js";
+import { tail as opsLogTail } from "../ops/ops-log.js";
 import { llmUsageSummary } from "../store/llm-usage.js";
-import { engineStatus, detectorById, runEngine } from "../engine.js";
-import { listFlags, flagCounts, getFlag } from "../flags.js";
-import { setSetting, coerceValue } from "../engine-settings.js";
-import { WORKER_TUNABLES, workerStatus } from "../worker.js";
-import { decideLeadShared , pageParams } from "./util.js";
+import { engineStatus, detectorById, runEngine } from "../detectors/engine.js";
+import { listFlags, flagCounts, getFlag } from "../detectors/flags.js";
+import { setSetting, coerceValue } from "../detectors/engine-settings.js";
+import { WORKER_TUNABLES, workerStatus } from "../orchestration/worker.js";
+import { decideLeadShared, pageParams, vParam } from "./util.js";
 
 const asyncH = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const router = express.Router();
@@ -31,7 +31,7 @@ const OPS_JOB_TYPES = new Set([
   "generate_card", "cards_all",
   // Ingest / maintenance
   "ingest_all", "ingest_politician", "source_health", "roster_update",
-  "mega_refresh", "repair_myneta", "cppp_ingest", "reset_data",
+  "mega_refresh", "repair_myneta", "cppp_ingest", "reset_data", "sync_org_entities",
   // Analysis store (free extraction + detectors; prose uses the FREE chain only)
   "extract_all", "extract_prose",
   // Investigator (admin-only output; GLM budget)
@@ -59,7 +59,7 @@ router.get("/api/admin/ops/health", requireAdmin, asyncH(async (req, res) => {
   const days = Math.max(1, Math.min(365, Number(req.query.days) || 14));
   const rows = sourceHealth(days);
   try {
-    const [{ classifyHealth }, { FETCHER_NAMES }] = await Promise.all([import("../health.js"), import("../ingest.js")]);
+    const [{ classifyHealth }, { FETCHER_NAMES }] = await Promise.all([import("../platform/health.js"), import("../orchestration/ingest.js")]);
     res.json({ days, ...classifyHealth(rows, FETCHER_NAMES) });
   } catch (err) {
     res.json({ days, rows, rotted: [], stale: [], warn: err.message });
@@ -72,7 +72,7 @@ router.get("/api/admin/ops/health", requireAdmin, asyncH(async (req, res) => {
 router.get("/api/admin/ops/maintenance", requireAdmin, asyncH(async (req, res) => {
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
   try {
-    const { maintenanceHistory } = await import("../db-maintenance.js");
+    const { maintenanceHistory } = await import("../platform/db-maintenance.js");
     res.json(maintenanceHistory({ limit }));
   } catch (err) {
     res.json({ latest: null, runs: [], tiers: ["nightly", "weekly", "monthly"], warn: err.message });
@@ -129,14 +129,14 @@ router.get("/api/admin/ops/jobs", requireAdmin, (req, res) => {
 });
 
 // One job + its captured live log (poll with ?since=<lastSeq>).
-router.get("/api/admin/ops/jobs/:id", requireAdmin, (req, res) => {
+router.get("/api/admin/ops/jobs/:id", requireAdmin, vParam("id", "id"), (req, res) => {
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ error: "not found" });
   res.json({ job, log: opsLogTail(req.params.id, Number(req.query.since) || 0) });
 });
 
 // Live log only (lighter poll for the log drawer).
-router.get("/api/admin/ops/logs/:id", requireAdmin, (req, res) => {
+router.get("/api/admin/ops/logs/:id", requireAdmin, vParam("id", "id"), (req, res) => {
   res.json(opsLogTail(req.params.id, Number(req.query.since) || 0));
 });
 
@@ -213,7 +213,11 @@ router.get("/api/admin/ops/flags", requireAdmin, (req, res) => {
   res.json({ total, page, pageSize, counts: flagCounts(), rows });
 });
 
-router.get("/api/admin/ops/flags/:id", requireAdmin, (req, res) => {
+// :id here is a flag uuid OR its engine key ("<detector>|<subject>|<fingerprint>",
+// see flags.js getFlag) — hence the permissive "ref" kind. The narrow "id" kind
+// rejected all 7,274 live flag keys. Keys containing "/" have to be sent
+// percent-encoded (%2F) so the single-segment param still matches.
+router.get("/api/admin/ops/flags/:id", requireAdmin, vParam("id", "ref"), (req, res) => {
   const flag = getFlag(req.params.id);
   if (!flag) return res.status(404).json({ error: "not found" });
   res.json(flag);
@@ -241,7 +245,9 @@ router.get("/api/admin/ops/leads", requireAdmin, (req, res) => {
 // Lead actions from the console. approve/reject mirror the #/admin gate (and
 // keep its status rules); investigate enqueues a single-lead GLM job; dismiss
 // parks a detected lead without deleting its history.
-router.post("/api/admin/ops/leads/:id/action", requireAdmin, (req, res) => {
+// :id is a lead uuid OR its engine key (getLead is "id = ? OR key = ?"), so the
+// same permissive kind as the flags route above.
+router.post("/api/admin/ops/leads/:id/action", requireAdmin, vParam("id", "ref"), (req, res) => {
   const { action } = req.body ?? {};
   const lead = getLead(req.params.id);
   if (!lead) return res.status(404).json({ error: "no such lead" });
@@ -339,14 +345,14 @@ router.post("/api/admin/ops/jobs/batch", requireAdmin, (req, res) => {
 });
 
 // Cancel a single QUEUED job (running jobs can't be yanked from a serial worker).
-router.post("/api/admin/ops/jobs/:id/cancel", requireAdmin, (req, res) => {
+router.post("/api/admin/ops/jobs/:id/cancel", requireAdmin, vParam("id", "id"), (req, res) => {
   const r = cancelJob(req.params.id);
   res.status(r.ok ? 200 : 409).json(r);
 });
 
 // Re-run a done/dead/failed job (fresh attempt, due now). Danger types must be
 // re-enqueued from their own card so the confirm phrase is re-typed.
-router.post("/api/admin/ops/jobs/:id/requeue", requireAdmin, (req, res) => {
+router.post("/api/admin/ops/jobs/:id/requeue", requireAdmin, vParam("id", "id"), (req, res) => {
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "not found" });
   if (OPS_DANGER[job.type]) return res.status(400).json({ ok: false, error: `re-run ${job.type} from its danger card (needs confirm)` });
@@ -356,7 +362,7 @@ router.post("/api/admin/ops/jobs/:id/requeue", requireAdmin, (req, res) => {
 
 // Edit a QUEUED job — priority / run_at / payload. Editing a danger job's payload
 // could smuggle past the confirm gate, so that's refused.
-router.patch("/api/admin/ops/jobs/:id", requireAdmin, (req, res) => {
+router.patch("/api/admin/ops/jobs/:id", requireAdmin, vParam("id", "id"), (req, res) => {
   const { priority, payload, runAt } = req.body ?? {};
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: "not found" });

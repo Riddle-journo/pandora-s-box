@@ -12,7 +12,7 @@
 // and keep entries whose pricing.prompt/completion are "0" and id ends ":free".
 import "dotenv/config";
 import { makeClient, parseModelJson } from "./llm.js";
-import { acquire, penalize } from "./util/host-limiter.js";
+import { acquire, penalize } from "../util/host-limiter.js";
 
 // Cross-job pacing: parallel card jobs each calling the free chain would burst
 // the free-tier providers into 429s. One shared slot per second smooths that

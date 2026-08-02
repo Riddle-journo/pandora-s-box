@@ -8,11 +8,11 @@
 //
 // Pure & code-only (no network, no model). buildRelations returns early without
 // touching the store when a rep has no relatives, so this stays testable.
-import { textToSector, ministryToSector } from "./data/sectors.js";
-import { fundingForParty } from "./data/electoral-bonds.js";
-import { buildRelations } from "./graph.js";
-import { findEntityByStrongId } from "./entities.js";
-import { relationsOf } from "./relations.js";
+import { textToSector, ministryToSector } from "../data/sectors.js";
+import { fundingForParty } from "../data/electoral-bonds.js";
+import { buildRelations } from "../publishing/graph.js";
+import { findEntityByStrongId } from "../entities/entities.js";
+import { relationsOf } from "../entities/relations.js";
 
 // Detector identity — bump when any threshold/weight/vector changes.
 export const DETECTOR_VERSION = "conflict-v1";

@@ -12,10 +12,10 @@
 // a source, and any sentence whose [n] doesn't resolve to the numbered registry
 // is stripped — never guessed.
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "../synthesis/llm.js";
 import {
   listLeads, listScandals, listEvidence, getPolitician, findPolitician, upsertStory,
-} from "./store.js";
+} from "../store/store.js";
 import { citationsFor, buildRegistry } from "./citations.js";
 
 

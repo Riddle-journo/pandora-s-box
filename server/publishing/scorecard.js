@@ -8,7 +8,7 @@
 // formula on the same corpus. The numbers are only as balanced as the corpus —
 // which is why scandal-seeds.js is deliberately balanced across parties/eras.
 
-import { listScandals } from "./store.js";
+import { listScandals } from "../store/store.js";
 
 // FULL accountability = 1.0, PARTIAL = 0.5, NONE = 0.0 → averaged to 0–100.
 const VERDICT_WEIGHT = { FULL: 1, PARTIAL: 0.5, NONE: 0 };

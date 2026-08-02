@@ -4,15 +4,15 @@
 // these back into the DETECTORS array via  ...DETECTORS_A,  at the same position,
 // so element order is unchanged. Bodies are byte-for-byte identical to their
 // former engine.js form.
-import { db } from "../store.js";
-import { detectConflicts, CONFLICT_DEFAULTS } from "../conflict.js";
+import { db } from "../store/store.js";
+import { detectConflicts, CONFLICT_DEFAULTS } from "./conflict.js";
 import {
   detectAssetGrowthOutliers, detectUtilizationExtremes, detectTimingCorrelation, ANOMALY_DEFAULTS,
-} from "../anomaly.js";
+} from "./anomaly.js";
 import {
   detectIncomeGrowthOutliers, detectSpendVsIncome, detectMultiSourceAdverse, LEDGER_DEFAULTS,
-} from "../ledger-detectors.js";
-import { detectCollusion } from "../collusion.js";
+} from "./ledger-detectors.js";
+import { detectCollusion } from "./collusion.js";
 import {
   CR, L, meanStd, benfordStats, evidenceRef, legacyOverrides, fromLegacy,
   BASE_TUNABLES, T, legacyTunables,

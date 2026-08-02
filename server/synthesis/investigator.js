@@ -20,14 +20,14 @@
 // adversarial passes are what make surfacing an unproven claim defensible.
 import "dotenv/config";
 import { AI_BASE, MODEL, AI_KEY, makeClient, callWithRetry } from "./llm.js";
-import { db, listEvidence, upsertLead, addEvidence } from "./store.js";
-import { searchDeals } from "./fetchers/nse-deals.js";
-import { lookupDirectorCompaniesByName as lookupDirectorCompanies } from "./store.js";
-import { searchOfficers } from "./fetchers/opencorporates.js";
-import { fetchIndianKanoon } from "./fetchers/indian-kanoon.js";
-import { fetchCompanyRegistry } from "./fetchers/company-registry.js";
-import { resolveSettings } from "./engine-settings.js";
-import { ENGINE_GROUPS } from "./engine-groups.js";
+import { db, listEvidence, upsertLead, addEvidence } from "../store/store.js";
+import { searchDeals } from "../fetchers/nse-deals.js";
+import { lookupDirectorCompaniesByName as lookupDirectorCompanies } from "../store/store.js";
+import { searchOfficers } from "../fetchers/opencorporates.js";
+import { fetchIndianKanoon } from "../fetchers/indian-kanoon.js";
+import { fetchCompanyRegistry } from "../fetchers/company-registry.js";
+import { resolveSettings } from "../detectors/engine-settings.js";
+import { ENGINE_GROUPS } from "../detectors/engine-groups.js";
 
 // ---- Budgets — DB-tunable from the ops console (engine.investigator.*), with
 // the historical constants as defaults so behaviour is unchanged out of the box.
@@ -185,8 +185,8 @@ export const TOOLS = {
     describe: "expand this person's relationship graph — directorships, family, ownership, donations the ledger records (follow the network from the subject)",
     run: async ({ actor_id }) => {
       try {
-        const { findEntityByStrongId } = await import("./entities.js");
-        const { relationsOf } = await import("./relations.js");
+        const { findEntityByStrongId } = await import("../entities/entities.js");
+        const { relationsOf } = await import("../entities/relations.js");
         const ent = findEntityByStrongId("person", { politician_id: actor_id });
         if (!ent) return { found: 0, summary: "No resolved entity for this subject yet." };
         const rels = relationsOf(ent.id, {});
@@ -259,8 +259,8 @@ async function recordDiscoveredRelations(lead, verdictObj) {
   const rels = Array.isArray(verdictObj?.discovered_relations) ? verdictObj.discovered_relations : [];
   if (!rels.length) return 0;
   try {
-    const { ensureEntity, findEntityByStrongId } = await import("./entities.js");
-    const { upsertRelationship } = await import("./relations.js");
+    const { ensureEntity, findEntityByStrongId } = await import("../entities/entities.js");
+    const { upsertRelationship } = await import("../entities/relations.js");
     const self = findEntityByStrongId("person", { politician_id: lead.actor_id });
     if (!self) return 0;
     let n = 0;
@@ -474,7 +474,7 @@ Give the innocent explanation and judge whether it is fully explainable.`;
   // lead's detector — proposed vs dismissed feeds the precision report alongside
   // the human decisions. Best-effort; never breaks the verdict.
   try {
-    const { recordLeadFeedback } = await import("./store.js");
+    const { recordLeadFeedback } = await import("../store/store.js");
     recordLeadFeedback(lead, verdict === "COINCIDENCE" ? "glm_dismissed" : "glm_proposed", { source: "glm" });
   } catch { /* logging must never break the loop */ }
 

@@ -13,9 +13,9 @@
 //   node server/cppp-ingest.js --force             # re-query even reps already done
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
-import { listPoliticians, addEvidence, listEvidence, recordFetchRun } from "./store.js";
-import { fetchCPPPProcurement } from "./fetchers/cppp-procurement.js";
-import { startTimer } from "./util/timing.js";
+import { listPoliticians, addEvidence, listEvidence, recordFetchRun } from "../store/store.js";
+import { fetchCPPPProcurement } from "../fetchers/cppp-procurement.js";
+import { startTimer } from "../util/timing.js";
 
 // A rep is "done" if it already carries a CPPP-sourced gem row (the fetcher tags
 // source_type 'gem' and the content names the CPPP corpus).

@@ -13,10 +13,10 @@
 //   node server/repair-myneta.js --only-suspect  # only check non-CamelCase slugs (fast)
 //   node server/repair-myneta.js --apply         # write fixes to the DB
 import "dotenv/config";
-import { listPoliticians, upsertPolitician } from "./store.js";
-import { fetchText, mapLimit } from "./fetchers/http.js";
-import { fetchMyNetaProfile } from "./sources/myneta-full.js";
-import { NORM, nameScore } from "./util/names.js";
+import { listPoliticians, upsertPolitician } from "../store/store.js";
+import { fetchText, mapLimit } from "../fetchers/http.js";
+import { fetchMyNetaProfile } from "../sources/myneta-full.js";
+import { NORM, nameScore } from "../util/names.js";
 
 const SEARCH = "https://www.myneta.info/search_myneta.php?q=";
 const args = process.argv.slice(2);

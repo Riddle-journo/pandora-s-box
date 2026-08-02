@@ -6,6 +6,7 @@
 // MP-only. Free, no key. The official mplads.mospi.gov.in portal is login-walled
 // for per-MP data, so this mirror is the only free programmatic path.
 import { fetchJson , TIMEOUT_SLOW } from "./http.js";
+import { noteParseMiss, noteTruncation } from "./observe.js";
 
 const API = "https://api.empoweredindian.in/api";
 
@@ -13,12 +14,22 @@ const HONORIFICS = new Set(["dr", "shri", "smt", "kumari", "ms", "mr", "mrs", "p
 const toks = (s) => (s ?? "").toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^a-z\s]/g, " ")
   .split(/\s+/).filter((t) => t.length >= 3 && !HONORIFICS.has(t));
 
+// Fixed request caps, named so the truncation checks compare against the same
+// numbers the URLs ask for.
+const DIR_LIMIT = 900;
+const WORKS_LIMIT = 100;
+
 // Cached MP directory (one call), matched by name tokens + constituency.
 let dirPromise = null;
 async function directory() {
   if (!dirPromise) dirPromise = (async () => {
-    const d = await fetchJson(`${API}/summary/mps?page=1&limit=900`, { timeoutMs: TIMEOUT_SLOW });
-    return (d?.data ?? []).map((m) => ({ ...m, toks: toks(m.mpName), cons: (m.constituency ?? "").toLowerCase() }));
+    const d = await fetchJson(`${API}/summary/mps?page=1&limit=${DIR_LIMIT}`, { timeoutMs: TIMEOUT_SLOW, source: "mplads" });
+    const list = d?.data ?? [];
+    // Single unpaged request: exactly DIR_LIMIT rows back means the roster was
+    // cut off, and every MP past the cut silently stops matching.
+    if (list.length >= DIR_LIMIT) noteTruncation("mplads", "directory", { got: list.length, cap: DIR_LIMIT });
+    if (!list.length) noteParseMiss("mplads", "directory", { expected: "MP roster rows" });
+    return list.map((m) => ({ ...m, toks: toks(m.mpName), cons: (m.constituency ?? "").toLowerCase() }));
   })();
   return dirPromise;
 }
@@ -47,7 +58,13 @@ export async function fetchMPLADS(p) {
 
   const detail = await fetchJson(`${API}/mplads/mps/${m.id}`, { timeoutMs: TIMEOUT_SLOW });
   const dd = detail?.data ?? {};
-  const works = await fetchJson(`${API}/mplads/mps/${m.id}/works?page=1&limit=100`, { timeoutMs: TIMEOUT_SLOW });
+  const works = await fetchJson(`${API}/mplads/mps/${m.id}/works?page=1&limit=${WORKS_LIMIT}`, { timeoutMs: TIMEOUT_SLOW, source: "mplads" });
+  // Same shape the works list is read with further down; checked here so a works
+  // page that comes back exactly full is reported as a truncation, not a total.
+  const workRows = works?.data?.works ?? works?.data ?? [];
+  if (Array.isArray(workRows) && workRows.length >= WORKS_LIMIT) {
+    noteTruncation("mplads", "works", { got: workRows.length, cap: WORKS_LIMIT });
+  }
 
   const lines = [
     `MPLADS record — ${m.mpName} (${m.house}), ${m.constituency}, ${m.state}`,

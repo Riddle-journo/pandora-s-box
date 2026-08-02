@@ -12,27 +12,27 @@
 //
 // Migrating from db.json:  node server/migrate-to-sqlite.js
 import fs from "node:fs";
-import { db } from "./store/db.js";
-import { id, J } from "./store/shared.js";
+import { db } from "./db.js";
+import { id, J } from "./shared.js";
 // Politicians/evidence/reports/cards domain lives in ./store/politicians.js.
 // These internal helpers are imported back for migrateFromJson (which also
 // touches non-domain tables and so stays here); the public functions are
 // re-exported through the facade line further below.
 import {
   insPolitician, polRow, insEvidence, evRow, insReport, repRow,
-} from "./store/politicians.js";
+} from "./politicians.js";
 // Content domain (scandals/stories/leads/tips) lives in ./store/content.js.
 // insScandal is imported back for migrateFromJson (stays here); the public
 // functions are re-exported through the facade line further below.
-import { insScandal } from "./store/content.js";
+import { insScandal } from "./content.js";
 
 // Shared connection for the entity layer (server/entities.js) — one DB handle,
 // one schema init, honouring PANDOROS_DB_PATH exactly like every other table here.
-export { db } from "./store/db.js";
+export { db } from "./db.js";
 
 // `id` is defined in ./store/shared.js so store/* modules can use it without
 // importing store.js; re-exported here to keep store.js the single public site.
-export { id } from "./store/shared.js";
+export { id } from "./shared.js";
 
 // ---- Politicians / evidence / reports / cards (moved to ./store/politicians.js) ----
 export {
@@ -41,7 +41,7 @@ export {
   addReport, addCard, latestCard, listPoliticiansWithCard, cardLeaderboardRows,
   deleteAllReports, deleteAllEvidence, findPolitician, removeDemoPoliticians,
   evidenceCoverage, evidenceCounts, politiciansMissing,
-} from "./store/politicians.js";
+} from "./politicians.js";
 
 // ---- Content domain (scandals / stories / leads / tips) moved to
 // ./store/content.js — re-exported through the facade below. lead_feedback's
@@ -53,7 +53,7 @@ export {
   upsertLead, getLead, listLeads, listLeadProposals, deleteLead,
   recordLeadFeedback, detectorPrecision,
   upsertStory, getStory, listStories,
-} from "./store/content.js";
+} from "./content.js";
 
 // ---- Tofler company cache (director enrichment for FLAGGED companies only). ----
 // One row per company we've looked up on Tofler, keyed by a stable company_key
@@ -183,7 +183,7 @@ export function setMeta(key, value) {
 export {
   enqueueJob, claimNextJob, peekNextJob, completeJob, failJob, getJob, listJobs,
   cancelJob, updateJob, requeueJob, reclaimRunningJobs, trimJobs, deleteAllJobs,
-} from "./store/jobs.js";
+} from "./jobs.js";
 
 // ---- Queue control: pause / cancel / edit / requeue / trim ----
 // Pause is a persisted meta flag the worker consults before each claim, so it
@@ -198,6 +198,8 @@ export function setQueuePaused(on) { return setMeta(QUEUE_PAUSED_KEY, !!on); }
 // One row per fetcher per ingestFor() call. This is how the platform notices a
 // scraper has rotted: at 100+ sources, a source that silently returns [] forever
 // is invisible without a per-source runs/success/items ledger.
+/** @param {{ source?: string, politician_id?: string|null, ok?: boolean|number,
+ *            items?: number, ms?: number, error?: unknown, at?: number }} [run] */
 export function recordFetchRun({ source, politician_id = null, ok, items = 0, ms = 0, error = null, at = Date.now() } = {}) {
   const row = {
     id: id(), source, politician_id: politician_id ?? null, ok: ok ? 1 : 0,
@@ -233,6 +235,48 @@ export function sourceHealth(days = 14) {
   }));
 }
 
+// Per-source, per-DAY run series — the time dimension sourceHealth() aggregates
+// away. Volume-drop detection needs it: a source that returns HTTP 200 and zero
+// rows scores identically to a healthy fetcher for a quiet politician, and only
+// a source's own trailing baseline can tell those apart.
+//
+// The bucket is a DAY, not a run, on purpose. fetch_runs rows are per
+// (source, politician), so items-per-run varies enormously between politicians;
+// comparing one latest run against a cross-politician median would be pure noise.
+// A day's mean items-per-successful-run is the smallest unit that is comparable
+// over time. `oks` is carried through so a consumer can require a day to hold
+// enough successful runs to be worth trusting.
+//
+// Rows are oldest-first, so the LAST row for a source is its most recent day.
+// Days are UTC (SQLite's unixepoch), which is fine: the comparison is
+// day-over-day within one source, not against wall-clock expectations.
+/** @param {{ days?: number, source?: string|null }} [opts]
+ *  @returns {{ source: string, day: string, runs: number, oks: number,
+ *              items: number, avg_items: number }[]} */
+export function fetchRunDailySeries({ days = 45, source = null } = {}) {
+  const since = Date.now() - days * 86400000;
+  const rows = db.prepare(`
+    SELECT source,
+      date(at / 1000, 'unixepoch') AS day,
+      COUNT(*)                     AS runs,
+      SUM(ok)                      AS oks,
+      SUM(CASE WHEN ok = 1 THEN items ELSE 0 END) AS items
+    FROM fetch_runs
+    WHERE at >= ? ${source ? "AND source = ?" : ""}
+    GROUP BY source, day
+    ORDER BY source, day`).all(...(source ? [since, source] : [since]));
+  return rows.map((r) => ({
+    source: r.source,
+    day: r.day,
+    runs: r.runs,
+    oks: r.oks ?? 0,
+    items: r.items ?? 0,
+    // Mean items per SUCCESSFUL run: a day where half the runs errored must not
+    // look like a volume collapse (that is ROTTED's job, not VOLUME_DROP's).
+    avg_items: r.oks ? (r.items ?? 0) / r.oks : 0,
+  }));
+}
+
 export function pruneFetchRuns(olderThanDays = 90) {
   const cutoff = Date.now() - olderThanDays * 86400000;
   return db.prepare("DELETE FROM fetch_runs WHERE at < ?").run(cutoff).changes;
@@ -247,6 +291,71 @@ export function lastFetchByPolitician() {
   const m = new Map();
   for (const r of rows) m.set(r.id, r.at);
   return m;
+}
+
+// ---- Fetcher-failure telemetry (DELIBERATELY NOT fetch_runs) ----
+// A degraded fetcher return ("the parse yielded nothing", "this PDF has no text
+// layer", "we stopped at the row cap") is a real finding and has to survive a
+// restart. It is NOT a fetch RUN, and it must never enter fetch_runs, because
+// fetch_runs.source is a closed vocabulary: sourceHealth() GROUPs BY it, and
+// every consumer of that (health.js, worker.js's health sweep, GET
+// /api/ops/health, db-maintenance's freshness()) treats each distinct value as a
+// configured source and each 0%-ok source as ROTTED — "provably broken". Writing
+// phase rows there would make the rot detector manufacture rot: one transient
+// 503, one scanned PDF or one page-cap hit would redden the automation gate.
+// So the phase telemetry gets its own table with its own (source, phase) key,
+// read explicitly by the health CLI and never mixed into source aggregates.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS fetch_failures (
+    id TEXT PRIMARY KEY, source TEXT, phase TEXT, message TEXT, url TEXT, at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_fetch_failures_key ON fetch_failures(source, phase, at);
+  CREATE INDEX IF NOT EXISTS idx_fetch_failures_at  ON fetch_failures(at);
+`);
+
+/** One degraded-return event. `source` must be a configured fetcher id — callers
+ *  that cannot attribute the failure to one (an arbitrary news host, say) record
+ *  in-process only and never reach here.
+ *  @param {{ source?: string, phase?: string, message?: unknown, url?: string|null, at?: number }} [ev] */
+export function recordFetchFailure({ source, phase, message = null, url = null, at = Date.now() } = {}) {
+  const row = {
+    id: id(), source: String(source ?? "?"), phase: String(phase ?? "?"),
+    message: message != null ? String(message).slice(0, 500) : null,
+    url: url != null ? String(url).slice(0, 500) : null,
+    at: Math.round(Number(at) || Date.now()),
+  };
+  db.prepare(`INSERT INTO fetch_failures (id, source, phase, message, url, at)
+    VALUES (@id, @source, @phase, @message, @url, @at)`).run(row);
+  return row;
+}
+
+// Per-(source, phase) aggregates over the last `days`, most frequent first.
+// Read-only; the health CLI's persistent counterpart to fetchFailureInventory().
+/** @param {{ days?: number, limit?: number }} [opts] */
+export function fetchFailureHealth({ days = 14, limit = 200 } = {}) {
+  const since = Date.now() - days * 86400000;
+  return db.prepare(`
+    SELECT source, phase, COUNT(*) AS count, MAX(at) AS last_at, MIN(at) AS first_at
+    FROM fetch_failures WHERE at >= ?
+    GROUP BY source, phase ORDER BY count DESC, source, phase LIMIT ?`).all(since, limit)
+    .map((r) => ({
+      ...r,
+      key: `${r.source}#${r.phase}`,
+      last_message: db.prepare(
+        "SELECT message FROM fetch_failures WHERE source = ? AND phase = ? AND at >= ? ORDER BY at DESC LIMIT 1")
+        .get(r.source, r.phase, since)?.message ?? null,
+    }));
+}
+
+// ALL-TIME distinct fetch_runs.source values with their row counts and span.
+// Exists so the health CLI can report `source` values that are NOT a configured
+// fetcher — junk keys written by a buggy caller — without any window clipping
+// hiding them. Strictly read-only: it never deletes anything.
+export function fetchRunSourceCounts() {
+  return db.prepare(`
+    SELECT source, COUNT(*) AS rows, SUM(ok) AS oks, MIN(at) AS first_at, MAX(at) AS last_at
+    FROM fetch_runs GROUP BY source ORDER BY rows DESC`).all()
+    .map((r) => ({ ...r, oks: r.oks ?? 0 }));
 }
 
 // ---- Maintenance / reset helpers ----

@@ -4,7 +4,7 @@
 //
 // Uses the shared better-sqlite3 handle from store.js (one connection, one schema
 // init, PANDOROS_DB_PATH honoured), like server/entities.js.
-import { db, id } from "./store.js";
+import { db, id } from "../store/store.js";
 
 const safeJson = (s) => { try { return JSON.parse(s); } catch { return {}; } };
 

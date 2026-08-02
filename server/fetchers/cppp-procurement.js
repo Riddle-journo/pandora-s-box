@@ -17,6 +17,7 @@
 // Two-hop favoritism trail: pass company names (from the MCA fetcher, once built)
 // via p._associatedCompanies to catch contracts awarded to a politician's firms.
 let dbPromise = null, warned = false;
+import { noteFetchFailure, noteTruncation } from "./observe.js";
 
 async function getDb() {
   const path = process.env.CPPP_DB_PATH;
@@ -24,7 +25,11 @@ async function getDb() {
   if (!dbPromise) dbPromise = (async () => {
     let Database;
     try { Database = (await import("better-sqlite3")).default; }
-    catch { if (!warned) { console.warn("[fetchers] better-sqlite3 not installed — CPPP procurement disabled. Run: npm install better-sqlite3"); warned = true; } return null; }
+    catch (err) {
+      if (!warned) { console.warn("[fetchers] better-sqlite3 not installed — CPPP procurement disabled. Run: npm install better-sqlite3"); warned = true; }
+      noteFetchFailure("cppp", "driver", err, {});
+      return null;
+    }
     try {
       const db = new Database(path, { readonly: true, fileMustExist: true });
       // Pick the largest user table and cache its text columns.
@@ -34,13 +39,17 @@ async function getDb() {
         try {
           const n = db.prepare(`SELECT COUNT(*) c FROM "${t}"`).get().c;
           if (n > bestRows) { bestRows = n; best = t; }
-        } catch (err) { console.warn("[cppp-procurement] row count failed for table:", err?.message ?? err); }
+        } catch (err) { noteFetchFailure("cppp", "table_count", err, { table: t }); }
       }
       if (!best) return null;
       const cols = db.prepare(`PRAGMA table_info("${best}")`).all();
       const textCols = cols.filter((c) => /TEXT|CHAR|CLOB|VARCHAR|^$/i.test(c.type || "")).map((c) => c.name);
       return { db, table: best, textCols, allCols: cols.map((c) => c.name) };
-    } catch (e) { if (!warned) { console.warn("[fetchers] CPPP DB open failed:", e.message); warned = true; } return null; }
+    } catch (e) {
+      if (!warned) { console.warn("[fetchers] CPPP DB open failed:", e.message); warned = true; }
+      noteFetchFailure("cppp", "db_open", e, { path });
+      return null;
+    }
   })();
   return dbPromise;
 }
@@ -66,8 +75,10 @@ export async function fetchCPPPProcurement(p) {
     try {
       const r = h.db.prepare(`SELECT * FROM "${h.table}" WHERE ${where} LIMIT 25`).all(...params);
       for (const row of r) rows.push({ term, row });
-    } catch (err) { console.warn("[cppp-procurement] search query failed:", err?.message ?? err); }
-    if (rows.length >= 50) break;
+    } catch (err) { noteFetchFailure("cppp", "search", err, { term, table: h.table }); }
+    // Hard row ceiling: hitting it means matches were dropped, so say so rather
+    // than presenting a truncated award list as the complete one.
+    if (rows.length >= 50) { noteTruncation("cppp", "search", { got: rows.length, cap: 50 }); break; }
   }
   if (!rows.length) return [];
 

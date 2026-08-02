@@ -15,6 +15,7 @@
 // other fetchers, and fetchToflerDirectors takes an injectable fetchImpl so the
 // tests never touch the network.
 import { fetchText } from "./http.js";
+import { noteFetchFailure } from "./observe.js";
 
 const TOFLER = "https://www.tofler.in";
 
@@ -111,7 +112,9 @@ export async function resolveCinByName(name) {
     const { verifyCompanyName } = await import("./company-registry.js");
     const rec = await verifyCompanyName(name);
     if (rec?.cin && isCin(rec.cin)) return { cin: String(rec.cin).toUpperCase(), name: rec.name ?? name };
-  } catch { /* fail-silent, like the other fetchers */ }
+  } catch (err) {
+    noteFetchFailure("tofler", "cin_resolve", err, { name });
+  }
   return null;
 }
 

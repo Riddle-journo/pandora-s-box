@@ -20,7 +20,7 @@
 //
 // One claim per matched ROW (distinct object_text keeps them from colliding in the
 // claims UNIQUE index); parsed specifics live in each record's `data`.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 import { parseAnyDate, parseMatchCount } from "./financial-links.js";
 
 export const VIGILANCE_CASES_VERSION = "vigilance-cases-v1";

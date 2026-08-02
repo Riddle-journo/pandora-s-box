@@ -9,7 +9,7 @@
 // The LLM never decides WHETHER these facts are true; its job shrinks to
 // narrating and contextualising facts this module has already verified. This is
 // the Serenata/RUBLI model: compute first, narrate second.
-import { formatRupees } from "./util/numbers.js";
+import { formatRupees } from "../util/numbers.js";
 
 // A single computed fact. `weight` is its fixed contribution (−100..+100) to the
 // named scorecard parameter — negative = adverse, positive = clean/good. These

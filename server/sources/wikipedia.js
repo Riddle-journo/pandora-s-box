@@ -4,6 +4,8 @@
 // avoid disambiguation errors; only accepted if the page looks like an
 // Indian politician.
 
+import { noteFetchFailure, noteParseMiss } from "../fetchers/observe.js";
+
 const API = "https://en.wikipedia.org/w/api.php";
 const UA = { "User-Agent": "PandorosBox/0.1 (public-accountability research)" };
 
@@ -32,10 +34,19 @@ export async function fetchWikipedia(p) {
 
   try {
     const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      noteFetchFailure("wikipedia", "fetch", `HTTP ${res.status}`, { url, politician_id: p.id });
+      return [];
+    }
     const data = await res.json();
     const pages = data?.query?.pages;
-    if (!pages) return [];
+    // No `query.pages` at all is a MediaWiki API/parameter change; a genuine
+    // no-result search still returns the envelope. The remaining empty returns
+    // below are deliberate name-match REJECTIONS, not failures, so they stay quiet.
+    if (!pages) {
+      noteParseMiss("wikipedia", "api_shape", { url, expected: "query.pages", bytes: JSON.stringify(data ?? {}).length });
+      return [];
+    }
 
     // Pick the candidate whose title best matches the name.
     const page = Object.values(pages)
@@ -62,5 +73,8 @@ export async function fetchWikipedia(p) {
       summary: "Wikipedia background (secondary source — corroborate against official records).",
       content: extract.slice(0, 1800),
     }];
-  } catch { return []; }
+  } catch (err) {
+    noteFetchFailure("wikipedia", "fetch", err, { url, politician_id: p.id });
+    return [];
+  }
 }

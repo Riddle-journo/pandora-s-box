@@ -21,7 +21,7 @@
 // project/site + registration/status; the WB mining corpus is PDF rows
 // [ "" | <pdf-url> | <body-excerpt-around-name> ], so the site is derived from the
 // PDF filename and the firm from the body text. The parser handles both layouts.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 import { parseAnyDate, parseMatchCount } from "./financial-links.js";
 
 export const PROPERTY_LEASES_VERSION = "property-leases-v1";

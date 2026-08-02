@@ -23,7 +23,7 @@
 // string that l1Match() builds for a readBodies source — rows shaped
 //   `• <report title> | <pdf url> | <body excerpt>`
 // — so it is unit-testable against an inline fixture with no DB.
-import { registerExtractor, runExtraction } from "../extract.js";
+import { registerExtractor, runExtraction } from "./extract.js";
 
 export const PARLIAMENT_COMMITTEE_VERSION = "parliament-committee-v1";
 export const PARLIAMENT_COMMITTEE_SOURCE_TYPE = "l1_standing_committee_reports";

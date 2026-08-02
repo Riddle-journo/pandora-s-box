@@ -7,17 +7,19 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import readline from "node:readline";
-import { listPoliticians, recordFetchRun, db } from "./store.js";
-import { ensureEntity } from "./entities.js";
-import { upsertFact } from "./ledger.js";
-import { UA, htmlToText, fetchPdfText, fetchText, fetchJson, sleep } from "./fetchers/http.js";
-import { renderPageText, closeBrowser } from "./fetchers/playwright-portal.js";
-import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "./fetchers/opendata.js";
-import { buildTranslitNeedles, textMatchesTranslit } from "./fetchers/translit.js";
-import { consoleStyle } from "./util/log.js";
-import { writeFileAtomic } from "./util/fs-atomic.js";
+import { listPoliticians, recordFetchRun, db } from "../store/store.js";
+import { ensureEntity } from "../entities/entities.js";
+import { upsertFact } from "../store/ledger.js";
+import { UA, htmlToText, fetchPdfText, fetchText, fetchJson, sleep } from "../fetchers/http.js";
+import { renderPageText, closeBrowser } from "../fetchers/playwright-portal.js";
+import { ogdResourceAll, ogdResourceMeta, ckanDatastoreSearch, CKAN_PORTALS, rowToFactSpecs } from "../fetchers/opendata.js";
+import { buildTranslitNeedles, textMatchesTranslit } from "../fetchers/translit.js";
+import { consoleStyle } from "../util/log.js";
+import { writeFileAtomic } from "../util/fs-atomic.js";
+import { normText, normContainsWord } from "../util/linker.js";
 const clog = consoleStyle("mega-ingest");
 
 const MEGA_DIR = path.join(process.cwd(), "server", "data", "mega");
@@ -407,14 +409,28 @@ const MEGA_SOURCES = [
     kind: "pdf-archive", url: "https://www.cci.gov.in/antitrust/orders", linkRe: "antitrustorder.*\\.pdf", maxDocs: 500,
     note: "Listing is an AJAX-filtered table (Section/year); a plain fetch may need the results endpoint. PDFs live at /images/antitrustorder/en/order<ts>.pdf. Named companies + govt tenders + GeM bid-rigging + penalties → procurement-collusion detector.",
     summary: "Cartel/bid-rigging order PDFs — collusive-tendering evidence (named firms, penalties)." },
-  { id: "cvc-reports", title: "CVC annual reports + CTE + sanction-for-prosecution", tier: 6, match: "name",
-    kind: "pdf-archive", url: "https://cvc.gov.in/cte-corner/cte-reports", linkRe: "\\.pdf", maxDocs: 300,
-    note: "Also harvest annual-report PDFs (penalties, sanction-for-prosecution-pending>1yr lists name departments). Static PDF listing; table extraction needed for the sanction lists.",
-    summary: "Vigilance CTE reports + sanction-for-prosecution data — procurement fraud + named public servants." },
+  // REPOINTED 2026-07-15: cvc.gov.in was rebuilt into a React SPA, so the old
+  // cte-corner/cte-reports HTML page now serves only a JS shell (harvested 0
+  // PDFs). The report PDFs moved to an open, unauthenticated JSON API
+  // (/api/get-all-annualreport → {data:[{title,date,filePath:"uploads/...pdf"}]}).
+  // linkFromText harvests those filePaths from the JSON body and resolves them
+  // against baseUrl, then pdf-archive downloads + name-matches the PDF bodies
+  // (sanction-for-prosecution-pending lists name departments/officials).
+  { id: "cvc-reports", title: "CVC annual reports + sanction-for-prosecution", tier: 6, match: "name",
+    kind: "pdf-archive", url: "https://cvc.gov.in/api/get-all-annualreport",
+    linkRe: "uploads/[A-Za-z0-9_./-]+\\.pdf", baseUrl: "https://cvc.gov.in/", linkFromText: true, maxDocs: 45,
+    note: "JSON-API listing (SPA rebuild). Additional report set at /api/get-all-datareports (CTE studies). /api/get-all-cteo is F5-WAF blocked — do not use. Annual-report PDFs carry sanction-for-prosecution-pending>1yr lists that name departments.",
+    summary: "Vigilance annual-report + sanction-for-prosecution PDFs — procurement fraud + named public servants (body-text match)." },
+  // SUPERSEDED 2026-07-15: the /press-release HTML listing now 404s and the
+  // /media/press-release replacement is a JS shell. ED moved its releases to an
+  // Umbraco JSON API that returns the FULL release text (accused names + ₹
+  // amounts) inline in a Description field — so this is no longer a PDF-listing
+  // harvest but a clean json-api name-match. Wired as L1 source "ed-pmla-releases"
+  // in ingest.js (names are in the JSON, no PDF download needed).
   { id: "ed-press", title: "Enforcement Directorate press releases (attachments/arrests)", tier: 6, match: "name",
-    kind: "pdf-archive", url: "https://www.enforcementdirectorate.gov.in/press-release", linkRe: "\\.pdf", maxDocs: 400,
-    note: "Listing path is intermittently broken (confirmed flaky) — build with retry; @dir_ed on X posts the same PDFs as a fallback. PMLA attachment orders name politicians/associates + amounts.",
-    summary: "ED PMLA attachment/arrest press-release PDFs — money-laundering signals (names + amounts)." },
+    kind: "pdf-archive", url: "", linkRe: "\\.pdf", maxDocs: 400,
+    skipped: "SUPERSEDED by L1 json-api 'ed-pmla-releases' (ingest.js) — ED retired the PDF listing; the Umbraco API https://enforcementdirectorate.gov.in/umbraco/backoffice/api/PressReleaseApi/GetPublic?language=en serves 1893 releases with names+amounts inline in Description. No PDF harvest needed.",
+    summary: "ED PMLA attachment/arrest releases — now ingested as json-api (names + amounts inline)." },
 
   // Phase 1 procurement — banned-vendor cross-reference (highest signal-per-record).
   { id: "cppp-debarment", title: "CPPP debarment / blacklisted-bidder list", tier: 6, match: "name",
@@ -446,17 +462,50 @@ const MEGA_SOURCES = [
     kind: "browser-capture", url: "https://iascivillist.dopt.gov.in/", settleMs: 5000,
     note: "Structured per-officer cadre/posting-history DB (also easy.nic.in/civilListIAS). Capture the officer-search XHR. Posting-history timelines → transfer-racket detection (abnormally short tenures, repeat parking in lucrative postings, election-timed transfers).",
     summary: "IAS officer posting histories — transfer-posting-racket detection (short tenures, lucrative-posting parking)." },
+
+  // ============================================================================
+  // Added 2026-07-15 — govt/ministry/rep-auditing source expansion (live-verified).
+  // Clean bulk download (tcpd-lokdhaba) + honestly-labelled SPA/CSRF discovery
+  // entries (gem/dopt-ipr) + one scaffold (prs-mptrack). The three un-ingestable
+  // sources from the same sweep (CIC, NGO Darpan, NDAP) are recorded in
+  // sources_catalog.json → rejected_sources with their exact blockers, NOT here.
+  // ============================================================================
+  { id: "tcpd-lokdhaba", title: "TCPD Lok Dhaba — election results + unique politician IDs (1962–)", tier: 4, match: "name",
+    summary: "575k+ candidate records (Lok Sabha GE + every state Assembly AE, 1962–2019): name, party, constituency, votes, vote-share, margin, position, and TCPD's stable unique politician ID (pid, e.g. GEAN64836) for cross-election linkage. A roster-name match corroborates a politician's electoral record; pid + MyNeta_education link out to existing sources.",
+    kind: "csv-multi",
+    urls: ["https://lokdhaba.ashoka.edu.in/downloads/All_States/All_States_GE.csv.gz",
+           "https://lokdhaba.ashoka.edu.in/downloads/All_States/All_States_AE.csv.gz"],
+    note: "gzip-compressed CSV (.csv.gz — csv-multi now gunzips transparently). Cols: Candidate (name, UPPERCASE), pid, Party, Constituency_Name, State_Name, Year, Position, Votes, Vote_Share_Percentage, Margin, MyNeta_education, TCPD_Prof_Main. Homepage is a React shell and the Flask API 502s — use these static /downloads/*.csv.gz files. CC-BY academic use; direct GET, no auth. Per-state files exist too but All_States_{GE,AE} are a strict superset.",
+  },
+  { id: "gem-contracts", title: "GeM — Government e-Marketplace contract awards (buyer-side spend)", tier: 5, match: "none",
+    kind: "browser-capture", url: "https://gem.gov.in/view_contracts", settleMs: 6000,
+    summary: "National public-procurement contract awards: order no (GEMC-…), buyer ministry/department/office, buying mode, contract date, ₹ value, item. match:none — the listing carries buyer org + a role designation (e.g. 'Section Officer') but NO vendor or individual person names, so it is aggregate ministry/dept spend context, not a per-politician record.",
+    note: "VERIFIED 2026-07-15 the SPA's own POST endpoint is directly curl-able (no CAPTCHA/session): POST https://gem.gov.in/view_contracts/contract_details, body 'fromDate={DD-MM-YYYY}&toDate={DD-MM-YYYY}&department=&bno=&buyer_category=&page={0..}', header X-Requested-With:XMLHttpRequest → ~20 contract HTML blocks/page (spans .ajxtag_order_number/.ajxtag_totalvalue/.ajxtag_contract_date/.ajxtag_item_title). CAPTCHA gates only the per-contract PDF, not the listing. Promote to a POST-paged fetcher (paged-html-table is GET-only today) or capture here. get_dept/get_org return the filter dropdowns.",
+  },
+  { id: "dopt-ipr", title: "DoPT Immovable Property Returns — IAS/IPS officer asset declarations", tier: 5, match: "name",
+    kind: "browser-capture", url: "https://services.eoffice.gov.in/IPRSTATUS/IAS/IPRFiledSearch", settleMs: 5000,
+    summary: "Annual immovable-property (asset) declarations of IAS/IPS officers — the bureaucrat analogue of MyNeta candidate affidavits, and distinct from the existing dopt-ias-civillist (posting history, not assets). Per-officer: Officer Name, Cadre, Allotment Year/Batch, Submission Date + a downloadable IPR document. match:name — a lead for politician↔official links + undisclosed-asset signals.",
+    note: "VERIFIED 2026-07-15 end-to-end with curl (raw GET is a JS shell, so browser-capture is the menu-nearest label). Flow: GET search page with cookie jar → parse hidden _csrf + encrypted option values for assessmentYearId (2011–2026) and cadreId (per-state) → POST https://services.eoffice.gov.in/IPRSTATUS/iprStatus/doSearchEmployee → 191KB HTML grid (verified 224 IAS officers, Bihar/2024). Each IPR doc (iprDownload/doDefault?reqParam=<encrypted-per-row-token>) is a ~280KB SCANNED-IMAGE PDF (no text layer) → asset VALUES need the OCR pass (PDF_OCR=1). IPS variant: /IPRSTATUS/IPS/IPRFiledSearch. dataful.in copy is paywalled + status-only — skip.",
+  },
+  { id: "prs-mptrack", title: "PRS MP Track — per-MP attendance, questions, debates, bills", tier: 4, match: "name",
+    kind: null,
+    summary: "Per-MP legislative performance (18th Lok Sabha + Rajya Sabha, ~630+ MPs): Attendance %, Questions Asked, Debates, Private Member's Bills + national/state averages — a behavioural accountability dimension the roster doesn't yet have. Names are per-MP matchable.",
+    skipped: "SCAFFOLD 2026-07-15 — needs a small two-stage HTML-body fetcher (no existing kind fits an HTML-detail-body harvest). VERIFIED plain-curl, no JS/login/CAPTCHA: (1) paginate the server-rendered index https://prsindia.org/mptrack?page={0..~72}&per-page=9, collect detail links matching /mptrack/(18th-lok-sabha|rajya-sabha)/<slug>; (2) GET each detail HTML page, extract name/constituency/party/state + attendance_pct/questions_asked/debates/private_member_bills/national_average/state_average from body text (numbers are in raw HTML; only Google-Charts config is JS). No CSV/XLSX/JSON export exists. Build as server/fetchers/prs-mptrack.js (analogue of the readBodies HTML harvest). Companion aggregate PDFs: https://prsindia.org/parliamenttrack/vital-stats (match:none).",
+  },
 ];
 
 // --- roster needles ---------------------------------------------------------
+// IMPORTANT: these needles are a CANDIDATE GENERATOR, not an identity decision.
+// A kept row only means "some roster name occurs here"; which politician (if any)
+// the row actually concerns is decided later, per politician, by the abstain-first
+// ladder in util/linker.js (via ingest.js l1Match reading this cache).
 function buildNeedles() {
   const ps = listPoliticians().filter((p) => !p.is_demo);
-  const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
   const set = new Set();
-  for (const p of ps) { const n = norm(p.name); if (n.length >= 4) set.add(n); }
+  for (const p of ps) { const n = normText(p.name); if (n.length >= 4) set.add(n); }
   return [...set];
 }
-const normLine = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ");
+const normLine = (s) => normText(s);
 
 // --- helpers ----------------------------------------------------------------
 async function downloadToFile(url, dest, { timeoutMs = 1800000 } = {}) {
@@ -566,13 +615,38 @@ function parseHtmlTables(html) {
   }
   return tables;
 }
-const matchRow = (needles, row) => { const t = normLine(row.join(" | ")); return needles.some((n) => t.includes(n)); };
+// Word-boundary containment, not raw substring: `includes("ram singh")` also fires
+// on "pa|ram singh|al", which filled these caches with rows no politician appears
+// in and gave the old attribution path more junk to mis-assign.
+export const matchRow = (needles, row) => { const t = normLine(row.join(" | ")); return needles.some((n) => normContainsWord(t, n)); };
 const CAP = 5000; // max kept rows per dataset — evidence content is capped anyway
 
 // A source awaiting owner setup (e.g. cfg.urls left empty pending a manual
 // download link) is NOT a failure — it ran cleanly and correctly found nothing
 // to do. Recording it as ok:1/items:0 lands it in QUIET, not a false ROTTED
 // alarm (see server/health.js classifyHealth).
+// Truncate-to-empty via the atomic helper: a plain writeFileSync that dies
+// mid-call can leave the raw index in a half state, and these files are the
+// ONLY copy of a multi-hour crawl's text (--rematch re-filters them offline).
+const truncateFile = (file) => writeFileAtomic(file, "");
+
+// Per-line-tolerant JSONL read. These indexes are appended to during a crawl that
+// can be killed at any point, so the final line is routinely half-written — and
+// one JSON.parse throw used to abort an entire --rematch run, discarding every
+// good record before it. Bad lines are skipped and COUNTED, never silent.
+export function readJsonlTolerant(file, onRecord) {
+  let ok = 0, bad = 0;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { bad++; continue; }
+    ok++;
+    onRecord(rec);
+  }
+  if (bad) clog.warn(`[mega] ${path.basename(file)}: skipped ${bad} corrupt JSONL line(s) (kept ${ok})`);
+  return { ok, bad };
+}
+
 function notConfigured(cfg) {
   clog.log(`[mega] ${cfg.id}: not configured — ${cfg.note}`);
   recordFetchRun({ source: `mega:${cfg.id}`, ok: 1, items: 0, ms: Date.now() - (cfg.__t0 ?? Date.now()) });
@@ -611,11 +685,16 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
     }
     if (cfg.kind === "csv-multi") {
       if (!cfg.urls?.length) return notConfigured(cfg);
+      // Some clean bulk sources ship gzip-compressed CSV (.csv.gz — e.g. TCPD Lok
+      // Dhaba). Decompress transparently; plain .csv is read as before.
+      const { gunzipSync } = await import("node:zlib");
       const rows = []; let total = 0;
       for (const u of cfg.urls) {
-        const f = path.join(rawDir, u.split("/").pop());
+        const f = path.join(rawDir, u.split("/").pop().split("?")[0]);
         if (!rematchOnly || !fs.existsSync(f)) await downloadToFile(u, f);
-        for (const r of parseCsv(fs.readFileSync(f, "utf8"))) {
+        const buf = fs.readFileSync(f);
+        const text = f.endsWith(".gz") ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+        for (const r of parseCsv(text)) {
           total++;
           if (rows.length < CAP && matchRow(needles, r)) rows.push(r);
         }
@@ -636,7 +715,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
         const rl = readline.createInterface({ input: fs.createReadStream(f), crlfDelay: Infinity });
         for await (const line of rl) {
           total++;
-          if (rows.length < CAP && needles.some((n) => normLine(line).includes(n))) rows.push(line.split(","));
+          if (rows.length < CAP && matchRow(needles, [line])) rows.push(line.split(","));
         }
         clog.log(`[mega] ${cfg.id}: scanned ${total} lines so far, kept ${rows.length}`);
       }
@@ -647,12 +726,12 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       // appends EVERY page's rows to raw pages.jsonl for the investigator.
       fs.mkdirSync(rawDir, { recursive: true });
       const rawFile = path.join(rawDir, "pages.jsonl");
-      if (!rematchOnly) fs.writeFileSync(rawFile, "");
+      if (!rematchOnly) truncateFile(rawFile);
       const rows = []; let total = 0, emptyStreak = 0;
       if (rematchOnly && fs.existsSync(rawFile)) {
-        for (const line of fs.readFileSync(rawFile, "utf8").split("\n").filter(Boolean)) {
-          for (const r of JSON.parse(line).rows) { total++; if (rows.length < CAP && matchRow(needles, r)) rows.push(r); }
-        }
+        readJsonlTolerant(rawFile, (page) => {
+          for (const r of page?.rows ?? []) { total++; if (rows.length < CAP && matchRow(needles, r)) rows.push(r); }
+        });
         return writeMegaCache(cfg, rows, total);
       }
       for (let pg = cfg.startPage ?? 1; pg <= (cfg.maxPages ?? 500); pg++) {
@@ -725,7 +804,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       // {url,status,sample} to endpoints.json; the owner then promotes a stable
       // endpoint into a plain json-api L1_SOURCES entry (cheap cached retrieval,
       // no browser at run time). Discovery only — writes NO politician cache.
-      const { getBrowser } = await import("./fetchers/playwright-portal.js");
+      const { getBrowser } = await import("../fetchers/playwright-portal.js");
       const browser = await getBrowser();
       if (!browser) return clog.log(`[mega] ${cfg.id}: playwright not installed — skipped`);
       fs.mkdirSync(rawDir, { recursive: true });
@@ -769,10 +848,10 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       };
       const rows = []; let total = 0;
       if (rematchOnly && fs.existsSync(idx)) {
-        for (const line of fs.readFileSync(idx, "utf8").split("\n").filter(Boolean)) {
-          const d = JSON.parse(line); total++;
+        readJsonlTolerant(idx, (d) => {
+          total++;
           if (rows.length < CAP && matchRow(needles, [d.title, d.text].filter(Boolean))) rows.push([d.title, d.href, snip(d.text || d.title)]);
-        }
+        });
         return writeMegaCache(cfg, rows, total);
       }
       // 1. gather PDF links across listing page(s)
@@ -782,9 +861,10 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       const links = []; const seen = new Set();
       for (const lu of listUrls) {
         // cfg.insecure: some gov sites (e.g. wbindustries.gov.in) serve a broken
-        // TLS chain — fetchText's insecure mode routes around it via node:https
-        // with rejectUnauthorized:false, same technique the L1 engine already
-        // uses for this exact site (see ingest.js l1FetchInsecure).
+        // TLS chain — fetchText's insecure mode routes around it, the same
+        // workaround the L1 engine needs for this exact site (see ingest.js
+        // l1FetchSecureFirst, which now verifies first and downgrades only on a
+        // certificate-trust error, recording the host).
         const html = await fetchText(lu, { timeoutMs: 30000, insecure: cfg.insecure });
         for (const m of html.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
           let href = m[1]; const title = htmlToText(m[2], 300);
@@ -792,10 +872,23 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
           if (!new RegExp(cfg.linkRe ?? "\\.pdf", "i").test(href) || seen.has(href)) continue;
           seen.add(href); links.push({ title, href });
         }
+        // cfg.linkFromText: some listings are now React SPAs that serve their doc
+        // list as a JSON API (e.g. CVC's cvc.gov.in/api/get-all-annualreport),
+        // where PDF paths live in JSON strings, not <a> tags. Harvest bare linkRe
+        // matches from the raw body and resolve against cfg.baseUrl. Gated so
+        // anchor-based sources are unaffected.
+        if (cfg.linkFromText) {
+          for (const m of html.matchAll(new RegExp(cfg.linkRe ?? "\\.pdf", "gi"))) {
+            let href = m[0];
+            try { href = new URL(href, cfg.baseUrl || lu).href; } catch { continue; }
+            if (seen.has(href)) continue;
+            seen.add(href); links.push({ title: href.split("/").pop(), href });
+          }
+        }
         await new Promise((r) => setTimeout(r, cfg.delayMs ?? 800));
       }
       clog.log(`[mega] ${cfg.id}: ${links.length} documents found; harvesting${cfg.titleOnly ? " (title-only)" : ""}…`);
-      fs.writeFileSync(idx, "");
+      truncateFile(idx);
       // 2. per doc: title match is free; body extract only when needed
       for (const { title, href } of links.slice(0, cfg.maxDocs ?? 3000)) {
         total++;
@@ -832,10 +925,10 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       };
       const rows = []; let total = 0;
       if (rematchOnly && fs.existsSync(idx)) {
-        for (const line of fs.readFileSync(idx, "utf8").split("\n").filter(Boolean)) {
-          const d = JSON.parse(line); total++;
+        readJsonlTolerant(idx, (d) => {
+          total++;
           if (rows.length < CAP && matchDoc(d.title, d.text)) rows.push([d.title, d.href, snip(d.text || d.title)]);
-        }
+        });
         return writeMegaCache(cfg, rows, total);
       }
       // 1. page item identifiers (bounded by maxDocs)
@@ -853,7 +946,7 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
       }
       const capped = items.slice(0, maxDocs);
       clog.log(`[mega] ${cfg.id}: ${capped.length} IA items; harvesting OCR text (${cfg.textFormat ?? "DjVuTXT"})…`);
-      fs.writeFileSync(idx, "");
+      truncateFile(idx);
       const fmt = cfg.textFormat ?? "DjVuTXT";
       for (const it of capped) {
         total++;
@@ -910,9 +1003,17 @@ async function refreshOne(cfg, needles, { rematchOnly = false } = {}) {
 }
 
 // --- CLI ---------------------------------------------------------------------
+// Owner-run CLI, gated on being the process entry point: the status branch below
+// calls process.exit, so an unguarded top level made this module impossible to
+// import (and therefore impossible to unit-test). Invocation is unchanged —
+// `node server/orchestration/mega-ingest.js --refresh <id>` still hits the guard.
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-if (cmd === "--refresh" || cmd === "--rematch") {
+const IS_CLI = process.argv[1]
+  ? path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()
+  : false;
+if (!IS_CLI) { /* imported as a module — no side effects */ }
+else if (cmd === "--refresh" || cmd === "--rematch") {
   const which = argv[1] ?? "all";
   const targets = which === "all" ? MEGA_SOURCES : MEGA_SOURCES.filter((s) => s.id === which);
   if (!targets.length) { clog.error(`[mega] unknown id '${which}'. Known: ${MEGA_SOURCES.map((s) => s.id).join(", ")}`); process.exit(1); }

@@ -13,7 +13,7 @@
 // Pure & code-only: `detectCollusion({companies, tenders})` takes plain arrays and
 // returns {clusters, leads} with no store/network, so it is trivially testable.
 // `runCollusion()` gathers the same inputs from the store and upserts the leads.
-import { upsertLead, listPoliticians, listEvidence } from "./store.js";
+import { upsertLead, listPoliticians, listEvidence } from "../store/store.js";
 
 // Detector identity — bump when any threshold/weight/vector changes.
 export const DETECTOR_VERSION = "collusion-v1";
@@ -169,8 +169,9 @@ export function runCollusion({ tenders = [] } = {}) {
   const companies = [];
   for (const p of listPoliticians()) {
     for (const e of listEvidence(p.id)) {
-      if (e.source_type === "mca_company" && Array.isArray(e.numbers?.companies)) {
-        for (const c of e.numbers.companies) companies.push({ ...c, source_url: c.source_url ?? e.url });
+      const nums = /** @type {any} */ (e).numbers;
+      if (e.source_type === "mca_company" && Array.isArray(nums?.companies)) {
+        for (const c of nums.companies) companies.push({ ...c, source_url: c.source_url ?? e.url });
       }
     }
   }

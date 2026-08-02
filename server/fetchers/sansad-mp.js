@@ -16,7 +16,8 @@
 //   SANSAD_DISABLE=1       skip this fetcher entirely
 import { fetchJson, fetchPdfText, mapLimit , TIMEOUT_DEFAULT, TIMEOUT_SLOW } from "./http.js";
 import { ministryToSector, textToSector } from "../data/sectors.js";
-import { recordAssertion } from "../entities.js";
+import { recordAssertion } from "../entities/entities.js";
+import { noteFetchFailure, noteParseMiss, noteTruncation } from "./observe.js";
 
 // Record the member match as a strong_id assertion (mpsno). Wrapped so a
 // recording failure can never bubble into fetchSansadMP's graceful catch and
@@ -28,7 +29,11 @@ function assertMember(p, m, house) {
       source_ref: String(m.id), politician_id: p.id, confidence: 0.95, method: "strong_id",
       evidence_url: `https://sansad.in/${house}/members#${m.id}`,
     });
-  } catch { /* additive only */ }
+  } catch (err) {
+    // Additive only — the evidence still ships — but a lost identity binding
+    // is exactly the rot that must not be invisible.
+    noteFetchFailure("sansad", "assertion", err, { politician_id: p.id, house });
+  }
 }
 
 const LS = "https://sansad.in/api_ls";
@@ -54,15 +59,26 @@ function tokens(name) {
     .filter((t) => t.length >= 3 && !HONORIFICS.has(t));
 }
 
+// Fixed request caps for the two directory calls. Named so the truncation
+// check below compares against the SAME number the URL asks for.
+const LS_DIR_SIZE = 1000;
+const RS_DIR_SIZE = 1000;
+
 // ── Cached member directories (built once per process) ─────────────────
 let lsDirPromise = null, rsDirPromise = null;
 
 async function lsDirectory() {
   if (!lsDirPromise) lsDirPromise = (async () => {
     const url = `${LS}/member?loksabha=${LOKSABHA}&state=&party=&gender=&ageFrom=&ageTo=`
-      + `&noOfTerms=&page=1&size=1000&searchText=&constituency=&sitting=1&locale=en&memberStatus=s`;
-    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW });
-    return (data?.membersDtoList ?? []).map((m) => ({
+      + `&noOfTerms=&page=1&size=${LS_DIR_SIZE}&searchText=&constituency=&sitting=1&locale=en&memberStatus=s`;
+    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW, source: "sansad" });
+    const list = data?.membersDtoList ?? [];
+    // The directory is fetched with a FIXED size=1000 and never paged. That is
+    // fine at ~543 sitting members and silently wrong the day it is not, and a
+    // truncated directory means every member past the cut simply stops matching.
+    if (list.length >= LS_DIR_SIZE) noteTruncation("sansad", "ls_directory", { got: list.length, cap: LS_DIR_SIZE, url });
+    if (!list.length) noteParseMiss("sansad", "ls_directory", { url, expected: "sitting members" });
+    return list.map((m) => ({
       id: m.mpsno,
       name: m.mpFirstLastName || `${m.firstName ?? ""} ${m.lastName ?? ""}`,
       constituency: m.constituency ?? "",
@@ -74,10 +90,13 @@ async function lsDirectory() {
 
 async function rsDirectory() {
   if (!rsDirPromise) rsDirPromise = (async () => {
-    const url = `${RS}/member/sitting-members?state=&party=&gender=&page=1&size=1000`
+    const url = `${RS}/member/sitting-members?state=&party=&gender=&page=1&size=${RS_DIR_SIZE}`
       + `&mpFlag=1&ageFrom=&ageTo=&terms=&search=&locale=en`;
-    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW });
-    return (data?.records ?? []).map((m) => ({
+    const data = await fetchJson(url, { timeoutMs: TIMEOUT_SLOW, source: "sansad" });
+    const list = data?.records ?? [];
+    if (list.length >= RS_DIR_SIZE) noteTruncation("sansad", "rs_directory", { got: list.length, cap: RS_DIR_SIZE, url });
+    if (!list.length) noteParseMiss("sansad", "rs_directory", { url, expected: "sitting members" });
+    return list.map((m) => ({
       id: m.mpsno,
       name: (m.name ?? "").replace(/^@\s*/, ""),
       constituency: m.state ?? "",
@@ -142,7 +161,7 @@ export async function attachQuestionFulltext(records, {
   const texts = await mapLimit(targets, 3, async (q) => {
     let t = "";
     try { t = await fetchPdf(q[pathField], { timeoutMs: TIMEOUT_SLOW, maxLen: 1600 }); }
-    catch { /* graceful: a failed PDF just contributes no fulltext */ }
+    catch (err) { noteFetchFailure("sansad", "question_pdf", err, { path: q[pathField] }); }
     return t && t.length > 120 ? `── ${formatHeader(q)} ──\n${t}` : null;
   });
   const got = texts.filter(Boolean);
@@ -357,7 +376,11 @@ export async function fetchSansadMP(p) {
 
     const rsm = matchMember(p, await rsDirectory());
     if (rsm) { assertMember(p, rsm, "rs"); return await scrapeRS(p, rsm); }
-  } catch { /* graceful: API hiccup → no parliamentary evidence this run */ }
+  } catch (err) {
+    // An API hiccup here costs an MP their ENTIRE parliamentary record for the
+    // run, and the caller records that as a clean zero-item fetch. Not silently.
+    noteFetchFailure("sansad", "record", err, { politician_id: p.id, office: p.office });
+  }
 
   return [];
 }

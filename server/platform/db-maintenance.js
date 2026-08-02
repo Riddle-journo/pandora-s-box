@@ -21,18 +21,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { db, id } from "./store.js";
+import { db, id } from "../store/store.js";
 import {
   pruneFetchRuns, reclaimRunningJobs, sourceHealth,
   enqueueJob, listPoliticians, lastFetchByPolitician,
   listJobs, jobCounts, getMeta, setMeta, trimJobs,
-} from "./store.js";
+} from "../store/store.js";
 import { dataGovKey } from "./config.js";
-import { consoleStyle } from "./util/log.js";
+import { consoleStyle } from "../util/log.js";
 const clog = consoleStyle("db-maintenance");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.PANDOROS_DB_PATH || path.join(__dirname, "..", "data", "pandoros.db");
+const DB_PATH = process.env.PANDOROS_DB_PATH || path.join(__dirname, "..", "..", "data", "pandoros.db");
 const DATA_DIR = path.dirname(DB_PATH);
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
@@ -287,9 +287,9 @@ export async function driftHeal({ limit = null } = {}) {
   let ids = scan.evidenceIds;
   if (limit != null && Number(limit) > 0) ids = ids.slice(0, Number(limit));
   if (!ids.length) return { detected: 0, healed: 0, deleted: { facts: 0, claims: 0 }, reextracted: null };
-  await import("./extract-all.js"); // side-effect: registers every extractor
-  const { deleteFactsClaimsByEvidence } = await import("./ledger.js");
-  const { reExtractEvidence } = await import("./extract.js");
+  await import("../extractors/extract-all.js"); // side-effect: registers every extractor
+  const { deleteFactsClaimsByEvidence } = await import("../store/ledger.js");
+  const { reExtractEvidence } = await import("../extractors/extract.js");
   const deleted = deleteFactsClaimsByEvidence(ids);
   const reextracted = reExtractEvidence(ids);
   return { detected: scan.evidence, healed: ids.length, deleted, reextracted };
@@ -302,7 +302,7 @@ export async function freshness(days = 14) {
   const rows = sourceHealth(days);
   try {
     const { classifyHealth } = await import("./health.js");
-    const { FETCHER_NAMES } = await import("./ingest.js");
+    const { FETCHER_NAMES } = await import("../orchestration/ingest.js");
     const c = classifyHealth(rows, FETCHER_NAMES);
     return { days, sources: rows.length, rotted: c.rotted ?? [], quiet: c.quiet ?? [], stale: c.stale ?? [] };
   } catch (e) {
@@ -536,7 +536,7 @@ export function maintenanceHistory({ limit = 20 } = {}) {
 const pad = (s, n) => { s = String(s); return s.length >= n ? s : s + " ".repeat(n - s.length); };
 
 async function doctor(days) {
-  const { sourceHealth } = await import("./store.js");
+  const { sourceHealth } = await import("../store/store.js");
   const health = sourceHealth(days);
   const quiet = health.filter((h) => h.runs > 0 && h.ok_rate >= 0.5 && h.total_items === 0).map((h) => h.source);
   const datasets = await optionalDatasets();

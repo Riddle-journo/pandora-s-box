@@ -32,6 +32,7 @@ const NSE = "https://www.nseindia.com";
 import { fetchRaw } from "./http.js";
 import { logger } from "../util/log.js";
 const log = logger("sebi-disclosures");
+import { noteFetchFailure } from "./observe.js";
 
 // ── NSE cookie handshake (mirrors nse-deals.js) ──────────────────────────────
 // GET the homepage with a browser UA to collect the anti-bot cookies, return a
@@ -57,8 +58,10 @@ async function nseJson(url, { cookie, referer, timeoutMs = 12000 } = {}) {
     return null;
   }
   const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("json")) return null;
-  return await res.json().catch(() => null);
+  // A 200 with a non-JSON body is NSE serving an interstitial/block page. It is
+  // not an empty disclosure set, and the caller cannot tell the difference.
+  if (!ct.includes("json")) { noteFetchFailure("sebi_disclosures", "content_type", "200 with content-type " + (ct || "(none)"), { url }); return null; }
+  return await res.json().catch((err) => { noteFetchFailure("sebi_disclosures", "json_parse", err, { url }); return null; });
 }
 
 // ── Symbol resolution ────────────────────────────────────────────────────────

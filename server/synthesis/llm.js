@@ -64,7 +64,7 @@ function retryAfterMsFrom(err) {
  *           sleepImpl?: (ms: number) => Promise<void> }} [opts]
  */
 export async function callWithRetry(client, params, { module = "unknown", attempts = 3, baseDelayMs = 1000, sleepImpl } = {}) {
-  const { recordLlmUsage } = await import("./store/llm-usage.js");
+  const { recordLlmUsage } = await import("../store/llm-usage.js");
   const sleep = sleepImpl ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const t0 = Date.now();
   let lastErr = null;

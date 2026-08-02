@@ -9,6 +9,7 @@
 // primary records before scoring.
 
 import { gdeltJson } from "./gdelt-fetch.js";
+import { noteFetchFailure, noteParseMiss } from "../fetchers/observe.js";
 
 const GDELT = "https://api.gdeltproject.org/api/v2/doc/doc";
 
@@ -20,7 +21,19 @@ export async function fetchNews(p, { maxRecords = 100 } = {}) {
     `&startdatetime=20170101000000`;
   try {
     const data = await gdeltJson(url, { headers: { "User-Agent": "RateMyRep/0.1" } });
-    if (!data) return [];
+    // gdeltJson has already recorded WHY it returned null (rate limit, cert,
+    // non-JSON body); this records that the news dimension went empty for THIS
+    // politician, which is what the coverage question needs.
+    if (!data) {
+      noteFetchFailure("news", "gdelt_null", "gdeltJson returned null — see the gdelt#* failure rows for the cause", { politician_id: p.id, url });
+      return [];
+    }
+    // A 200 whose payload has no `articles` key at all is an API-shape change,
+    // not a politician with no press.
+    if (!Array.isArray(data.articles)) {
+      noteParseMiss("news", "articles_shape", { url, expected: "an `articles` array", bytes: JSON.stringify(data).length });
+      return [];
+    }
     return (data.articles ?? []).map((a) => ({
       politician_id: p.id,
       source_type: "news",
@@ -33,7 +46,8 @@ export async function fetchNews(p, { maxRecords = 100 } = {}) {
         : null,
       summary: `${a.domain ?? "unknown outlet"} — news coverage (lead only; corroborate against primary records).`,
     }));
-  } catch {
+  } catch (err) {
+    noteFetchFailure("news", "map", err, { politician_id: p.id, url });
     return [];
   }
 }

@@ -6,8 +6,8 @@
 // facets stays registered before /api/scandals/:slug.
 // ════════════════════════════════════════════════════════════════════════════
 import express from "express";
-import { listScandals, getScandal, getPolitician, listPoliticians } from "../store.js";
-import { asyncH, maybePaginate } from "./util.js";
+import { listScandals, getScandal, getPolitician, listPoliticians } from "../store/store.js";
+import { asyncH, maybePaginate, vParam } from "./util.js";
 
 const router = express.Router();
 
@@ -45,7 +45,7 @@ router.get("/api/scandals/facets", (_req, res) => {
   });
 });
 
-router.get("/api/scandals/:slug", (req, res) => {
+router.get("/api/scandals/:slug", vParam("slug", "slug"), (req, res) => {
   const s = getScandal(req.params.slug);
   if (!s) return res.status(404).json({ error: "not found" });
   res.json(s);
@@ -57,7 +57,7 @@ router.get("/api/scandals/:slug", (req, res) => {
 
 // ---- Issues: "Where India Stands" (task #5) ----
 router.get("/api/issues", asyncH(async (req, res) => {
-  const { listIssues } = await import("../store.js");
+  const { listIssues } = await import("../store/store.js");
   const { ISSUE_SEEDS } = await import("../data/issues.js");
   const done = listIssues();
   const bySlug = {}; for (const i of done) bySlug[i.slug] = i;
@@ -69,8 +69,8 @@ router.get("/api/issues", asyncH(async (req, res) => {
   });
   res.json(maybePaginate(items, req.query));
 }));
-router.get("/api/issues/:slug", asyncH(async (req, res) => {
-  const { getIssue } = await import("../store.js");
+router.get("/api/issues/:slug", vParam("slug", "slug"), asyncH(async (req, res) => {
+  const { getIssue } = await import("../store/store.js");
   const i = getIssue(req.params.slug);
   if (!i) return res.status(404).json({ error: "not generated yet" });
   res.json(i);
@@ -81,13 +81,13 @@ router.get("/api/funding/overview", asyncH(async (_req, res) => {
   const { fundingOverview } = await import("../data/electoral-bonds.js");
   res.json(fundingOverview());
 }));
-router.get("/api/funding/party/:party", asyncH(async (req, res) => {
+router.get("/api/funding/party/:party", vParam("party", "party"), asyncH(async (req, res) => {
   const { fundingForParty } = await import("../data/electoral-bonds.js");
   const f = fundingForParty(req.params.party);
   if (!f) return res.status(404).json({ error: "party not in disclosed electoral-bond data" });
   res.json(f);
 }));
-router.get("/api/politicians/:id/funding", asyncH(async (req, res) => {
+router.get("/api/politicians/:id/funding", vParam("id", "id"), asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
   const { fundingForParty } = await import("../data/electoral-bonds.js");
@@ -99,7 +99,7 @@ router.get("/api/politicians/:id/funding", asyncH(async (req, res) => {
 // resolves) so the UI can link each row to its report card.
 router.get("/api/scorecards", asyncH(async (_req, res) => {
   const [{ buildScorecards }, { resolveMinistry, resolveParty }] =
-    await Promise.all([import("../scorecard.js"), import("../data/ministries.js")]);
+    await Promise.all([import("../publishing/scorecard.js"), import("../data/ministries.js")]);
   const sc = buildScorecards();
   for (const b of sc.byMinistry) b.card_key = resolveMinistry(b.label)?.key ?? null;
   for (const b of sc.byParty) b.card_key = resolveParty(b.label)?.key ?? null;
@@ -117,10 +117,51 @@ router.get("/api/ministries", asyncH(async (_req, res) => {
   res.json(MINISTRIES.map((m) => ({ key: m.key, name: m.name, scope: m.scope, sectors: m.sectors ?? [], failures: counts[m.key] ?? 0 })));
 }));
 
-router.get("/api/ministries/:key(*)/card", asyncH(async (req, res) => {
+router.get("/api/ministries/:key(*)/card", vParam("key", "pathkey"), asyncH(async (req, res) => {
   try {
-    const { buildMinistryCard } = await import("../cards.js");
+    const { buildMinistryCard } = await import("../publishing/cards.js");
     res.json(buildMinistryCard(req.params.key));
+  } catch (err) {
+    console.error(err);
+    res.status(404).json({ error: "not found" });
+  }
+}));
+
+// ---- Organizations directory + cards (ministries, departments, PSUs, regulators) ----
+router.get("/api/orgs", asyncH(async (req, res) => {
+  const [{ ORGS }, { resolveMinistry }] = await Promise.all([import("../data/orgs.js"), import("../data/ministries.js")]);
+  const counts = {};
+  for (const s of listScandals()) {
+    const k = resolveMinistry(s.ministry)?.key;
+    if (k) counts[k] = (counts[k] ?? 0) + 1;
+  }
+  // Ledger evidence counts per org entity (one grouped query, best-effort).
+  let evCounts = {};
+  try {
+    const { db } = await import("../store/store.js");
+    const rows = db.prepare(`
+      SELECT json_extract(e.strong_ids, '$.org_key') AS org_key, count(*) AS c
+      FROM relationships r JOIN entities e ON e.id = r.dst_entity_id
+      WHERE e.kind = 'org' AND org_key IS NOT NULL GROUP BY org_key`).all();
+    for (const r of rows) evCounts[r.org_key] = r.c;
+  } catch {}
+  let list = ORGS;
+  const { kind, state, sector, q } = req.query;
+  if (kind) list = list.filter((o) => o.kind === kind);
+  if (state) list = list.filter((o) => o.scope.toLowerCase() === String(state).toLowerCase());
+  if (sector) list = list.filter((o) => (o.sectors ?? []).some((x) => x.toLowerCase().includes(String(sector).toLowerCase())));
+  if (q) { const qq = String(q).toLowerCase(); list = list.filter((o) => o.name.toLowerCase().includes(qq) || (o.short ?? "").toLowerCase().includes(qq)); }
+  res.json(list.map((o) => ({
+    key: o.key, kind: o.kind, scope: o.scope, name: o.name, short: o.short ?? null,
+    sectors: o.sectors ?? [], parent: o.parent ?? null,
+    failures: counts[o.key] ?? 0, evidence_mentions: evCounts[o.key] ?? 0,
+  })));
+}));
+
+router.get("/api/orgs/:key(*)/card", vParam("key", "pathkey"), asyncH(async (req, res) => {
+  try {
+    const { buildOrgCard } = await import("../publishing/cards.js");
+    res.json(await buildOrgCard(req.params.key));
   } catch (err) {
     console.error(err);
     res.status(404).json({ error: "not found" });
@@ -138,9 +179,9 @@ router.get("/api/parties", asyncH(async (_req, res) => {
   res.json(PARTIES.map((p) => ({ key: p.key, name: p.name, reps: rosterCounts[p.key] ?? 0 })));
 }));
 
-router.get("/api/parties/:key/card", asyncH(async (req, res) => {
+router.get("/api/parties/:key/card", vParam("key", "key"), asyncH(async (req, res) => {
   try {
-    const { buildPartyCard } = await import("../cards.js");
+    const { buildPartyCard } = await import("../publishing/cards.js");
     res.json(buildPartyCard(req.params.key, req.query.scope || "union"));
   } catch (err) {
     console.error(err);
@@ -151,10 +192,10 @@ router.get("/api/parties/:key/card", asyncH(async (req, res) => {
 // Failures on a given politician's watch (links scandals → minister dossier).
 // Matches both the stored minister_politician_id and a live name-token match,
 // so it works for historical ministers added before linking existed.
-router.get("/api/politicians/:id/scandals", asyncH(async (req, res) => {
+router.get("/api/politicians/:id/scandals", vParam("id", "id"), asyncH(async (req, res) => {
   const p = getPolitician(req.params.id);
   if (!p) return res.status(404).json({ error: "not found" });
-  const { resolveMinisterPolitician } = await import("../scandal-generator.js");
+  const { resolveMinisterPolitician } = await import("../publishing/scandal-generator.js");
   const hits = listScandals().filter((s) =>
     s.minister_politician_id === p.id ||
     (s.minister_in_charge?.name && resolveMinisterPolitician(s.minister_in_charge.name) === p.id));

@@ -6,9 +6,20 @@
 // still believes in; anything it no longer emits is marked 'stale' (kept for the
 // audit trail, excluded from synthesis). Leads remain the durable, human-gated
 // record — deleting every flag loses nothing that was already promoted.
-import { db, id as newId } from "./store.js";
+import { db, id as newId } from "../store/store.js";
 
 const J = (row) => (row ? JSON.parse(row.data) : null);
+
+/**
+ * @typedef {object} FlagQuery
+ * @property {string} [detector]
+ * @property {string} [severity]
+ * @property {string} [status] "active" (default), "stale", or "all"
+ * @property {string} [politicianId]
+ * @property {string} [q] free-text match over headline/rationale
+ * @property {number} [limit]
+ * @property {number} [offset]
+ */
 
 const insFlag = db.prepare(`INSERT OR REPLACE INTO flags
   (id, key, detector, severity, score, politician_id, entity_id, status, created_at, updated_at, run_id, data)
@@ -50,6 +61,7 @@ export function markStaleExcept(detector, runId) {
   return rows.length;
 }
 
+/** @param {FlagQuery} [query] */
 export function listFlags({ detector, severity, status = "active", politicianId, q, limit = 200, offset = 0 } = {}) {
   const where = [], args = [];
   if (status && status !== "all") { where.push("status = ?"); args.push(status); }
@@ -98,6 +110,7 @@ export function getFlag(idOrKey) {
   return J(db.prepare("SELECT data FROM flags WHERE id = ? OR key = ? LIMIT 1").get(idOrKey, idOrKey));
 }
 
+/** @param {{ detector?: string, status?: string }} [filter] */
 export function deleteFlags({ detector, status } = {}) {
   if (detector && status) return db.prepare("DELETE FROM flags WHERE detector = ? AND status = ?").run(detector, status).changes;
   if (detector) return db.prepare("DELETE FROM flags WHERE detector = ?").run(detector).changes;

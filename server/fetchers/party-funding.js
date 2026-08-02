@@ -7,6 +7,7 @@
 // in parentheses, e.g. "Bharatiya Janata Party (BJP)". Free, no key.
 import { fetchText, htmlToText, mapLimit , TIMEOUT_SLOW } from "./http.js";
 import { acquire } from "../util/host-limiter.js";
+import { noteFetchFailure, noteParseMiss } from "./observe.js";
 
 const BASE = "https://www.myneta.info/party/index.php";
 
@@ -116,7 +117,13 @@ function scrapeParty(entry) {
 
 async function scrapePartyFresh(entry) {
   const summaryHtml = await mynetaFetch(`${BASE}?action=summary&id=${entry.id}`, { timeoutMs: TIMEOUT_SLOW });
-  if (!summaryHtml) return null;
+  // The resolved null is cached for the rest of the run, so ONE failure here
+  // blanks party finance for every member of that party — the single widest
+  // silent-truncation blast radius in this fetcher.
+  if (!summaryHtml) {
+    noteFetchFailure("party_funding", "party_summary", "empty summary page", { party: entry.name ?? entry.id, party_id: entry.id });
+    return null;
+  }
 
   let summary = trim(htmlToText(summaryHtml, 5000), 2500);
   const si = summary.search(/Total (Assets|Income)/i);
@@ -125,15 +132,22 @@ async function scrapePartyFresh(entry) {
   // Most-recent financial years linked from the summary table → detailed breakdown.
   const years = [];
   const seenYears = new Set();
+  // Regex-scraped year links: if the summary page loaded but no year matched,
+  // MyNeta changed its markup and every per-year breakdown disappears.
   for (const m of summaryHtml.matchAll(/action=itr&year=(\d+)&id=\d+>\s*([\d-]+)/gi)) {
     if (seenYears.has(m[1])) continue;
     seenYears.add(m[1]);
     years.push({ year: m[1], label: m[2] });
   }
+  if (!years.length) noteParseMiss("party_funding", "itr_year_links", { bytes: summaryHtml.length, expected: "financial-year links", party_id: entry.id });
   years.sort((a, b) => Number(b.year) - Number(a.year));
   const blocks = await mapLimit(years.slice(0, DETAIL_YEARS), 2, async ({ year, label }) => {
     const h = await mynetaFetch(`${BASE}?action=itr&year=${year}&id=${entry.id}`, { timeoutMs: TIMEOUT_SLOW });
-    return h ? formatItr(h, label) : "";
+    if (!h) {
+      noteFetchFailure("party_funding", "itr_year", "empty ITR page", { party_id: entry.id, year, label });
+      return "";
+    }
+    return formatItr(h, label);
   });
   const detail = blocks.filter(Boolean).join("\n");
 

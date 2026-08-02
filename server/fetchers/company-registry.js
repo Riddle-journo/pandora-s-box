@@ -15,9 +15,10 @@
 // first-ever report for a rep has no registry check; the next run (incremental/
 // recheck) verifies what that report extracted. This is by design — names are
 // extracted once by the LLM from the affidavit, then verified forever in code.
-import { latestReport } from "../store.js";
+import { latestReport } from "../store/store.js";
 import { fetchJson } from "./http.js";
-import { dataGovKey } from "../config.js";
+import { dataGovKey } from "../platform/config.js";
+import { noteFetchFailure } from "./observe.js";
 
 const RESOURCE = "4dbe5667-7b6b-41d7-82af-211562424d9a"; // RoC-wise Company Master Data
 const API = `https://api.data.gov.in/resource/${RESOURCE}`;
@@ -72,8 +73,13 @@ export async function verifyCompanyName(name, { key = dataGovKey(), timeoutMs = 
     seen.add(q);
     let d;
     try {
-      d = await fetchJson(`${API}?api-key=${key}&format=json&limit=3&filters%5BCompanyName%5D=${encodeURIComponent(q)}`, { timeoutMs });
-    } catch { continue; }
+      d = await fetchJson(`${API}?api-key=${key}&format=json&limit=3&filters%5BCompanyName%5D=${encodeURIComponent(q)}`, { timeoutMs, source: "company_registry" });
+    } catch (err) {
+      // Skipping one name variant is fine; skipping ALL of them and returning
+      // null reads downstream as "this company is not registered".
+      noteFetchFailure("company_registry", "mca_lookup", err, { query: q });
+      continue;
+    }
     for (const r of d?.records ?? []) {
       // Belt-and-braces: only accept a record whose name really IS the one we
       // asked for — never trust the API's matching semantics blindly.

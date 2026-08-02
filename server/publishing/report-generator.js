@@ -18,15 +18,15 @@
 // then mechanically attaches the matching numbered source to each section,
 // so every [n] in the UI is a correct, clickable, verifiable link.
 import "dotenv/config";
-import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "./llm.js";
-import { listPoliticians, getPolitician, listEvidence, listTips, addReport, latestReport } from "./store.js";
-import { ingestFor } from "./ingest.js";
-import { computeFlags, scoreFromFlags } from "./analyzer.js";
+import { AI_BASE, MODEL, AI_KEY, makeClient, parseModelJson, arr, callWithRetry } from "../synthesis/llm.js";
+import { listPoliticians, getPolitician, listEvidence, listTips, addReport, latestReport } from "../store/store.js";
+import { ingestFor } from "../orchestration/ingest.js";
+import { computeFlags, scoreFromFlags } from "../detectors/analyzer.js";
 import { buildRelations } from "./graph.js";
 import { citationsFor, selectSources } from "./citations.js";
-import { FREE_CHAIN, freeComplete } from "./free-chain.js";
+import { FREE_CHAIN, freeComplete } from "../synthesis/free-chain.js";
 import { PARAMETERS, SCORING, computeOverall } from "./scoring.js";
-import { consoleStyle } from "./util/log.js";
+import { consoleStyle } from "../util/log.js";
 const clog = consoleStyle("report-generator");
 export { PARAMETERS, SCORING, computeOverall };
 
@@ -829,7 +829,7 @@ export async function generateReport(politicianId, { mode = "incremental", force
 //   as PART of report generation (task #14) — not in the ingester.
 const invokedDirectly = process.argv[1]?.replaceAll("\\", "/").endsWith("report-generator.js");
 if (invokedDirectly) {
-  const { startTimer } = await import("./util/timing.js");
+  const { startTimer } = await import("../util/timing.js");
   const stop = startTimer("Report generation");
   const args = process.argv.slice(2);
   const valFlags = ["--office", "--state", "--limit", "--mode"];
@@ -849,7 +849,7 @@ if (invokedDirectly) {
   if (target && target !== "all") {
     // Accept an id OR a name, and allow several comma-separated (test runs):
     //   node server/report-generator.js "Narendra Modi,Rahul Gandhi"
-    const { findPolitician } = await import("./store.js");
+    const { findPolitician } = await import("../store/store.js");
     list = target.split(",").map((t) => findPolitician(t.trim())).filter(Boolean);
     if (!list.length) { clog.error(`No politician matched "${target}". Use a full/partial name or an id.`); process.exit(1); }
   } else {
@@ -873,9 +873,9 @@ if (invokedDirectly) {
   if (!flags["no-scandals"]) {
     try {
       const { generateScandal } = await import("./scandal-generator.js");
-      const { maybeDiscover } = await import("./scandal-discovery.js");
-      const { SCANDAL_SEEDS } = await import("./data/scandal-seeds.js");
-      const { getScandal } = await import("./store.js");
+      const { maybeDiscover } = await import("../synthesis/scandal-discovery.js");
+      const { SCANDAL_SEEDS } = await import("../data/scandal-seeds.js");
+      const { getScandal } = await import("../store/store.js");
       let made = 0;
       for (const seed of SCANDAL_SEEDS) {
         if (getScandal(seed.slug)) continue;
@@ -892,9 +892,9 @@ if (invokedDirectly) {
   // adding an issue to data/issues.js automatically gets it analysed next run.
   if (!flags["no-issues"]) {
     try {
-      const { generateIssue } = await import("./issue-analyzer.js");
-      const { ISSUE_SEEDS } = await import("./data/issues.js");
-      const { getIssue } = await import("./store.js");
+      const { generateIssue } = await import("../synthesis/issue-analyzer.js");
+      const { ISSUE_SEEDS } = await import("../data/issues.js");
+      const { getIssue } = await import("../store/store.js");
       let made = 0;
       for (const seed of ISSUE_SEEDS) {
         if (getIssue(seed.slug)) continue;
