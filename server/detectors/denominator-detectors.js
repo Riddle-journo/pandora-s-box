@@ -17,6 +17,7 @@
 // to a non-politician actor). A statistical outlier is a lead to verify, never a
 // finding.
 import { db, upsertLead } from "../store/store.js";
+import { medianMad, robustZ, plausibilityFilter } from "./robust-stats.js";
 
 export const DENOM_DETECTOR_VERSION = "denominator-detector-v1";
 
@@ -25,6 +26,12 @@ export const DENOM_DEFAULTS = {
   WAGE_MIN_COHORT_N: 12,   // need this many districts in a month for a stable z-score
   WAGE_Z_MIN: 3,           // flag wage rate this many std-devs above the month's mean
   WAGE_ABS_MIN: 200,       // …and only if the rate itself is ≥ ₹200/day (noise floor)
+  // Hard plausibility ceiling. MGNREGA wage rates are centrally notified per
+  // state and sit in the low hundreds of rupees a day; anything past this is a
+  // broken extraction, so it is excluded from the statistics AND from the leads
+  // and reported as a data-quality problem instead. Generous on purpose — the
+  // job is to catch the impossible, not to second-guess the merely high.
+  WAGE_PLAUSIBLE_MAX: 1000,
   // Payment-delay (the MGNREGA 15-day wage mandate).
   PCT_PAID_MAX: 50,        // flag districts paying ≤ this % of wages within 15 days
   DELAY_EXP_MIN: 100,      // …only when expenditure is material (≥ ₹100 lakh), so a
@@ -51,35 +58,80 @@ function meanStd(xs) {
 // (fin_year-month): compare each district's declared average daily wage against all
 // districts reporting that month. A statewide wage rate is centrally notified, so a
 // district far above the pack is a candidate for over-reported muster/wage figures.
+// Uses the MEDIAN and MAD, not the mean and standard deviation, and refuses to
+// score any wage outside a plausible band at all. Both were live defects:
+// 407 of 6,410 district rows carry impossible values (worst: ₹1,481,735 as an
+// average DAILY wage), and because the old code used mean/σ those same rows
+// dragged one month's cohort mean from about ₹368 to ₹2,403 — inflating the
+// baseline so far that genuine outliers were hidden behind fake ones.
+//
+// Implausible rows are returned as a data-quality report, never as leads. A
+// wage of ₹1.4 lakh a day is a broken extractor, and an operator needs told
+// that; publishing it as a 26.9σ finding is how a project loses its credibility.
 export function detectMgnregaWageOutliers(records = [], overrides = {}) {
-  const { WAGE_MIN_COHORT_N, WAGE_Z_MIN, WAGE_ABS_MIN } = { ...DENOM_DEFAULTS, ...overrides };
-  const byPeriod = new Map();
-  for (const r of records) {
-    if (r.wage_rate == null || !r.period) continue;
-    (byPeriod.get(r.period) ?? byPeriod.set(r.period, []).get(r.period)).push(r);
+  const { WAGE_MIN_COHORT_N, WAGE_Z_MIN, WAGE_ABS_MIN, WAGE_PLAUSIBLE_MAX } = { ...DENOM_DEFAULTS, ...overrides };
+
+  const dated = records.filter((r) => r.wage_rate != null && r.period);
+  const { kept, summary } = plausibilityFilter(dated, (r) => r.wage_rate, {
+    min: 1, max: WAGE_PLAUSIBLE_MAX, label: "MGNREGA daily wage (₹)",
+  });
+
+  // COHORT = STATE × month, not nation × month. MGNREGA wage rates are notified
+  // per state, so every district in the highest-paying state is a large positive
+  // outlier against a national median — which is a fact about the notification,
+  // not about the district. Judged nationally this detector flagged 552
+  // districts, led by whole states at once; judged against their own state's
+  // districts it finds only the districts that deviate from the rate their
+  // neighbours were paid, which is the only version that could indicate an
+  // over-reported muster roll.
+  const byCohort = new Map();
+  for (const r of kept) {
+    const key = `${stateOf(r.name)}|${r.period}`;
+    (byCohort.get(key) ?? byCohort.set(key, []).get(key)).push(r);
   }
+
   const out = [];
-  for (const [period, rows] of byPeriod) {
-    if (rows.length < WAGE_MIN_COHORT_N) continue;
-    const { mean, std } = meanStd(rows.map((r) => r.wage_rate));
-    if (std === 0) continue;
+  let thinCohorts = 0;
+  for (const [key, rows] of byCohort) {
+    const [state, period] = key.split("|");
+    // A small state-month is skipped, never pooled back into a national cohort:
+    // pooling is the exact error this grouping exists to avoid.
+    if (rows.length < WAGE_MIN_COHORT_N) { thinCohorts++; continue; }
+    const stats = medianMad(rows.map((r) => r.wage_rate));
+    if (!(stats.sigma > 0)) continue;   // every district on the notified rate — nothing to be an outlier of
     for (const r of rows) {
-      const z = (r.wage_rate - mean) / std;
-      if (z < WAGE_Z_MIN || r.wage_rate < WAGE_ABS_MIN) continue;
+      const z = robustZ(r.wage_rate, stats);
+      if (z == null || z < WAGE_Z_MIN || r.wage_rate < WAGE_ABS_MIN) continue;
       const signal_score = Math.min(Math.round(z * 6), 40);
       out.push({
         actor_id: r.entity_id, actor_name: r.name,
-        vector: "MGNREGA_WAGE_OUTLIER", instrument: "average MGNREGA wage rate vs same-month district cohort",
+        vector: "MGNREGA_WAGE_OUTLIER", instrument: "average MGNREGA wage rate vs same-state, same-month districts",
         beneficiary: `wage rate ${period}`, beneficiary_kind: "district",
         signal_score, severity: sev(signal_score),
-        headline: `${r.name}: MGNREGA average wage ₹${r.wage_rate.toFixed(0)}/day in ${period} is ${z.toFixed(1)}σ above the national district mean (₹${mean.toFixed(0)}).`,
-        detail: `Average daily wage ₹${r.wage_rate.toFixed(1)} vs the ${period} district-cohort mean ₹${mean.toFixed(1)} (std ₹${std.toFixed(1)}, n=${rows.length}) → z=${z.toFixed(2)}. Wage rates are centrally notified per state, so a large positive outlier is a candidate for over-reported wage/muster figures — verify against the state's notified rate, not a finding.`,
+        headline: `${r.name}: MGNREGA average wage ₹${r.wage_rate.toFixed(0)}/day in ${period} is ${z.toFixed(1)}σ above the median for ${state} districts that month (₹${stats.median.toFixed(0)}).`,
+        detail: `Average daily wage ₹${r.wage_rate.toFixed(1)} vs ₹${stats.median.toFixed(1)} across the ${rows.length} ${state} districts reporting in ${period} (robust spread ₹${stats.sigma.toFixed(1)}, method ${stats.method}) → z=${z.toFixed(2)}. The comparison is within the state because MGNREGA wage rates are notified per state — a district above its own state's rate is the anomaly; a state above the national rate is just the notification. Median-based statistics are used because a few corrupt rows destroy a mean. A candidate for over-reported wage/muster figures, not a finding.`,
         detector_version: DENOM_DETECTOR_VERSION, evidence_urls: [],
-        data: { statistic: "wage_rate_zscore", period, wage_rate: r.wage_rate, cohort_mean: mean, cohort_std: std, cohort_n: rows.length, z, source: "ogd-mgnrega-glance" },
+        data: {
+          statistic: "wage_rate_robust_zscore", period, state, wage_rate: r.wage_rate,
+          cohort_median: stats.median, cohort_sigma: stats.sigma, cohort_mad: stats.mad,
+          cohort_n: rows.length, z, method: `median+${stats.method}`,
+          cohort_definition: "state x month", source: "ogd-mgnrega-glance",
+        },
       });
     }
   }
+  out.dataQuality = { ...summary, thin_state_months_skipped: thinCohorts };
   return out;
+}
+
+// District entities are named "STATE / DISTRICT" by the open-data connector.
+// Anything unparseable becomes its own cohort rather than being lumped into a
+// wrong one — a lone district simply falls below the cohort minimum and is
+// skipped, which is the safe failure.
+function stateOf(name) {
+  const s = String(name ?? "");
+  const i = s.indexOf(" / ");
+  return i > 0 ? s.slice(0, i).trim() : s.trim() || "UNKNOWN";
 }
 
 // ── b. MGNREGA_PAYMENT_DELAY — late wage payment on material spend ─────────────
