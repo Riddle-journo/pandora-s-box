@@ -27,17 +27,60 @@ test.after(() => {
 });
 
 // ── wage outlier ─────────────────────────────────────────────────────────────
-test("wage outlier: flags a district far above the same-month cohort, not the pack", () => {
-  // 12 districts ~₹250, one at ₹600 in the same period.
+test("wage outlier: flags a district far above its own state's districts that month", () => {
+  // 12 districts ~₹250, one at ₹600 in the same state and period. Names carry
+  // the "STATE / DISTRICT" shape the open-data connector always produces —
+  // the cohort is state x month, because MGNREGA rates are notified per state.
   const recs = [];
-  for (let i = 0; i < 12; i++) recs.push({ entity_id: `n${i}`, name: `Normal ${i}`, period: "2024-2025-Dec", wage_rate: 250 + (i % 3), total_exp: 500 });
-  recs.push({ entity_id: "hot", name: "Hot District", period: "2024-2025-Dec", wage_rate: 600, total_exp: 500 });
+  for (let i = 0; i < 12; i++) recs.push({ entity_id: `n${i}`, name: `TESTSTATE / Normal ${i}`, period: "2024-2025-Dec", wage_rate: 250 + (i % 3), total_exp: 500 });
+  recs.push({ entity_id: "hot", name: "TESTSTATE / Hot District", period: "2024-2025-Dec", wage_rate: 600, total_exp: 500 });
   const out = detectMgnregaWageOutliers(recs);
   assert.equal(out.length, 1, "only the outlier flags");
   assert.equal(out[0].actor_id, "hot");
   assert.equal(out[0].vector, "MGNREGA_WAGE_OUTLIER");
   assert.equal(out[0].beneficiary_kind, "district");
   assert.ok(out[0].data.z >= 3);
+  assert.equal(out[0].data.state, "TESTSTATE");
+  assert.equal(out[0].data.cohort_definition, "state x month");
+});
+
+test("REGRESSION: a whole high-paying state is not flagged against a national median", () => {
+  // The live failure. MGNREGA wage rates are notified per state, so judged
+  // nationally every district of the highest-paying state reads as a 3σ
+  // outlier — a fact about the notification, not about any district. Judged
+  // nationally this produced 552 leads led by whole states at once.
+  const recs = [];
+  // A large low-wage state, uniformly on its notified rate.
+  for (let i = 0; i < 20; i++) recs.push({ entity_id: `lo${i}`, name: `LOWSTATE / D${i}`, period: "p", wage_rate: 220 + (i % 4), total_exp: 500 });
+  // A smaller high-wage state, ALSO uniformly on its own (higher) rate.
+  for (let i = 0; i < 14; i++) recs.push({ entity_id: `hi${i}`, name: `HIGHSTATE / D${i}`, period: "p", wage_rate: 380 + (i % 4), total_exp: 500 });
+
+  const out = detectMgnregaWageOutliers(recs);
+  assert.equal(out.length, 0,
+    "every HIGHSTATE district sits on its own state's notified rate — none is an anomaly");
+
+  // …and a district that genuinely departs from its own state's rate still flags.
+  recs.push({ entity_id: "odd", name: "HIGHSTATE / Outlier", period: "p", wage_rate: 700, total_exp: 500 });
+  const out2 = detectMgnregaWageOutliers(recs);
+  assert.equal(out2.length, 1);
+  assert.equal(out2[0].actor_id, "odd");
+  assert.equal(out2[0].data.state, "HIGHSTATE");
+});
+
+test("REGRESSION: an impossible wage is a data-quality report, never a lead", () => {
+  // ₹1,481,735 as an average DAILY wage is a broken extraction. The engine used
+  // to publish it as a 26.9σ finding — and, because the baseline was a mean,
+  // that one row also inflated the cohort centre enough to hide the real ones.
+  const recs = [];
+  for (let i = 0; i < 12; i++) recs.push({ entity_id: `n${i}`, name: `S / N${i}`, period: "p", wage_rate: 250 + (i % 3), total_exp: 500 });
+  recs.push({ entity_id: "broken", name: "S / PONDICHERRY", period: "p", wage_rate: 1_481_735, total_exp: 500 });
+  recs.push({ entity_id: "real", name: "S / Real Outlier", period: "p", wage_rate: 600, total_exp: 500 });
+
+  const out = detectMgnregaWageOutliers(recs);
+  assert.ok(!out.some((l) => l.actor_id === "broken"), "the impossible value produces no lead");
+  assert.ok(out.some((l) => l.actor_id === "real"), "and no longer masks the genuine outlier");
+  assert.equal(out.dataQuality.rejected, 1);
+  assert.equal(out.dataQuality.worst[0].value, 1_481_735);
 });
 
 test("wage outlier: no flag below cohort size, or when wage under the noise floor", () => {
