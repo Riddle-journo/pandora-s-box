@@ -99,6 +99,16 @@ export function upsertLead(lead) {
     ? { ...existing, ...incoming, key, updated_at: now }
     : { ...incoming, id: id(), key, status: incoming.status ?? "detected", detected_at: now };
   if (existing && !forceStatus && TERMINAL_LEAD_STATUS.has(existing.status)) row.status = existing.status;
+  // Re-detection revives a retired lead. `stale` means "the data stopped
+  // supporting this"; a detector emitting it again is the data saying otherwise,
+  // and without this the row would stay hidden forever — a sweep that can only
+  // ever remove is a sweep that silently buries findings. Human decisions are
+  // untouched: only the machine-set `stale` is cleared.
+  if (existing?.status === "stale" && !incoming.status) {
+    row.status = "detected";
+    delete row.stale_at;
+    delete row.stale_reason;
+  }
   if (!row.id) row.id = id();
   insLead.run({
     id: row.id, key: row.key, status: row.status ?? "detected", vector: row.vector ?? null,
