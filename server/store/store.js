@@ -51,7 +51,7 @@ export {
   addTip, listTips, reviewTip,
   listScandals, listProposals, deleteScandal, getScandal, upsertScandal,
   upsertLead, getLead, listLeads, listLeadProposals, deleteLead,
-  recordLeadFeedback, detectorPrecision,
+  recordLeadFeedback, detectorPrecision, retireLeadsWithoutActiveFlags, retireLeadsNotInRun,
   upsertStory, getStory, listStories,
 } from "./content.js";
 

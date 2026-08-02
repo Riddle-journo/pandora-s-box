@@ -16,7 +16,7 @@
 // subject ENTITY (actor_id = entity_id → upsertLead stores it, fromLegacy routes it
 // to a non-politician actor). A statistical outlier is a lead to verify, never a
 // finding.
-import { db, upsertLead } from "../store/store.js";
+import { db, upsertLead, retireLeadsNotInRun } from "../store/store.js";
 import { medianMad, robustZ, plausibilityFilter } from "./robust-stats.js";
 
 export const DENOM_DETECTOR_VERSION = "denominator-detector-v1";
@@ -103,18 +103,29 @@ export function detectMgnregaWageOutliers(records = [], overrides = {}) {
       const z = robustZ(r.wage_rate, stats);
       if (z == null || z < WAGE_Z_MIN || r.wage_rate < WAGE_ABS_MIN) continue;
       const signal_score = Math.min(Math.round(z * 6), 40);
+      // Lead with the multiple, not the sigma. When a state's districts are all
+      // on the same notified rate the spread is tiny, so z runs to "136.9σ" —
+      // arithmetically correct and rhetorically absurd, the kind of overclaim
+      // that teaches a reader to distrust every other number on the page.
+      // "2.9× the state median" says the same thing and survives scrutiny.
+      const multiple = stats.median > 0 ? r.wage_rate / stats.median : null;
+      const tightCohort = z > 25;
       out.push({
         actor_id: r.entity_id, actor_name: r.name,
         vector: "MGNREGA_WAGE_OUTLIER", instrument: "average MGNREGA wage rate vs same-state, same-month districts",
         beneficiary: `wage rate ${period}`, beneficiary_kind: "district",
         signal_score, severity: sev(signal_score),
-        headline: `${r.name}: MGNREGA average wage ₹${r.wage_rate.toFixed(0)}/day in ${period} is ${z.toFixed(1)}σ above the median for ${state} districts that month (₹${stats.median.toFixed(0)}).`,
-        detail: `Average daily wage ₹${r.wage_rate.toFixed(1)} vs ₹${stats.median.toFixed(1)} across the ${rows.length} ${state} districts reporting in ${period} (robust spread ₹${stats.sigma.toFixed(1)}, method ${stats.method}) → z=${z.toFixed(2)}. The comparison is within the state because MGNREGA wage rates are notified per state — a district above its own state's rate is the anomaly; a state above the national rate is just the notification. Median-based statistics are used because a few corrupt rows destroy a mean. A candidate for over-reported wage/muster figures, not a finding.`,
+        headline: `${r.name}: MGNREGA average wage ₹${r.wage_rate.toFixed(0)}/day in ${period}`
+          + (multiple ? ` — ${multiple.toFixed(1)}× the ₹${stats.median.toFixed(0)} median for ${state} districts that month.` : ` is an outlier for ${state} that month.`),
+        detail: `Average daily wage ₹${r.wage_rate.toFixed(1)} vs ₹${stats.median.toFixed(1)} across the ${rows.length} ${state} districts reporting in ${period}`
+          + `${multiple ? ` — ${multiple.toFixed(2)}× the state median` : ""} (robust spread ₹${stats.sigma.toFixed(1)}, method ${stats.method}, z=${z.toFixed(1)})`
+          + `${tightCohort ? ". The z-score is very large because nearly every district in this state reported the identical notified rate, leaving almost no spread — read the multiple, not the sigma" : ""}`
+          + `. The comparison is within the state because MGNREGA wage rates are notified per state — a district above its own state's rate is the anomaly; a state above the national rate is just the notification. Median-based statistics are used because a few corrupt rows destroy a mean. A candidate for over-reported wage/muster figures, not a finding.`,
         detector_version: DENOM_DETECTOR_VERSION, evidence_urls: [],
         data: {
           statistic: "wage_rate_robust_zscore", period, state, wage_rate: r.wage_rate,
           cohort_median: stats.median, cohort_sigma: stats.sigma, cohort_mad: stats.mad,
-          cohort_n: rows.length, z, method: `median+${stats.method}`,
+          cohort_n: rows.length, z, multiple_of_median: multiple, tight_cohort: tightCohort, method: `median+${stats.method}`,
           cohort_definition: "state x month", source: "ogd-mgnrega-glance",
         },
       });
@@ -314,9 +325,20 @@ export function runDenominatorDetectors({ log = console.log } = {}) {
   const priced = detectProcurementAboveMarket(procurement, mandiBaseline);
 
   const all = [...wage, ...delay, ...overspend, ...priced];
-  for (const c of all) upsertLead(c);
+  const written = all.map((c) => upsertLead(c));
+
+  // This suite re-derives its whole population every run, so a lead it stopped
+  // producing is a lead the data (or the corrected method) no longer supports.
+  // Without this sweep the old "₹1,440,994/day, 26.9σ" rows — now excluded as
+  // impossible — stayed at the top of the list forever.
+  const retired = retireLeadsNotInRun(
+    ["MGNREGA_WAGE_OUTLIER", "MGNREGA_PAYMENT_DELAY", "SCHEME_OVERSPEND", "PROCUREMENT_ABOVE_MARKET"],
+    written.map((l) => l.key),
+  ).retired;
 
   return {
+    retired,
+    data_quality: wage.dataQuality ?? null,
     inputs: {
       mgnrega_district_months: mgnrega.length, scheme_periods: scheme.length,
       procurement_rows: procurement.length, mandi_commodities: mandiBaseline.size,
@@ -337,5 +359,6 @@ if (isMain) {
   console.log(`\n[denominator-detectors] version: ${DENOM_DETECTOR_VERSION}`);
   console.log("[denominator-detectors] inputs:", JSON.stringify(res.inputs));
   console.log("[denominator-detectors] candidates:", JSON.stringify(res.counts));
-  console.log(`[denominator-detectors] total upserted: ${res.upserted}`);
+  console.log(`[denominator-detectors] total upserted: ${res.upserted}, retired ${res.retired}`);
+  if (res.data_quality?.rejected) console.log(`[denominator-detectors] DATA QUALITY: ${res.data_quality.rejected} of ${res.data_quality.total} wage rows refused as impossible (worst ${res.data_quality.worst?.[0]?.value} at ${res.data_quality.worst?.[0]?.name})`);
 }

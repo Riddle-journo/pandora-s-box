@@ -10,7 +10,7 @@
 // Leads land as status 'detected' in the SAME queue as always: GLM L2/L3
 // investigates, the referee filters, and the admin gate decides. upsertLead
 // preserves any human-advanced status, so re-synthesis never regresses a lead.
-import { upsertLead } from "../store/store.js";
+import { upsertLead, retireLeadsWithoutActiveFlags } from "../store/store.js";
 import { activeFlagsBySubject, listFlags } from "../detectors/flags.js";
 import { resolveSettings } from "../detectors/engine-settings.js";
 import { ENGINE_GROUPS } from "../detectors/engine-groups.js";
@@ -128,5 +128,12 @@ export async function runLeadSynthesis({ log = console.log } = {}) {
       log(`[synthesis] ${hubs} network-hub meta-lead(s)`);
     } catch (err) { log(`[synthesis] hubs skipped: ${err.message}`); }
   }
-  return { promoted, clusters, hubs };
+  // Retire leads whose flag no longer exists. Flags have had a staleness sweep
+  // since the engine was written; leads never did, so every false positive a
+  // detector fix removed stayed on the page regardless. Soft, and only for
+  // leads no human has ruled on.
+  const retired = retireLeadsWithoutActiveFlags();
+  if (retired.retired) log(`[synthesis] ${retired.retired} lead(s) retired — their flag is no longer active`);
+
+  return { promoted, clusters, hubs, retired: retired.retired };
 }

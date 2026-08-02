@@ -112,6 +112,96 @@ export function getLead(idOrKey) {
   return J(db.prepare("SELECT data FROM investigation_leads WHERE id = ? OR key = ? LIMIT 1").get(idOrKey, idOrKey));
 }
 
+/**
+ * Retire leads of the given vectors that a full-population run did NOT re-emit.
+ *
+ * The counterpart to `retireLeadsWithoutActiveFlags` for detectors that write
+ * leads directly instead of going through the flag store — the denominator
+ * suite, which has no flag rows for the sweep to follow. Without this, a
+ * detector fix leaves its old output standing: after the MGNREGA wage detector
+ * gained a plausibility bound and a state-scoped cohort, the leads announcing
+ * "₹1,440,994/day, 26.9σ above the national mean" were still the top of the
+ * list, because nothing had told them they were superseded.
+ *
+ * Only safe for a run over the WHOLE population — a scoped run legitimately
+ * says nothing about the subjects it skipped. Soft, and never touches a lead a
+ * human has ruled on.
+ *
+ * @param {string[]} vectors   the vectors this run owns and re-derived in full
+ * @param {string[]} liveKeys  the lead keys it emitted
+ */
+export function retireLeadsNotInRun(vectors = [], liveKeys = []) {
+  if (!vectors.length) return { retired: 0 };
+  const live = new Set(liveKeys);
+  const rows = db.prepare(`
+    SELECT id, key, data FROM investigation_leads
+     WHERE coalesce(status,'detected') = 'detected'
+       AND vector IN (${vectors.map(() => "?").join(",")})
+  `).all(...vectors);
+
+  const upd = db.prepare("UPDATE investigation_leads SET status = 'stale', data = ? WHERE id = ?");
+  const now = new Date().toISOString();
+  let retired = 0;
+  const run = db.transaction((list) => {
+    for (const r of list) {
+      if (live.has(r.key)) continue;
+      const d = J(r) ?? {};
+      d.status = "stale";
+      d.stale_at = now;
+      d.stale_reason = "a full re-run of this detector no longer produces this lead — the data or the method stopped supporting it";
+      upd.run(JSON.stringify(d), r.id);
+      retired++;
+    }
+  });
+  run(rows);
+  return { scanned: rows.length, retired };
+}
+
+/**
+ * Retire leads whose backing flag is no longer active.
+ *
+ * Flags already have a staleness sweep: a full-population run that stops
+ * flagging a subject marks the old flag `stale`, because the data no longer
+ * supports it. Leads had no equivalent, so every lead ever promoted stayed
+ * visible forever — which meant no detector improvement could ever clean up
+ * after itself. After the base-rate guard retired 104 MPLADS flags and the
+ * plausibility bound retired the impossible-wage ones, 359 leads were left
+ * standing on flags that no longer existed.
+ *
+ * SOFT only, and only for leads no human has ruled on: `published` and
+ * `rejected` are terminal, and the rejected rows are the eval corpus. A stale
+ * lead keeps its row and its reason, so a later run can revive it and so the
+ * record of what was once believed stays auditable.
+ *
+ * @returns {{scanned: number, retired: number}}
+ */
+export function retireLeadsWithoutActiveFlags() {
+  const rows = db.prepare(`
+    SELECT l.id, l.data
+      FROM investigation_leads l
+     WHERE coalesce(l.status,'detected') = 'detected'
+       AND json_extract(l.data, '$.data.engine_flag_key') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM flags f
+          WHERE f.key = json_extract(l.data, '$.data.engine_flag_key')
+            AND f.status = 'active')
+  `).all();
+
+  const upd = db.prepare("UPDATE investigation_leads SET status = 'stale', data = ? WHERE id = ?");
+  const now = new Date().toISOString();
+  const run = db.transaction((list) => {
+    for (const r of list) {
+      const d = J(r) ?? {};   // J takes the ROW, not the blob
+      d.status = "stale";
+      d.stale_at = now;
+      d.stale_reason = "the detector flag behind this lead is no longer active — the data stopped supporting it";
+      upd.run(JSON.stringify(d), r.id);
+    }
+  });
+  run(rows);
+  return { scanned: rows.length, retired: rows.length };
+}
+
 // Rejected leads are SOFT-deleted (kept for the eval/label corpus), so the
 // unfiltered listing hides them — that is exactly what callers already assume,
 // because a rejection used to DELETE the row outright. This matters beyond
