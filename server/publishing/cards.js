@@ -20,6 +20,9 @@ import {
   listPoliticians, cardLeaderboardRows,
 } from "../store/store.js";
 import { blankBucket, addToBucket, finalize } from "./scorecard.js";
+import {
+  ledgerViewForPolitician, ledgerFindings, mergeFindings, growthOf, peerContextFor,
+} from "./card-ledger.js";
 import { getMinistry, resolveMinistry, getParty, resolveParty, PARTIES } from "../data/ministries.js";
 import { getOrg, orgChildren, resolveOrg } from "../data/orgs.js";
 import { fundingForParty } from "../data/electoral-bonds.js";
@@ -63,6 +66,31 @@ const PARAM_RELEVANT_SOURCES = {
   abuse_of_power: ["eci_affidavit", "mplads"],
 };
 
+// A parameter is also scoreable when the LEDGER carries the figures it is
+// judged on, not only when an evidence row with the right source_type exists.
+// Without this, a politician whose affidavit reached `facts` but never minted a
+// typed evidence row would be scored -1 on data we demonstrably hold.
+const PARAM_LEDGER_METRICS = {
+  manifesto: [],
+  corruption: ["declared_assets", "declared_liabilities", "criminal_cases"],
+  favoritism: ["declared_business_interests"],
+  hypocrisy: [],
+  abuse_of_power: ["criminal_cases", "mplads_utilization_pct"],
+};
+
+// Peer-comparison wording. Direction matters: "richer than 90%" and "more
+// charges than 90%" are both true statements about a high percentile, but only
+// one of them reads as English for each metric.
+const PEER_PHRASING = [
+  ["declared_assets", { label: "Declared assets", verb: () => "higher than" }],
+  ["declared_income", { label: "Declared income", verb: () => "higher than" }],
+  ["declared_liabilities", { label: "Declared liabilities", verb: () => "higher than" }],
+  ["election_expenditure", { label: "Election spending", verb: () => "higher than" }],
+  ["criminal_cases", { label: "Declared criminal cases", verb: (p) => (p >= 50 ? "more than" : "fewer than or equal to") }],
+  ["mplads_utilization_pct", { label: "MPLADS utilisation", verb: () => "higher than" }],
+];
+const PEER_MONEY = new Set(["declared_assets", "declared_income", "declared_liabilities", "election_expenditure"]);
+
 // Key sources a complete card draws on, for the data-gaps section.
 const EXPECTED_SOURCES = [
   { type: "eci_affidavit", label: "Sworn election affidavit (assets, cases)" },
@@ -78,7 +106,14 @@ export function buildPoliticianCard(pid) {
   const p = getPolitician(pid);
   if (!p) throw new Error(`no politician ${pid}`);
   const evidence = listEvidence(pid);
-  const { flags, facts } = computeFlags(evidence);
+  // Two sources, one rubric. Evidence `numbers` carry richer nested detail and
+  // win on conflict; the typed ledger fills every gap — which for most of the
+  // roster is the difference between a populated card and "INSUFFICIENT_DATA".
+  const ledger = ledgerViewForPolitician(pid);
+  const { flags, facts } = mergeFindings(computeFlags(evidence), ledgerFindings(ledger));
+  const lm = ledger.metrics ?? {};
+  const lval = (k) => lm[k]?.value ?? null;
+  const lsrc = (k) => lm[k]?.url ?? null;
   const { affidavits, mplads, companies, defaulters } = gatherNumbers(evidence);
   const sections = [];
 
@@ -112,6 +147,41 @@ export function buildPoliticianCard(pid) {
       w.facts.push(fact(`${a.election_year ?? "Undated"} affidavit: net worth ${formatRupees(a.net_worth)}${a.total_liabilities ? `, liabilities ${formatRupees(a.total_liabilities)}` : ""}.`, "INFO", [a.url]));
     w.template_prose = `Declared net worth across ${affidavits.length} sworn affidavit${affidavits.length > 1 ? "s" : ""}: ${affidavits.map((a) => `${a.election_year ?? "?"} — ${formatRupees(a.net_worth)}`).join("; ")}.`;
     sections.push(w);
+  } else if (lval("declared_assets") != null) {
+    // Same section, built from the typed ledger for the ~3,000 representatives
+    // whose affidavit figures were extracted straight into `facts` and never
+    // attached to an evidence row as structured `numbers`.
+    const assets = lval("declared_assets");
+    const liabilities = lval("declared_liabilities");
+    const w = section("wealth", "Wealth & Assets");
+    const netWorth = liabilities != null ? assets - liabilities : assets;
+    w.stats.push({ label: "Declared net worth", value: formatRupees(netWorth) });
+    w.stats.push({ label: "Total assets", value: formatRupees(assets) });
+    if (liabilities != null) w.stats.push({ label: "Liabilities", value: formatRupees(liabilities) });
+    const growth = growthOf(ledger.series?.declared_assets);
+    if (growth) w.stats.push({ label: "Asset growth", value: `${growth.multiple}×`, trend: `over ${growth.years} yrs` });
+
+    // Movable-asset breakdown — the line items readers actually recognise.
+    for (const [key, label] of [
+      ["cash_in_hand", "Cash in hand"], ["jewellery_value", "Jewellery"],
+      ["vehicles_value", "Vehicles"], ["immovable_total", "Immovable property"],
+      ["loans_given", "Loans given out"],
+    ]) {
+      if (lval(key) != null) w.stats.push({ label, value: formatRupees(lval(key)) });
+    }
+    if (lval("declared_immovable_properties") != null)
+      w.stats.push({ label: "Properties declared", value: String(lval("declared_immovable_properties")) });
+
+    if (ledger.series?.declared_assets?.length)
+      w.series = ledger.series.declared_assets.map((p) => ({ year: p.year, net_worth: p.value, display: formatRupees(p.value) }));
+    w.facts.push(fact(
+      `Declared assets ${formatRupees(assets)}${liabilities != null ? `, liabilities ${formatRupees(liabilities)}` : ""}${lm.declared_assets.year ? ` (${lm.declared_assets.year} declaration)` : ""}.`,
+      "INFO", [lsrc("declared_assets")]));
+    if (growth)
+      w.facts.push(fact(`Declared assets rose from ${formatRupees(growth.from)} in ${growth.from_year} to ${formatRupees(growth.to)} in ${growth.to_year} — ${growth.multiple}× over ${growth.years} years.`,
+        growth.multiple >= 3 ? "NOTABLE" : "INFO", [lsrc("declared_assets")]));
+    w.template_prose = w.facts[0].text;
+    sections.push(w);
   }
 
   // Criminal record (declared case COUNT — per-case detail needs the affidavit itself)
@@ -127,6 +197,42 @@ export function buildPoliticianCard(pid) {
       [latestAff.url]));
     c.template_prose = c.facts[0].text + " See the affidavit for case details.";
     sections.push(c);
+  } else if (lval("criminal_cases") != null) {
+    const n = lval("criminal_cases");
+    const c = section("criminal", "Criminal Record (self-declared)");
+    c.stats.push({ label: "Cases declared", value: String(n) });
+    c.facts.push(fact(
+      n === 0
+        ? "No criminal cases declared in the sworn affidavit."
+        : `${n} criminal case${n > 1 ? "s" : ""} declared in the sworn affidavit (charges, not convictions).`,
+      n === 0 ? "CLEAN" : n >= 3 ? "NOTABLE" : "INFO", [lsrc("criminal_cases")]));
+    c.template_prose = c.facts[0].text + " See the affidavit for case details.";
+    sections.push(c);
+  }
+
+  // Income declared to the tax authorities, year by year. A single net-worth
+  // figure invites the wrong question ("is that a lot?"); an income series next
+  // to an asset series invites the right one ("do these two move together?").
+  const incomeSeries = ledger.series?.declared_income;
+  if (incomeSeries?.length || lval("declared_income") != null) {
+    const inc = section("income", "Declared Income");
+    if (lval("declared_income") != null)
+      inc.stats.push({ label: `Latest declared income${lm.declared_income.year ? ` (${lm.declared_income.year})` : ""}`, value: formatRupees(lval("declared_income")) });
+    if (lval("election_expenditure") != null)
+      inc.stats.push({ label: "Declared election spend", value: formatRupees(lval("election_expenditure")) });
+    if (incomeSeries?.length) {
+      inc.series = incomeSeries.map((p) => ({ year: p.year, value: p.value, display: formatRupees(p.value) }));
+      inc.facts.push(fact(
+        `Income declared across ${incomeSeries.length} years: ${incomeSeries.map((p) => `${p.year} — ${formatRupees(p.value)}`).join("; ")}.`,
+        "INFO", [lsrc("declared_income")]));
+      const ig = growthOf(incomeSeries);
+      if (ig && ig.multiple >= 3)
+        inc.facts.push(fact(`Declared income rose ${ig.multiple}× between ${ig.from_year} and ${ig.to_year}.`, "NOTABLE", [lsrc("declared_income")]));
+    } else {
+      inc.facts.push(fact(`Declared income ${formatRupees(lval("declared_income"))}${lm.declared_income.year ? ` (${lm.declared_income.year})` : ""}.`, "INFO", [lsrc("declared_income")]));
+    }
+    inc.template_prose = inc.facts[0]?.text ?? "";
+    sections.push(inc);
   }
 
   // Public funds (MPLADS, MPs only)
@@ -136,6 +242,20 @@ export function buildPoliticianCard(pid) {
     if (mplads.allocated != null) m.stats.push({ label: "Allocated", value: formatRupees(mplads.allocated) });
     if (mplads.unspent != null) m.stats.push({ label: "Unspent", value: formatRupees(mplads.unspent) });
     m.facts.push(fact(`${pct(mplads.utilization_pct)} of MPLADS local-development funds utilised${mplads.unspent ? `, ${formatRupees(mplads.unspent)} unspent` : ""}.`, mplads.utilization_pct < 50 ? "NOTABLE" : "INFO", [mplads.url]));
+    m.template_prose = m.facts[0].text;
+    sections.push(m);
+  } else if (lval("mplads_utilization_pct") != null) {
+    const util = lval("mplads_utilization_pct");
+    const alloc = lval("mplads_allocated"), spent = lval("mplads_spent");
+    const m = section("funds", "Public Funds (MPLADS)");
+    m.stats.push({ label: "Utilisation", value: pct(util) });
+    if (alloc != null) m.stats.push({ label: "Allocated", value: formatRupees(alloc) });
+    if (spent != null) m.stats.push({ label: "Spent", value: formatRupees(spent) });
+    if (alloc != null && spent != null) m.stats.push({ label: "Unspent", value: formatRupees(Math.max(0, alloc - spent)) });
+    if (lval("mplads_works_recommended") != null) m.stats.push({ label: "Works recommended", value: String(lval("mplads_works_recommended")) });
+    if (lval("mplads_works_completed") != null) m.stats.push({ label: "Works completed", value: String(lval("mplads_works_completed")) });
+    m.facts.push(fact(`${pct(util)} of MPLADS local-development funds utilised${alloc != null && spent != null ? `, ${formatRupees(Math.max(0, alloc - spent))} unspent` : ""}.`,
+      util < 50 ? "NOTABLE" : "INFO", [lsrc("mplads_utilization_pct")]));
     m.template_prose = m.facts[0].text;
     sections.push(m);
   }
@@ -189,6 +309,19 @@ export function buildPoliticianCard(pid) {
       lg.facts.push(fact(`Parliamentary activity: ${bits.join(", ")}${leg.assurances != null ? `; ${leg.assurances} government assurance${leg.assurances === 1 ? "" : "s"} secured` : ""}.`, sev, [leg.url]));
       lg.template_prose = lg.facts[0].text;
       sections.push(lg);
+    } else if (lval("questions_asked") != null || lval("debates_participated") != null) {
+      const lg = section("legislative", "Legislative Record");
+      const qs = lval("questions_asked"), db_ = lval("debates_participated"), as = lval("assurances_count");
+      if (qs != null) lg.stats.push({ label: "Questions asked", value: String(qs) });
+      if (db_ != null) lg.stats.push({ label: "Debates", value: String(db_) });
+      if (as != null) lg.stats.push({ label: "Assurances", value: String(as) });
+      const bits = [];
+      if (qs != null) bits.push(`asked ${qs} question${qs === 1 ? "" : "s"}`);
+      if (db_ != null) bits.push(`participated in ${db_} debate${db_ === 1 ? "" : "s"}`);
+      lg.facts.push(fact(`Parliamentary activity: ${bits.join(", ")}${as != null ? `; ${as} government assurance${as === 1 ? "" : "s"} secured` : ""}.`,
+        (qs === 0 && db_ === 0) ? "NOTABLE" : "INFO", [lsrc("questions_asked") ?? lsrc("debates_participated")]));
+      lg.template_prose = lg.facts[0].text;
+      sections.push(lg);
     }
   }
 
@@ -216,6 +349,30 @@ export function buildPoliticianCard(pid) {
     sections.push(sw);
   }
 
+  // How they compare — the section that turns a figure into information.
+  // "Net worth ₹7 crore" answers nothing on its own; "richer than 88% of MLAs
+  // in this state, median ₹2.1 crore" answers the question a reader actually
+  // arrived with. Ranks are only shown for cohorts large enough to be honest.
+  const peers = peerContextFor({ id: p.id, office: p.office, state: p.state });
+  const rankKeys = Object.keys(peers.ranks ?? {});
+  if (rankKeys.length) {
+    const cmp = section("peers", "How They Compare");
+    cmp.cohort = { label: peers.cohort_label, size: peers.cohort_size };
+    for (const [key, phrasing] of PEER_PHRASING) {
+      const r = peers.ranks[key];
+      if (!r) continue;
+      const money = PEER_MONEY.has(key);
+      const shown = money ? formatRupees(r.value) : key.endsWith("_pct") ? pct(r.value) : String(r.value);
+      const median = money ? formatRupees(r.median) : key.endsWith("_pct") ? pct(r.median) : String(r.median);
+      cmp.stats.push({ label: phrasing.label, value: shown, trend: `rank ${r.rank} of ${r.of}` });
+      cmp.facts.push(fact(
+        `${phrasing.label}: ${shown} — ${phrasing.verb(r.percentile)} ${r.percentile}% of ${r.cohort_label} (rank ${r.rank} of ${r.of}; median ${median}).`,
+        "INFO", []));
+    }
+    cmp.template_prose = `Ranked against ${peers.cohort_size} ${peers.cohort_label}, using the same declared figures for everyone.`;
+    if (cmp.facts.length) sections.push(cmp);
+  }
+
   // Data gaps — which key sources have nothing yet (honesty about coverage)
   const present = new Set(evidence.map((e) => e.source_type).filter(Boolean));
   const gaps = EXPECTED_SOURCES.filter((s) => {
@@ -233,7 +390,8 @@ export function buildPoliticianCard(pid) {
   const { baseline, contributions } = scoreFromFlags(flags);
   const parameters = PARAMETERS.map((pm) => {
     const contribs = contributions[pm.key] ?? [];
-    const relevant = (PARAM_RELEVANT_SOURCES[pm.key] ?? []).some((t) => present.has(t));
+    const relevant = (PARAM_RELEVANT_SOURCES[pm.key] ?? []).some((t) => present.has(t))
+      || (PARAM_LEDGER_METRICS[pm.key] ?? []).some((k) => lval(k) != null);
     const score = contribs.length || relevant ? baseline[pm.key] : -1;
     return { key: pm.key, label: pm.label, score, contributions: contribs };
   });
@@ -259,6 +417,11 @@ export function buildPoliticianCard(pid) {
     sections,
     computed_facts: facts,
     evidence_count: evidence.length,
+    // How much typed, citable data stands behind this card — the honest measure
+    // of its depth, and the number that tells an operator whether a thin card is
+    // a coverage gap or a generation bug.
+    ledger_metric_count: Object.keys(lm).length,
+    peers: rankKeys.length ? peers : null,
     prose_model: null,
   };
 }
