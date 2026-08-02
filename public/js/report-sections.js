@@ -439,8 +439,41 @@ function renderCardSection(sec, idx = 0, open = idx === 0) {
       <summary class="section-head"><h3>${esc(sec.title)}</h3></summary>
       ${prose ? `<p class="section-sub">${esc(prose)}</p>` : ""}
       ${stats ? `<div class="snapshot-grid">${stats}</div>` : ""}
+      ${renderCardSeries(sec.series)}
       ${facts}
     </details>`;
+}
+
+// A dated series (declared assets or income, year by year) as a plain bar row.
+//
+// This is the single most-asked question a reader brings to a wealth figure —
+// "did it jump?" — and a column of numbers does not answer it at a glance while
+// a shape does. Deliberately dependency-free: bar heights are inline
+// percentages, colours come from the theme tokens, so it works in light and
+// dark mode and adds nothing to the page weight.
+function renderCardSeries(series) {
+  const pts = (series ?? [])
+    .map((p) => ({ year: p.year, value: Number(p.value ?? p.net_worth), display: p.display }))
+    .filter((p) => p.year != null && Number.isFinite(p.value));
+  if (pts.length < 2) return "";                       // two points make a trend; one makes a number
+  const max = Math.max(...pts.map((p) => p.value));
+  if (!(max > 0)) return "";
+  const bars = pts.map((p) => {
+    // Floor at 2% so a genuinely tiny year is still visible as a bar rather
+    // than reading as missing data.
+    const h = Math.max(2, Math.round((p.value / max) * 100));
+    return `
+      <div class="cser-col" title="${esc(p.year)}: ${esc(p.display ?? p.value)}">
+        <div class="cser-barwrap"><div class="cser-bar" style="height:${esc(h)}%"></div></div>
+        <div class="cser-val">${esc(p.display ?? p.value)}</div>
+        <div class="cser-year">${esc(p.year)}</div>
+      </div>`;
+  }).join("");
+  // Built outside the template: a nested template literal inside an attribute
+  // is exactly the shape the escape scanner cannot reason about, and "the
+  // scanner can't see it" is not a safety argument.
+  const label = pts.map((p) => `${p.year}: ${p.display ?? p.value}`).join(", ");
+  return `<div class="card-series" role="img" aria-label="${esc(label)}">${bars}</div>`;
 }
 
 function renderCardScorecard(card) {
