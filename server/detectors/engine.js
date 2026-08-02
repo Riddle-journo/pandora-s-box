@@ -51,8 +51,31 @@ import {
 export { meanStd, benfordStats, evidenceRef } from "./helpers.js";
 import { DETECTORS_A } from "./batch-a.js";
 import { DETECTORS_B } from "./batch-b.js";
+import { guardDetector, populationForMetric, COHORT_DEFAULTS } from "./cohort-guard.js";
 
 export const ENGINE_VERSION = "engine-v1";
+
+// Base-rate guard thresholds. Live in the DB like every other threshold
+// (architectural rule: judgement calls are tunable from the ops console without
+// a deployment), under the pseudo-detector id `cohort_guard`.
+export const COHORT_TUNABLES = {
+  systemicAt: {
+    label: "Systemic above", type: "number", def: COHORT_DEFAULTS.systemicAt, min: 0.02, max: 0.9,
+    desc: "Fire rate (0–1) above which a finding is treated as a property of the cohort, not of its members.",
+  },
+  tailPct: {
+    label: "Keep tail", type: "number", def: COHORT_DEFAULTS.tailPct, min: 0.005, max: 0.5,
+    desc: "Share of the cohort still reported individually once a finding is systemic.",
+  },
+  minPopulation: {
+    label: "Min cohort", type: "number", def: COHORT_DEFAULTS.minPopulation, min: 5, max: 5000,
+    desc: "Below this many eligible subjects, no base rate is computed and nothing is suppressed.",
+  },
+  minKeep: {
+    label: "Always keep", type: "number", def: COHORT_DEFAULTS.minKeep, min: 1, max: 50,
+    desc: "Most extreme cases always retained individually, whatever the base rate.",
+  },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DATA LOADERS — one cached context per run; detectors stay pure over it.
@@ -250,6 +273,24 @@ export async function runEngine(opts = {}) {
     try {
       let candidates = (await det.run(ctx, S)) ?? []; // await: procurement detectors are async
       if (politicianId) candidates = candidates.filter((c) => c.subject?.politician_id === politicianId);
+
+      // Base-rate guard. A detector that fires on a quarter of its cohort is
+      // describing the norm, so above the ceiling only the tail stays an
+      // individual finding and the pattern itself becomes one lead about the
+      // programme. Scoped single-politician runs skip it — you cannot measure a
+      // base rate from a population of one.
+      let systemicFindings = [];
+      let cohortStats = null;
+      if (det.cohort && !politicianId) {
+        const population = det.cohort.population
+          ? det.cohort.population(ctx)
+          : populationForMetric(ctx, det.cohort.metric);
+        const guarded = guardDetector(candidates, { ...det.cohort, population }, resolveSettings("cohort_guard", COHORT_TUNABLES));
+        candidates = guarded.candidates;
+        systemicFindings = guarded.systemic;
+        cohortStats = guarded.stats;
+      }
+
       let big = 0, small = 0;
       const samples = [];
       for (const c of candidates) {
@@ -270,11 +311,41 @@ export async function runEngine(opts = {}) {
         if (!dryRun) upsertFlag(flag);
         allFlags.push(flag);
       }
+      // The systemic counterpart: one finding about the programme, carrying the
+      // arithmetic. Written under the same runId as the individual flags so the
+      // staleness sweep below does not immediately retire it.
+      for (const sf of systemicFindings) {
+        const flag = {
+          key: `${det.id}|systemic|${sf.group ?? "all"}`,
+          detector: det.id, severity: "big", score: sf.signal_score,
+          politician_id: null, entity_id: sf.entity_id ?? null,
+          subject_name: sf.subject_name, subject_kind: sf.subject_kind,
+          headline: sf.headline, rationale: sf.detail,
+          evidence: [], data: sf.data,
+          lead: {
+            actor_id: null, actor_name: sf.subject_name,
+            vector: "SYSTEMIC_PATTERN", instrument: sf.subject_name,
+            beneficiary: sf.subject_name, beneficiary_kind: sf.subject_kind,
+            signal_score: sf.signal_score, severity: sf.severity,
+            headline: sf.headline, detail: sf.detail,
+            detector_version: `${det.id}@${ENGINE_VERSION}`, evidence_urls: [], data: sf.data,
+          },
+          detector_version: `${det.id}@${ENGINE_VERSION}`, run_id: runId,
+        };
+        if (!dryRun) upsertFlag(flag);
+        allFlags.push(flag);
+        big++;
+        log(`[engine] ${det.id}: SYSTEMIC — ${sf.headline}`);
+      }
+
       // A full-population run's silence about a previously-flagged subject means
       // the data no longer supports that flag → stale. Scoped runs skip this.
       let stale = 0;
       if (!dryRun && !politicianId) stale = markStaleExcept(det.id, runId);
-      results[det.id] = { candidates: candidates.length, big, small, stale, ms: Date.now() - dt0, samples };
+      results[det.id] = {
+        candidates: candidates.length, big, small, stale, ms: Date.now() - dt0, samples,
+        ...(cohortStats ? { cohort: cohortStats, systemic: systemicFindings.length } : {}),
+      };
       log(`[engine] ${det.id}: ${candidates.length} flag(s) (${big} big, ${small} small${stale ? `, ${stale} stale` : ""}) in ${Date.now() - dt0}ms`);
     } catch (err) {
       results[det.id] = { error: err.message };

@@ -67,6 +67,21 @@ export const DETECTORS_A = [
     tunables: legacyTunables(
       { UTIL_LOW_PCT: ANOMALY_DEFAULTS.UTIL_LOW_PCT, UTIL_HIGH_PCT: ANOMALY_DEFAULTS.UTIL_HIGH_PCT, UTIL_MIN_FUND: ANOMALY_DEFAULTS.UTIL_MIN_FUND },
       { UTIL_LOW_PCT: { label: "Low tail %", desc: "Flag utilisation below this %." }, UTIL_HIGH_PCT: { label: "High tail %", desc: "Flag utilisation above this %." }, UTIL_MIN_FUND: { label: "Min fund (₹)", desc: "Only material when the fund is ≥ this (default ₹1 Cr)." } }),
+    // Base rate: measured at 128 of 472 members (27.1%) under-utilising, which
+    // is a fact about how MPLADS runs, not about 128 individuals. The two tails
+    // are judged separately — they are opposite conditions with opposite rates.
+    cohort: {
+      metric: "mplads_utilization_pct",
+      subjectKind: "programme",
+      subjectName: "MPLADS (Members of Parliament Local Area Development Scheme)",
+      unit: "% of allocation utilised",
+      stat: (c) => c.data?.utilization_pct ?? null,
+      groupBy: (c) => c.data?.extreme ?? null,
+      directionFor: (key) => (key === "fully-drawn" ? "high" : "low"),
+      subjectNameFor: (key) => (key === "fully-drawn"
+        ? "MPLADS spend-to-the-rupee reporting"
+        : "MPLADS (Members of Parliament Local Area Development Scheme)"),
+    },
     run(ctx, S) {
       const ov = { UTIL_LOW_PCT: S.UTIL_LOW_PCT, UTIL_HIGH_PCT: S.UTIL_HIGH_PCT, UTIL_MIN_FUND: S.UTIL_MIN_FUND };
       const records = [];
@@ -518,6 +533,17 @@ export const DETECTORS_A = [
       bigPct: { label: "Big below %", type: "number", def: 15, min: 1, max: 50, desc: "BIG below this %." },
       minWorks: { label: "Min works", type: "number", def: 20, min: 1, desc: "Only when at least this many works were recommended." },
     }),
+    // Same reasoning as fund_utilization: chronic non-completion is mostly an
+    // administrative property of the scheme. Only the worst few are about a
+    // person; the rate itself is the story.
+    cohort: {
+      metric: "mplads_works_recommended",
+      subjectKind: "programme",
+      subjectName: "MPLADS works completion",
+      unit: "% of recommended works completed",
+      stat: (c) => c.data?.pct ?? null,
+      direction: "low",
+    },
     run(ctx, S) {
       const rec = ctx.seriesByPolitician("mplads_works_recommended");
       const done = ctx.seriesByPolitician("mplads_works_completed");
