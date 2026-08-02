@@ -139,7 +139,7 @@ and `backup.ps1` additionally caps the whole `data\backups\` folder at its 14 mo
 ## Restore from backup
 
 **Do this only when the app is stopped.** The real backup filename pattern (from
-`server/db-maintenance.js`) is:
+`server/platform/db-maintenance.js`) is:
 
 ```
 data\backups\pandoros-<ISO-timestamp-with-dashes>.db

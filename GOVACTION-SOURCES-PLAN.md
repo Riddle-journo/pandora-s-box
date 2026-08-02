@@ -76,7 +76,7 @@ Connector + discovery shipped. Files:
   `ogdResourceMeta`, `ogdResourceAll`). Fail-soft, keyless CKAN, OGD key from
   `OGD_API_KEY` (falls back to data.gov.in public sample key). Freshness caveat
   baked in (`ogdResourceMeta` exposes `updated_date`).
-- `server/opendata-catalog.js` — discovery CLI (`npm run opendata:catalog`):
+- `server/catalogue/opendata-catalog.js` — discovery CLI (`npm run opendata:catalog`):
   searches CKAN portals by lifecycle-stage keywords, scores each dataset by
   corruption-signal, dedupes, writes `server/data/opendata-catalog.json`.
 - `test/opendata.test.js` — 6 pure tests + 3 live smoke tests (gated on

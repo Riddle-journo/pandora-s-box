@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-07-13T12:00:00+05:30",
+  "last_updated": "2026-07-15T00:00:00+05:30",
   "accepted_sources": [
     {
       "name": "IBBI Public Announcements of CIRP (Corporate Insolvency Resolution Process)",
@@ -4089,6 +4089,24 @@
       "url": "https://github.com/CivicDataLab/oci-assam-frontend",
       "reason": "Confirmed pure Next.js/TypeScript frontend application (components, pages, styles, transformers, types) with zero committed CSV/JSON/XLSX data files; it fetches data at runtime from an external CKAN/WordPress backend via GraphQL. Superseded by assam-tenders-data repo which holds the actual OCDS-mapped datasets.",
       "last_checked": "2026-07-07T22:00:00+05:30"
+    },
+    {
+      "name": "CIC — Central Information Commission decisions (name search)",
+      "url": "https://cic.gov.in/decision",
+      "reason": "RE-VERIFIED 2026-07-15 (prior reject stands). The only route to the CIC decision corpus is a CAPTCHA-gated POST search form on dsscic.nic.in (fields incl. captcha[required] + _csrfToken); POST without a solved captcha returns HTTP 403. No static <a href> PDF listing, no <table> in raw HTML, no data.gov.in bulk mirror — pdf-archive/readBodies has nothing to harvest. Solving the CAPTCHA = bot-detection this project must not run. Sole clean artifact is one static 77.7MB curated decision-compendium PDF (cic.gov.in/sites/default/files/cicdecisioncompedium.pdf) — landmark decisions only, not the live stream; low incremental value, not wired.",
+      "last_checked": "2026-07-15T00:00:00+05:30"
+    },
+    {
+      "name": "NGO Darpan (NITI Aayog) — NGO/VO registry",
+      "url": "https://ngodarpan.gov.in/",
+      "reason": "VERIFIED 2026-07-15 un-ingestable. Angular SPA; every /apis/ endpoint returns 401 without a client-computed AES-GCM signature+requid header (static signKey handshake via capis/sys-id), and the NGO search (regis/ngos) additionally requires a per-query 6-char image CAPTCHA (capis/captcha). Bypassing the request-signing + per-query CAPTCHA = bot-detection the project must not run. No data.gov.in/OGD mirror of the per-NGO registry exists.",
+      "last_checked": "2026-07-15T00:00:00+05:30"
+    },
+    {
+      "name": "NDAP — National Data & Analytics Platform (NITI Aayog)",
+      "url": "https://ndap.niti.gov.in/",
+      "reason": "VERIFIED 2026-07-15: not a wireable source, it is a DISCOVERY LAYER. Frontend is a create-react-app JS shell; backend loadqa.ndapapi.com/v1/* is a custom POST-only JSON API requiring a registered API key (unauthenticated calls return 405 / Invalid Request). No anonymous bulk/CSV download. Correct use: browse NDAP to identify relevant datasets (MGNREGA, State Finances/Budgets, DBT, GST, Public Finance Stats), then ingest each specific dataset via data.gov.in using the existing ogd-resource/ckan-datastore kinds keyed by DATA_GOV_API_KEY — not NDAP itself.",
+      "last_checked": "2026-07-15T00:00:00+05:30"
     }
   ],
   "discovered_leads": [

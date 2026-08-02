@@ -91,8 +91,19 @@ export default [
   },
   {
     // New server code should use util/log.js (structured, ops-console-mirrored)
-    // instead of raw console. Warn-only: the ~250-call long tail migrates
-    // incrementally, and worker.js's console patch depends on console existing.
+    // instead of raw console. Warn-only: the long tail migrates incrementally,
+    // and worker.js's console patch depends on console existing.
+    //
+    // SCOPE, stated precisely because it is easy to get wrong: this is the ONLY
+    // block that enables no-console, and it matches server/** and nothing else.
+    // scripts/**, test/** and public/** are therefore never counted — for CLI
+    // scripts stdout IS the interface, so a console call there is intent, not
+    // debt, and no "no-console: off" override is needed (adding one changes no
+    // count: `npx eslint scripts` reports 0 problems with or without it).
+    // The whole warning count of this repo is therefore server/** no-console
+    // debt (run `npx eslint server` for today's figure — it moves with every
+    // commit, so it is deliberately not pinned here). Shrinking it needs real
+    // migration to util/log.js; no config change elsewhere can move it.
     files: ["server/**/*.js"],
     rules: { "no-console": "warn" },
   },

@@ -2,8 +2,15 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Pandoro's Box public API",
-    "description": "Citation-backed accountability report cards on India's elected representatives. Public read surface only; admin/ops routes (x-admin-token) are documented in docs/api.md.",
+    "description": "Citation-backed accountability report cards on India's elected representatives. Public read surface only; admin/ops routes (x-admin-token) are documented in docs/api.md.\n\nVERSIONING: `/api/v1` is the canonical prefix and is what the SPA calls; bare `/api` is a permanent, never-removed alias. Both resolve to the same handlers via a URL rewrite, so status codes and response bodies are byte-identical on either prefix — including the opt-in `?page`/`?pageSize` envelope, which stays opt-in on v1 (a bare array is still the default). Every response on the `/api` surface carries `X-API-Version: v1`. Unknown versions (`/api/v2/...`) are not routed and return 404. The `paths` below are absolute and are reachable under both prefixes.",
     "version": "0.1.0"
+  },
+  "x-api-versioning": {
+    "canonicalPrefix": "/api/v1",
+    "aliasPrefixes": ["/api"],
+    "responseHeader": "X-API-Version",
+    "currentVersion": "v1",
+    "notes": "Routers register absolute /api/... paths with no mount prefix, so v1 is implemented as a URL rewrite registered before the /api rate limiter — both prefixes share one rate-limit budget. Unknown /api/vN prefixes fall through to 404."
   },
   "paths": {
     "/healthz": {
@@ -25,22 +32,22 @@
     "/api/politicians/{id}": {
       "get": {
         "summary": "One politician",
-        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
-        "responses": { "200": { "description": "Politician object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" } } ],
+        "responses": { "200": { "description": "Politician object" }, "400": { "$ref": "#/components/responses/BadRequest" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/api/politicians/{id}/card": {
       "get": {
         "summary": "Latest Summarizer report card",
-        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
-        "responses": { "200": { "description": "Card object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" } } ],
+        "responses": { "200": { "description": "Card object" }, "400": { "$ref": "#/components/responses/BadRequest" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/api/politicians/{id}/evidence": {
       "get": {
         "summary": "Evidence rows backing a politician's card",
-        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
-        "responses": { "200": { "description": "Array of evidence rows" } }
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" } } ],
+        "responses": { "200": { "description": "Array of evidence rows" }, "400": { "$ref": "#/components/responses/BadRequest" } }
       }
     },
     "/api/compare": {
@@ -75,8 +82,8 @@
     "/api/scandals/{slug}": {
       "get": {
         "summary": "One scandal analysis",
-        "parameters": [ { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } } ],
-        "responses": { "200": { "description": "Scandal object" }, "404": { "$ref": "#/components/responses/NotFound" } }
+        "parameters": [ { "name": "slug", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" } } ],
+        "responses": { "200": { "description": "Scandal object" }, "400": { "$ref": "#/components/responses/BadRequest" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
     "/api/issues": {
@@ -95,7 +102,7 @@
     "/api/politicians/{id}/tips": {
       "post": {
         "summary": "Submit an anonymous tip (requires proof-of-work)",
-        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" } } ],
         "responses": { "200": { "description": "Accepted" }, "400": { "$ref": "#/components/responses/BadRequest" }, "429": { "description": "Rate limited" } }
       }
     }
@@ -130,9 +137,12 @@
         "properties": { "error": { "type": "string" } }
       }
     },
+    "headers": {
+      "ApiVersion": { "description": "Version of the API surface that served the response.", "schema": { "type": "string", "enum": ["v1"] } }
+    },
     "responses": {
       "NotFound": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "BadRequest": { "description": "Bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+      "BadRequest": { "description": "Bad request — includes a malformed path parameter (`{\"error\":\"invalid id\"}`, `invalid slug`, `invalid key`, `invalid party`). Path parameters are validated before the handler runs; a well-formed but unknown value still returns 404.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
     }
   }
 }

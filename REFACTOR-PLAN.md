@@ -55,7 +55,7 @@ FORBIDDEN in this session, no matter what seems helpful:
 - Do not mass-replace console.* calls or add a logging library (the ops console
   streams job logs by capturing console output — replacing it breaks the ops UI).
 - Do not unify or "fix" the various norm()/NORM name-normalization functions in
-  server/data/*, server/mega-ingest.js, server/extractors/*, server/sources/wikipedia.js —
+  server/data/*, server/orchestration/mega-ingest.js, server/extractors/*, server/sources/wikipedia.js —
   their regex differences are intentional-until-proven-otherwise.
 - Do not change any User-Agent string in server/fetchers/* (some sites require specific UAs).
 - Do not split public/app.js into modules or merge its render helpers.
@@ -71,7 +71,7 @@ FORBIDDEN in this session, no matter what seems helpful:
 # PHASE 0 — Repo hygiene + secrets (mostly human, do first)
 
 ### 0.1 — Commit the in-flight work *(HUMAN — no AI session)*
-Working tree has uncommitted opendata work (`server/opendata-catalog.js`, `server/fetchers/opendata.js`, `server/data/opendata-catalog.json`, `test/opendata.test.js`, `GOVACTION-SOURCES-PLAN.md`, modified `package.json`).
+Working tree has uncommitted opendata work (`server/catalogue/opendata-catalog.js`, `server/fetchers/opendata.js`, `server/data/opendata-catalog.json`, `test/opendata.test.js`, `GOVACTION-SOURCES-PLAN.md`, modified `package.json`).
 - Run `npm test` (must be green) then `git add -A; git commit -m "WIP: opendata catalog work"`.
 - **Verify:** `git status --short` prints nothing.
 
@@ -117,14 +117,14 @@ Rotate at each dashboard: OpenRouter, Groq, Google AI Studio, data.gov.in. Gener
 # PHASE 2 — Reliability hardening
 
 ### 2.1 — Central config helper + data.gov key alias fix
-- **Model:** Sonnet-medium. **Files:** `server/config.js` (new), `server/fetchers/company-registry.js`, `server/db-maintenance.js`, `server/fetchers/opendata.js`, `test/config.test.js` (new).
-- **Task:** Create `server/config.js`: `export function dataGovKey() { return process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_API_KEY || process.env.DATA_GOV_KEY || process.env.OGD_API_KEY || ""; }`. Replace the ad-hoc env reads: company-registry.js (~:66, ~:96), db-maintenance.js (~:153). In opendata.js:33, `ogdKey` becomes `process.env.OGD_API_KEY || dataGovKey() || OGD_SAMPLE_KEY` (OGD_API_KEY must stay first — an existing test pins that precedence). Do NOT touch ingest.js here. Write `test/config.test.js` asserting precedence (save/restore env).
+- **Model:** Sonnet-medium. **Files:** `server/platform/config.js` (new), `server/fetchers/company-registry.js`, `server/platform/db-maintenance.js`, `server/fetchers/opendata.js`, `test/config.test.js` (new).
+- **Task:** Create `server/platform/config.js`: `export function dataGovKey() { return process.env.DATA_GOV_IN_KEY || process.env.DATA_GOV_API_KEY || process.env.DATA_GOV_KEY || process.env.OGD_API_KEY || ""; }`. Replace the ad-hoc env reads: company-registry.js (~:66, ~:96), db-maintenance.js (~:153). In opendata.js:33, `ogdKey` becomes `process.env.OGD_API_KEY || dataGovKey() || OGD_SAMPLE_KEY` (OGD_API_KEY must stay first — an existing test pins that precedence). Do NOT touch ingest.js here. Write `test/config.test.js` asserting precedence (save/restore env).
 - **Verify:** `npm run check` green (opendata.test.js is the tripwire).
 
 ### 2.2 — ingest.js json-api batches actually get the key
-- **Model:** Opus. **Files:** `server/ingest.js` only.
+- **Model:** Opus. **Files:** `server/orchestration/ingest.js` only.
 - **Task:** Find where FETCHERS entries' `apiKeyEnv` is consumed. When the named var is unset AND the name is one of the four data.gov spellings, fall back to `dataGovKey()` from `./config.js`. Don't change the `apiKeyEnv` strings themselves; don't change behavior when the var IS set.
-- **Verify:** `npm run check` green + `node -e "process.env.DATA_GOV_IN_KEY='x123'; import('./server/ingest.js').then(()=>console.log('IMPORT OK'))"` prints `IMPORT OK`.
+- **Verify:** `npm run check` green + `node -e "process.env.DATA_GOV_IN_KEY='x123'; import('./server/orchestration/ingest.js').then(()=>console.log('IMPORT OK'))"` prints `IMPORT OK`.
 - **Risk:** wrong edit site in a 1,164-line file — low blast radius (previous behavior was already silently keyless); import check + suite catch breakage.
 
 ### 2.3 — Global error middleware + async wrapper + stop leaking err.message
@@ -133,7 +133,7 @@ Rotate at each dashboard: OpenRouter, Groq, Google AI Studio, data.gov.in. Gener
 - **Verify:** `npm run check` green.
 
 ### 2.4 — Process-level handlers + /healthz + store.pingDb()
-- **Model:** Sonnet-medium. **Files:** `server/index.js`, `server/store.js`, `scripts/smoke.js`.
+- **Model:** Sonnet-medium. **Files:** `server/index.js`, `server/store/store.js`, `scripts/smoke.js`.
 - **Task:** (1) store.js: `export function pingDb() { return db.prepare("SELECT 1 AS ok").get().ok === 1; }`. (2) index.js: `process.on("unhandledRejection", err => console.error(...))` and `process.on("uncaughtException", err => { console.error(...); process.exit(1); })` (exit-on-uncaught is deliberate — PM2 in Phase 7 restarts clean). (3) Route `GET /healthz` → `{ok: pingDb(), uptime}` with try/catch → 500 `{ok:false}`. (4) smoke.js: poll `/healthz` instead, require body contains `"ok":true`.
 - **Verify:** `npm run check` → `SMOKE PASS`.
 
@@ -181,13 +181,13 @@ Rotate at each dashboard: OpenRouter, Groq, Google AI Studio, data.gov.in. Gener
 # PHASE 4 — Mechanical dedup (test-guarded)
 
 ### 4.1 — Shared NORM + nameScore for the three clone scripts
-- **Model:** Sonnet-medium. **Files:** `server/util/names.js` (new), `server/import-ls.js`, `server/import-rs.js`, `server/repair-myneta.js`, `test/names-util.test.js` (new).
+- **Model:** Sonnet-medium. **Files:** `server/util/names.js` (new), `server/entities/import-ls.js`, `server/entities/import-rs.js`, `server/entities/repair-myneta.js`, `test/names-util.test.js` (new).
 - **Task:** FIRST diff the three `NORM` (import-ls:27 / import-rs:24 / repair-myneta:26) and `nameScore` (28/25/27) definitions. If NOT character-identical → STOP and report differences, do not unify. If identical: move to `server/util/names.js`, import in all three, write 6+ characterization cases (input→output pairs computed by running the ORIGINAL function via `node -e` before editing).
 - **Verify:** `npm test` green (import-rs.test.js is the real tripwire).
 - **Decision:** the ~7 OTHER `norm()` definitions (data/, extractors/, sources/, mega-ingest) are intentionally LEFT ALONE — different regexes, behavior-sensitive. On the DO-NOT list.
 
 ### 4.2 — Single `sleep`
-- **Model:** Sonnet-medium. **Files:** `server/util/timing.js`, `server/fetchers/http.js`, `server/bulk-import.js`, `server/worker.js`, `server/sources/gdelt-fetch.js`.
+- **Model:** Sonnet-medium. **Files:** `server/util/timing.js`, `server/fetchers/http.js`, `server/entities/bulk-import.js`, `server/orchestration/worker.js`, `server/sources/gdelt-fetch.js`.
 - **Task:** Add `sleep` export to util/timing.js. http.js:7 becomes `export { sleep } from "../util/timing.js";` (KEEP the re-export — others import sleep from http.js). Delete local copies in the other three, import instead (correct relative path each).
 - **Verify:** `npm run check` green AND `(Get-ChildItem server -Recurse -Filter *.js | Select-String "const sleep = \(ms\)").Count` prints `1`.
 
@@ -217,7 +217,7 @@ Rotate at each dashboard: OpenRouter, Groq, Google AI Studio, data.gov.in. Gener
 - **Verify:** `npm test` green. (Enabling retries at call sites is deliberately deferred — later, one flaky fetcher at a time.)
 
 ### 4.8 — Fill the 5 empty catch blocks
-- **Model:** Sonnet-medium. **Files:** `server/fetchers/cppp-procurement.js` (~:37, ~:69), `server/mega-ingest.js` (~:548, ~:550, ~:656).
+- **Model:** Sonnet-medium. **Files:** `server/fetchers/cppp-procurement.js` (~:37, ~:69), `server/orchestration/mega-ingest.js` (~:548, ~:550, ~:656).
 - **Task:** In each empty catch add one `console.warn("[<file>] <what failed>:", err?.message ?? err);` (bind err if unbound). Control flow unchanged — still swallows.
 - **Verify:** `npm run check` green.
 
@@ -234,8 +234,8 @@ A "facade" = the old file keeps re-exporting everything from the new files, so n
 - **Task:** Replace the read-index.js-source regex test with harness-based HTTP checks: `/api/conflicts`, `/api/politicians/x/conflicts`, `/api/stories`, `/api/stories/some-slug` → 404; explicit list of 13 admin paths (tips, scandal-proposals, investigation-leads, conflicts, stories, ops/summary, ops/roster, ops/jobs, ops/engine, ops/flags, ops/leads, ops/queue, ops/precision) GET without token → all 401.
 - **Verify:** `npm test` green. Strictly stronger than the regex version, and won't break when routes move files.
 
-### 5.2 — Extract `requireAdmin` → server/auth.js
-- **Model:** Sonnet-medium. **Files:** `server/auth.js` (new), `server/index.js`.
+### 5.2 — Extract `requireAdmin` → server/platform/auth.js
+- **Model:** Sonnet-medium. **Files:** `server/platform/auth.js` (new), `server/index.js`.
 - **Task:** Move `requireAdmin` (index.js:412-421) verbatim; named export; import `node:crypto` there; index.js imports it. Nothing else.
 - **Verify:** `npm run check` green.
 
@@ -255,7 +255,7 @@ A "facade" = the old file keeps re-exporting everything from the new files, so n
 - **After 5.3–5.5 index.js is ~300 coherent lines (setup, static, request log, politicians/compare/leaderboard/tips/pow, healthz, error mw, listen). STOP — do not split further.**
 
 ### 5.6 — store.js split 1: db bootstrap → server/store/db.js
-- **Model:** Opus. **Files:** `server/store/db.js` (new), `server/store.js`.
+- **Model:** Opus. **Files:** `server/store/db.js` (new), `server/store/store.js`.
 - **Task:** Move verbatim: `PANDOROS_DB_PATH` resolution, `new Database(...)`, pragmas, the ENTIRE import-time DDL block (store.js:45-237). Export `db`. store.js: `import { db } from "./store/db.js";` as FIRST local import; everything else untouched.
 - **Verify:** `npm run check` green — all 56 test files exercise this path; any DDL-order mistake fails the whole suite instantly.
 
@@ -268,7 +268,7 @@ A "facade" = the old file keeps re-exporting everything from the new files, so n
 - **Verify each:** `npm run check` green.
 
 ### 5.10 — engine.js prep: shared-helper extraction (ABORTABLE)
-- **Model:** Opus. **Files:** `server/detectors/helpers.js` (new), `server/engine.js`.
+- **Model:** Opus. **Files:** `server/detectors/helpers.js` (new), `server/detectors/engine.js`.
 - **Task:** Inventory every module-scope function/constant referenced inside DETECTORS `run()` bodies but defined outside the array. Move them verbatim to `server/detectors/helpers.js`; engine.js imports them by name AND re-exports (`export { ... } from ...`) so externals keep working. Do NOT move any detector yet.
 - **ABORT RULE:** if the session finds >~25 shared helpers or tangled mutual references → rollback, mark 5.10–5.12 SKIPPED. The registry already structures engine.js internally; splitting it is nice-to-have, not need-to-have.
 - **Verify:** `npm run check` green (engine.test.js runs the registry).
@@ -279,7 +279,7 @@ A "facade" = the old file keeps re-exporting everything from the new files, so n
 
 ### 5.13 — Move one-off scripts out of server/ (2 sessions)
 - **Model:** Sonnet-medium. Batch A: `git mv` backfill-entities/backfill-fts/backfill-relations/fix-rs-myneta-mismatch/reset-data/migrate-to-sqlite/reingest-party-finance → `scripts/`. Batch B: split-shared-entities/update-roster/entities-review + root add-politician.js → `scripts/`.
-- **Task (each):** `git mv` only. Fix each moved file's relative imports (`./store.js` → `../server/store.js`). Update `package.json` scripts referencing old paths. `git grep` for old paths — only doc hits allowed (update those too). **Do NOT move** import-ls.js / import-rs.js / repair-myneta.js (a test imports import-rs.js) nor anything imported by worker.js/index.js/tests — `git grep` each file before moving; leave it if imported.
+- **Task (each):** `git mv` only. Fix each moved file's relative imports (`./store.js` → `../server/store/store.js`). Update `package.json` scripts referencing old paths. `git grep` for old paths — only doc hits allowed (update those too). **Do NOT move** import-ls.js / import-rs.js / repair-myneta.js (a test imports import-rs.js) nor anything imported by worker.js/index.js/tests — `git grep` each file before moving; leave it if imported.
 - **Verify:** `npm run check` green + grep gate clean.
 - **Risk:** a moved maintenance script silently broken — low blast radius (app unaffected); import-probe only scripts known to gate on argv (some run work at import time).
 
@@ -316,7 +316,7 @@ Native deps (better-sqlite3, playwright, optional tesseract/canvas OCR) make a c
 
 ### 7.2 — Scheduled DB backup
 - **Model:** Sonnet-medium. **Files:** `scripts/backup.ps1` (new).
-- **Task:** PowerShell script: cd repo root → `node server/db-maintenance.js backup` → fail on non-zero → prune `data/backups` to last 14. Do NOT register the Windows scheduled task in-session — RUNBOOK gives the human the one-line `schtasks /Create /SC DAILY /ST 03:00 ...` command (machine-level change, human runs it).
+- **Task:** PowerShell script: cd repo root → `node server/platform/db-maintenance.js backup` → fail on non-zero → prune `data/backups` to last 14. Do NOT register the Windows scheduled task in-session — RUNBOOK gives the human the one-line `schtasks /Create /SC DAILY /ST 03:00 ...` command (machine-level change, human runs it).
 - **Verify:** `powershell -File scripts/backup.ps1` exits 0, new file in `data/backups`.
 
 ---

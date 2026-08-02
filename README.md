@@ -74,8 +74,8 @@ DATA_GOV_IN_KEY=...               # for MCA directorship download (optional)
 | `npm run lint` | `eslint .` |
 | `npm run check` | lint + test + smoke, in order — the one command to run before shipping a change |
 | `npm run prod:start` / `prod:stop` / `prod:status` / `prod:logs` | PM2 process control (`ecosystem.config.cjs`) — see `RUNBOOK.md` |
-| `npm run db:backup` / `db:check` / `db:doctor` / `db:vacuum` / `db:maintain` | `server/db-maintenance.js` subcommands — see `RUNBOOK.md` |
-| `npm run worker` / `worker:once` | `node server/worker.js` standalone (long-running / drain-and-exit) |
+| `npm run db:backup` / `db:check` / `db:doctor` / `db:vacuum` / `db:maintain` | `server/platform/db-maintenance.js` subcommands — see `RUNBOOK.md` |
+| `npm run worker` / `worker:once` | `node server/orchestration/worker.js` standalone (long-running / drain-and-exit) |
 | `npm run reingest:party-finance` | `node scripts/reingest-party-finance.js` |
 
 ---
@@ -100,17 +100,17 @@ Get-Process node -EA SilentlyContinue | Stop-Process -Force
 
 ---
 
-## 3. Ingest evidence — `server/ingest.js`
+## 3. Ingest evidence — `server/orchestration/ingest.js`
 
 Pulls every source into the DB (affidavits, news EN + regional-language, court, Sansad,
 party funding, MPLADS, MCA…). **No GLM cost.** Dedupes on URL, so re-runs add only new rows.
 Prints elapsed time.
 
 ```bash
-node server/ingest.js                       # all real reps
-node server/ingest.js --office MP           # Lok Sabha
-node server/ingest.js --office RS           # Rajya Sabha
-node server/ingest.js --state Maharashtra   # one state
+node server/orchestration/ingest.js                       # all real reps
+node server/orchestration/ingest.js --office MP           # Lok Sabha
+node server/orchestration/ingest.js --office RS           # Rajya Sabha
+node server/orchestration/ingest.js --state Maharashtra   # one state
 ```
 
 | Flag | Effect |
@@ -120,7 +120,7 @@ node server/ingest.js --state Maharashtra   # one state
 
 ---
 
-## 4. Summarizer — public report cards (`server/summarize.js`, ~free)
+## 4. Summarizer — public report cards (`server/publishing/summarize.js`, ~free)
 
 Builds the public report card for each politician: every number computed **in code**
 from the evidence corpus (affidavits, MPLADS, MCA, Sansad, Wikidata), scored by the
@@ -129,29 +129,29 @@ transparent flags→baseline formula in `scoring.js`/`analyzer.js`. A rotating c
 rate-limited the card ships with template prose — **a card never needs a paid LLM call**.
 
 ```bash
-node server/summarize.js --all                    # card every real rep
-node server/summarize.js --all --office MP        # filter by office
-node server/summarize.js --all --state Bihar      # one state
-node server/summarize.js --id <politician-id>     # a single rep
-node server/summarize.js --all --no-prose         # pure templates, zero LLM
-node server/summarize.js --all --no-ingest        # card existing evidence only
+node server/publishing/summarize.js --all                    # card every real rep
+node server/publishing/summarize.js --all --office MP        # filter by office
+node server/publishing/summarize.js --all --state Bihar      # one state
+node server/publishing/summarize.js --id <politician-id>     # a single rep
+node server/publishing/summarize.js --all --no-prose         # pure templates, zero LLM
+node server/publishing/summarize.js --all --no-ingest        # card existing evidence only
 ```
 
 Ministry & party cards (`/api/ministries/*/card`, `/api/parties/*/card?scope=<State>`)
 are pure aggregation computed on request — scandal buckets, roster grade distributions,
 electoral-bond funding. Canonical subjects live in `server/data/ministries.js`.
 
-## 4b. AI Investigator — private leads desk (`server/investigate.js`, the GLM budget)
+## 4b. AI Investigator — private leads desk (`server/synthesis/investigate.js`, the GLM budget)
 
 Finds leads worth a real journalist's follow-up. **Nothing here is ever public** — leads
 live behind the admin token, reviewed at `#/admin`, and shared off-platform.
 
 ```bash
-node server/investigate.js                      # L1 detectors (free) + L2/L3 on top 50 leads (paid)
-node server/investigate.js --id <politician>    # one rep
-node server/investigate.js --l1-only            # detectors/statistics only — zero LLM
-node server/investigate.js --top 20             # cap the paid L2/L3 spend
-node server/investigate.js --stories            # also draft journalist-handoff narratives (paid)
+node server/synthesis/investigate.js                      # L1 detectors (free) + L2/L3 on top 50 leads (paid)
+node server/synthesis/investigate.js --id <politician>    # one rep
+node server/synthesis/investigate.js --l1-only            # detectors/statistics only — zero LLM
+node server/synthesis/investigate.js --top 20             # cap the paid L2/L3 spend
+node server/synthesis/investigate.js --stories            # also draft journalist-handoff narratives (paid)
 ```
 
 Layers: L1 the **Anomaly Engine** (below) → L2 agentic investigator +
@@ -168,7 +168,7 @@ so investigation feeds discovery, not just verdicts. Its budgets are DB-tunable
 (`engine.investigator.*`). Lead flow: `detected → proposed →
 cleared | dismissed` ("cleared" = vetted for external sharing; it never publishes anything).
 
-### The Anomaly Engine — `server/engine.js` (L1, code-only, free)
+### The Anomaly Engine — `server/detectors/engine.js` (L1, code-only, free)
 
 One registry of **46 detectors** across 13 categories runs over everything the store knows and
 emits **flags**: `small` (context; feeds clusters) and `big` (lead-worthy alone). Every flag
@@ -211,7 +211,7 @@ out leverage so it beats a gross-asset test), `liability_writeoff` (debt that va
 sale or income to clear it — loan-waiver shape), `zero_liability_implausibility` (large assets
 + businesses beside zero declared debt).
 
-**Procurement forensics — the CPPP suite** (`server/cppp-detectors.js`, 9 detectors over the
+**Procurement forensics — the CPPP suite** (`server/detectors/cppp-detectors.js`, 9 detectors over the
 **4.9M-award** Central Public Procurement Portal corpus): `cppp_single_bidder` (uncontested
 wins — the #1 Open-Contracting red flag), `cppp_supplier_capture` (one firm dominates a
 buyer), `cppp_contract_splitting` (values hugging just under approval thresholds),
@@ -233,11 +233,11 @@ raising thresholds for detectors whose leads you mostly reject (and lowering for
 mostly approve). Suggestion-only — nothing auto-tunes.
 
 ```bash
-node server/engine.js                       # full ledger scan → flags → leads (writes; procurement OFF)
-node server/engine.js --dry-run             # preview under current thresholds, writes nothing
-node server/engine.js --detector da_ratio   # one detector
-node server/engine.js --id <politician>     # scope to one rep
-node server/cppp-index.js                    # (one-time) flatten the 4.9M-award CPPP DB → indexed table
+node server/detectors/engine.js                       # full ledger scan → flags → leads (writes; procurement OFF)
+node server/detectors/engine.js --dry-run             # preview under current thresholds, writes nothing
+node server/detectors/engine.js --detector da_ratio   # one detector
+node server/detectors/engine.js --id <politician>     # scope to one rep
+node server/store/cppp-index.js                    # (one-time) flatten the 4.9M-award CPPP DB → indexed table
 # procurement scan is opt-in: run it via the ops console "Engine · procurement scan (CPPP)"
 # job, or runEngine({ procurement: true }); it scans millions of rows so it's kept separate.
 ```
@@ -253,7 +253,7 @@ DB-backed and editable live from the ops console (`#/ops` → Tuning); enrichmen
 evidence. Flags live in the `flags` table; re-runs are idempotent, and a full run marks
 no-longer-supported flags `stale`.
 
-## 4c. Legacy dossiers — `server/report-generator.js` (retired)
+## 4c. Legacy dossiers — `server/publishing/report-generator.js` (retired)
 
 The old one-GLM-call-per-rep public dossier is retired in favour of the Summarizer card;
 existing reports are kept as a frozen archive. The CLI still works during the transition.
@@ -266,12 +266,12 @@ Public, GLM-written, and always human-gated (discovery only queues proposals; th
 analysis runs when you approve one at `#/admin`). Standalone commands:
 
 ```bash
-node server/scandal-generator.js seed           # analyses for all built-in seeds
-node server/scandal-generator.js seed --force   # regenerate even if present
-node server/scandal-generator.js <slug>         # one scandal by slug
-node server/scandal-discovery.js                # find NEW scandals from the news → review queue
-node server/scandal-discovery.js --days 30      # widen the news window
-node server/scandal-discovery.js --list         # show pending proposals
+node server/publishing/scandal-generator.js seed           # analyses for all built-in seeds
+node server/publishing/scandal-generator.js seed --force   # regenerate even if present
+node server/publishing/scandal-generator.js <slug>         # one scandal by slug
+node server/synthesis/scandal-discovery.js                # find NEW scandals from the news → review queue
+node server/synthesis/scandal-discovery.js --days 30      # widen the news window
+node server/synthesis/scandal-discovery.js --list         # show pending proposals
 ```
 
 Discovered scandals are **proposals** — review/approve at **`#/admin`** in the site (enter your
@@ -282,20 +282,20 @@ Discovered scandals are **proposals** — review/approve at **`#/admin`** in the
 ## 6. Rosters & extra data
 
 ```bash
-node server/update-roster.js --apply     # refresh ALL MPs (LS + RS) in one go; add --mla for MLAs
-node server/import-ls.js                  # just Lok Sabha (Sansad API)
-node server/import-rs.js                  # just Rajya Sabha
-node server/bulk-import.js                # MLAs from MyNeta (per state)
+node server/entities/update-roster.js --apply     # refresh ALL MPs (LS + RS) in one go; add --mla for MLAs
+node server/entities/import-ls.js                  # just Lok Sabha (Sansad API)
+node server/entities/import-rs.js                  # just Rajya Sabha
+node server/entities/bulk-import.js                # MLAs from MyNeta (per state)
 node server/mca-index.js --download       # build data/mca.db (directorships) — needs DATA_GOV_IN_KEY
-node server/repair-myneta.js --apply      # validate/repair affidavit URLs
+node server/entities/repair-myneta.js --apply      # validate/repair affidavit URLs
 ```
 
 ## 6b. Issues — "Where India Stands" (task #5)
 
 ```bash
-node server/issue-analyzer.js seed        # generate all 8 issue analyses (also runs inside report-generator)
-node server/issue-analyzer.js <slug>      # one issue (e.g. press-freedom)
-node server/issue-analyzer.js seed --force
+node server/synthesis/issue-analyzer.js seed        # generate all 8 issue analyses (also runs inside report-generator)
+node server/synthesis/issue-analyzer.js <slug>      # one issue (e.g. press-freedom)
+node server/synthesis/issue-analyzer.js seed --force
 ```
 Edit the issue list in `server/data/issues.js`; new issues are analysed automatically on the next report run.
 
@@ -304,9 +304,9 @@ Edit the issue list in `server/data/issues.js`; new issues are analysed automati
 ## 7. Maintenance
 
 ```bash
-node server/reset-data.js                # DRY RUN — preview what would be deleted
-node server/reset-data.js --apply        # delete ALL reports + remove demo reps
-node server/reset-data.js --reports --apply    # only wipe reports
+node server/orchestration/reset-data.js                # DRY RUN — preview what would be deleted
+node server/orchestration/reset-data.js --apply        # delete ALL reports + remove demo reps
+node server/orchestration/reset-data.js --reports --apply    # only wipe reports
 node scripts/migrate-to-sqlite.js         # one-time db.json → SQLite (already done)
 ```
 
@@ -325,7 +325,7 @@ node scripts/reingest-party-finance.js    # re-run the party-finance extractor (
 node scripts/smoke.js                     # post-deploy smoke check (npm run smoke)
 ```
 
-`node server/db-maintenance.js {backup|check|doctor|vacuum|all}` (or the
+`node server/platform/db-maintenance.js {backup|check|doctor|vacuum|all}` (or the
 `npm run db:*` scripts below) covers DB-file-level maintenance and is
 documented in `RUNBOOK.md`.
 
@@ -371,30 +371,30 @@ How it works: the console enqueues jobs onto the existing `jobs` queue; an
 
 | Env | Default | Effect |
 |-----|---------|--------|
-| `OPS_INPROC_WORKER` | on | set `0` to NOT run the worker in-process (run `node server/worker.js` separately instead) |
+| `OPS_INPROC_WORKER` | on | set `0` to NOT run the worker in-process (run `node server/orchestration/worker.js` separately instead) |
 | `OPS_SCHEDULER` | off | set `1` to also run the recurring scheduler (auto-ingest/discovery). Off = nothing runs unless you click it. |
 
 ## Typical workflows
 
 **First full build of all MPs (free):**
 ```bash
-node server/ingest.js --office MP                    # pull sources (free)
-node server/ingest.js --office RS
-node server/summarize.js --all --office MP --no-ingest   # public report cards (free)
-node server/summarize.js --all --office RS --no-ingest
+node server/orchestration/ingest.js --office MP                    # pull sources (free)
+node server/orchestration/ingest.js --office RS
+node server/publishing/summarize.js --all --office MP --no-ingest   # public report cards (free)
+node server/publishing/summarize.js --all --office RS --no-ingest
 ```
 
 **Weekly refresh (free):**
 ```bash
-node server/ingest.js                                # new evidence only (URL-deduped)
-node server/summarize.js --all --no-ingest           # re-card everyone
+node server/orchestration/ingest.js                                # new evidence only (URL-deduped)
+node server/publishing/summarize.js --all --no-ingest           # re-card everyone
 ```
 
 **Investigation sweep (paid — your call, never automatic):**
 ```bash
-node server/investigate.js --top 50                  # L1 free + L2/L3 on the best 50 leads
+node server/synthesis/investigate.js --top 50                  # L1 free + L2/L3 on the best 50 leads
 # then review at #/admin → clear leads → optionally:
-node server/investigate.js --stories                 # journalist-handoff drafts
+node server/synthesis/investigate.js --stories                 # journalist-handoff drafts
 ```
 
 ---

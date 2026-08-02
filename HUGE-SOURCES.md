@@ -1,11 +1,11 @@
 # Huge / heavy data sources — not downloaded by default
 
-These are the sources from `server/mega-ingest.js` that are deliberately **not**
+These are the sources from `server/orchestration/mega-ingest.js` that are deliberately **not**
 part of a routine `--refresh all` pass, because each one is either genuinely
 large (GB–TB scale) or takes hours to crawl. Each needs an explicit, owner-approved
 decision before pulling. The 10 small PDF-archive sources (title+body-text only,
 a few MB total) were downloaded separately — see the mega cache status
-(`node server/mega-ingest.js`) for those.
+(`node server/orchestration/mega-ingest.js`) for those.
 
 ---
 
@@ -67,7 +67,7 @@ a few MB total) were downloaded separately — see the mega cache status
 - **Why it matters:** Promoter names are a direct cross-reference point against
   political donors and known associates — real estate is one of the most common
   vehicles for undisclosed wealth in India.
-- **How it would be pulled:** `node server/mega-ingest.js --refresh
+- **How it would be pulled:** `node server/orchestration/mega-ingest.js --refresh
   maharera-projects`, optionally with `--max N` to cap pages for a partial pull
   (the code comment explicitly suggests this — e.g. `--max 500` for a ~12-minute
   partial run covering the most recent/relevant pages first).
@@ -121,7 +121,7 @@ a few MB total) were downloaded separately — see the mega cache status
 | Source | Size | Blocker | Recommended next step |
 |---|---|---|---|
 | `hc-judgments-s3` | ~1 TB (full); targeted slice = tens of GB | Needs court/year scope decision | Pick 3–5 states' High Courts + recent years, pull via AWS CLI |
-| `daksh-hc-bulk` | Unknown, likely GB-scale | None — just needs the download run | `node server/mega-ingest.js --refresh daksh-hc-bulk` |
+| `daksh-hc-bulk` | Unknown, likely GB-scale | None — just needs the download run | `node server/orchestration/mega-ingest.js --refresh daksh-hc-bulk` |
 | `maharera-projects` | Moderate disk, ~2h crawl | Time, not size | Run with `--max 500` for a bounded first pass |
 | `ddl-judicial` | Resolved (deleted) | Structurally unusable for per-politician matching | Skip, unless pursuing an aggregate-stats feature |
 | `rbi-state-finances` | Small | URLs not yet configured | 10-min manual URL lookup, then a normal refresh |

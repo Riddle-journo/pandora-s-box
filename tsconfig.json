@@ -13,9 +13,38 @@
   },
   "include": [
     "server/store/**/*.js",
-    "server/llm.js",
+    "server/synthesis/llm.js",
     "server/fetchers/http.js",
-    "server/config.js",
-    "server/util/**/*.js"
+    "server/platform/config.js",
+    "server/util/**/*.js",
+    "server/detectors/**/*.js"
+  ],
+  // tsc checks every module an included file imports, and there is no way to
+  // include a module without also checking its transitive imports. All 15
+  // server/detectors/*.js files are themselves type-clean; the four below are
+  // excluded ONLY because their import closure reaches modules that carry
+  // pre-existing type errors and are out of scope to edit here. Measured with a
+  // throwaway config that dropped the exclusions: 25 errors, every one of them
+  // in a NON-detector file —
+  //   engine.js   -> dynamic imports of enrichment/tofler-enrich.js (3),
+  //                  fetchers/sebi-disclosures.js (7), fetchers/tofler.js (2),
+  //                  enrichment/director-link.js (1), fetchers/company-registry.js (1),
+  //                  synthesis/lead-synthesis.js (2)
+  //   conflict.js -> entities/entities.js (4), entities/relations.js (5)
+  //   anomaly.js  -> dynamic import of entities/relations.js
+  //   batch-a.js  -> imports conflict.js + anomaly.js, so it inherits both
+  // Nothing in the included set imports these four, so dropping them still
+  // checks the other 11. CONSEQUENCE, because it is easy to forget: JSDoc types
+  // written in these four files are NOT verified by `npm run typecheck`, so they
+  // are kept annotation-free on purpose (test/api-config-scope.test.js enforces
+  // that). Delete an entry here once its closure typechecks clean — then the
+  // annotations become meaningful and may be added back.
+  // (Comments are legal in tsconfig.json — tsc parses it as JSONC.)
+  "exclude": [
+    "node_modules",
+    "server/detectors/engine.js",
+    "server/detectors/conflict.js",
+    "server/detectors/anomaly.js",
+    "server/detectors/batch-a.js"
   ]
 }
