@@ -179,10 +179,49 @@ const L1_WARN_BYTES = 32 * 1024 * 1024;
 const l1SizeWarned = new Set();
 const l1ReadFailed = new Set();
 
+// In-process memo for parsed L1 caches.
+//
+// l1Read is called once per L1 source PER POLITICIAN. There are 106 cache files
+// totalling 124 MB on disk (the largest is 37 MB), so a full-roster run was
+// re-reading and re-parsing the whole 124 MB for every one of 4,559 people —
+// on the order of half a terabyte of redundant JSON parsing, which is most of
+// why a complete ingest was never finished. The old code even logged the
+// problem ("every politician pays this parse each run") without fixing it.
+//
+// Keyed on mtime+size, so a cache rewritten mid-run by refreshL1Caches is
+// re-read rather than served stale. Bounded by a byte budget with
+// least-recently-used eviction, because caching 124 MB of JSON costs several
+// hundred MB of heap and that has to be a choice, not an accident.
+const L1_MEMO_BUDGET = Number(process.env.L1_MEMO_BUDGET_MB ?? 192) * 1024 * 1024;
+const l1Memo = new Map();   // id -> { mtimeMs, bytes, data }
+let l1MemoBytes = 0;
+export const l1MemoStats = () => ({ entries: l1Memo.size, bytes: l1MemoBytes, budget: L1_MEMO_BUDGET });
+/** Drop the memo — for tests, and for any caller that rewrites caches out of band. */
+export function l1MemoClear() { l1Memo.clear(); l1MemoBytes = 0; }
+
+function l1MemoPut(id, mtimeMs, bytes, data) {
+  if (bytes > L1_MEMO_BUDGET) return;           // one file bigger than the whole budget: never cache it
+  while (l1MemoBytes + bytes > L1_MEMO_BUDGET && l1Memo.size) {
+    const oldest = l1Memo.keys().next().value;  // Map preserves insertion order = LRU once we re-insert on hit
+    l1MemoBytes -= l1Memo.get(oldest).bytes;
+    l1Memo.delete(oldest);
+  }
+  l1Memo.set(id, { mtimeMs, bytes, data });
+  l1MemoBytes += bytes;
+}
+
 export function l1Read(id) {
   const file = l1Path(id);
-  let bytes;
-  try { bytes = fs.statSync(file).size; } catch { return null; } // no cache yet
+  let st;
+  try { st = fs.statSync(file); } catch { return null; }   // no cache yet
+  const bytes = st.size;
+
+  const hit = l1Memo.get(id);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.bytes === bytes) {
+    l1Memo.delete(id); l1Memo.set(id, hit);                // re-insert = mark most-recently-used
+    return hit.data;
+  }
+
   if (bytes > L1_MAX_BYTES) {
     if (!l1SizeWarned.has(id)) {
       l1SizeWarned.add(id);
@@ -190,11 +229,8 @@ export function l1Read(id) {
     }
     return null;
   }
-  if (bytes > L1_WARN_BYTES && !l1SizeWarned.has(id)) {
-    l1SizeWarned.add(id);
-    log.warn({ id, bytes }, "L1 cache is large — every politician pays this parse each run");
-  }
-  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  let data;
+  try { data = JSON.parse(fs.readFileSync(file, "utf8")); }
   catch (err) {
     // A truncated/corrupt cache is a cache miss, but never a silent one.
     if (!l1ReadFailed.has(id)) {
@@ -203,6 +239,12 @@ export function l1Read(id) {
     }
     return null;
   }
+  if (bytes > L1_WARN_BYTES && !l1SizeWarned.has(id)) {
+    l1SizeWarned.add(id);
+    log.warn({ id, bytes }, "L1 cache is large — parsed once and memoised for this process");
+  }
+  l1MemoPut(id, st.mtimeMs, bytes, data);
+  return data;
 }
 function l1Write(id, rows, meta = {}) { writeFileAtomic(l1Path(id), JSON.stringify({ fetched_at: new Date().toISOString(), count: rows.length, ...meta, rows })); }
 
