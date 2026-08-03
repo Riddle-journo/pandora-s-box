@@ -308,6 +308,19 @@ export const DETECTORS_A = [
       bigCases: { label: "Big at cases", type: "number", def: 8, min: 2, max: 100, desc: "BIG at/above this many cases." },
       bigJump: { label: "Big at increase", type: "number", def: 5, min: 1, max: 50, desc: "BIG when cases grew by ≥ this between affidavits." },
     }),
+    // Measured: fires on 932 of the 4,306 politicians who declare a case count
+    // — 21.6%. That three or more declared cases is common among Indian
+    // legislators is a documented fact about the roster, not 932 separate
+    // discoveries. The base rate itself is the story; the individuals worth
+    // naming are the extreme end of it.
+    cohort: {
+      metric: "criminal_cases",
+      subjectKind: "roster",
+      subjectName: "declared criminal cases across the elected roster",
+      unit: "declared cases",
+      stat: (c) => c.data?.series?.at(-1)?.value ?? null,
+      direction: "high",
+    },
     run(ctx, S) {
       const out = [];
       for (const [pid, rows] of ctx.seriesByPolitician("criminal_cases")) {
@@ -376,6 +389,20 @@ export const DETECTORS_A = [
       bigYears: { label: "Big at years", type: "number", def: 100, min: 10, max: 1000, desc: "BIG at/above this many years." },
       absMin: { label: "Min assets (₹)", type: "number", def: 5e7, min: 0, desc: "Ignore below this many rupees of assets." },
     }),
+    // Measured: fires on 479 of the 1,595 politicians who declare an income —
+    // 30%. Declared income in India is typically salary or professional income
+    // while declared assets include inherited land and long-held property, so a
+    // large multiple is the norm rather than a signal. Nearly a third of the
+    // roster showing it is a finding about what the declaration regime asks
+    // for, not about 479 individuals.
+    cohort: {
+      metric: "declared_income",
+      subjectKind: "roster",
+      subjectName: "assets measured against declared income across the roster",
+      unit: "years of declared income",
+      stat: (c) => c.data?.years ?? null,
+      direction: "high",
+    },
     run(ctx, S) {
       const out = [];
       const incomes = ctx.seriesByPolitician("declared_income");

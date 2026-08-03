@@ -66,3 +66,48 @@ const EXPECTED_IDS = [
 test("detector registry: exact ordered id list is pinned", () => {
   assert.deepEqual(DETECTORS.map((d) => d.id), EXPECTED_IDS);
 });
+
+// Cohort descriptors are hand-written objects sitting between two other
+// hand-written objects in a 2,000-line registry file, and a malformed one fails
+// SILENTLY: `guardDetector` sees no usable statistic, keeps every candidate,
+// and the detector goes back to emitting a lead per person with nobody the
+// wiser. (Writing these, a misplaced `}),` produced exactly that shape.) So the
+// shape is pinned rather than trusted.
+test("detector registry: every cohort descriptor is well formed", () => {
+  const withCohort = DETECTORS.filter((d) => d.cohort);
+  assert.ok(withCohort.length >= 4, "the measured over-firing detectors still carry a cohort");
+
+  for (const d of withCohort) {
+    const c = d.cohort;
+    assert.equal(typeof c.metric, "string", `${d.id}: needs a metric to count its eligible population from`);
+    assert.ok(c.metric.length > 0, `${d.id}: metric must not be empty`);
+    assert.equal(typeof c.stat, "function", `${d.id}: needs a statistic accessor, or the tail cannot be ranked`);
+    assert.equal(typeof c.subjectName, "string", `${d.id}: the systemic finding must name what it is about`);
+    assert.ok(c.subjectName.length > 3, `${d.id}: subjectName must be meaningful`);
+    assert.equal(typeof c.subjectKind, "string", `${d.id}: subjectKind`);
+
+    // Direction decides which end of the cohort is the adverse tail. Either a
+    // fixed direction or a per-group resolver, never neither — defaulting it
+    // would silently keep the wrong end.
+    const hasDirection = c.direction === "low" || c.direction === "high";
+    assert.ok(hasDirection || typeof c.directionFor === "function",
+      `${d.id}: needs direction ("low"/"high") or directionFor(groupKey)`);
+    if (typeof c.groupBy === "function") {
+      assert.equal(typeof c.directionFor, "function",
+        `${d.id}: a grouped cohort must resolve direction per group — the groups may have opposite tails`);
+    }
+  }
+});
+
+test("detector registry: a cohort's stat accessor tolerates a malformed candidate", () => {
+  // The accessor runs over whatever the detector emitted. If a candidate is
+  // missing its data blob the accessor must return null (which the guard treats
+  // as unrankable and handles), not throw and take the whole engine run down.
+  for (const d of DETECTORS.filter((x) => x.cohort)) {
+    for (const bad of [{}, { data: null }, { data: {} }, { data: { series: [] } }]) {
+      assert.doesNotThrow(() => d.cohort.stat(bad), `${d.id}: stat() threw on ${JSON.stringify(bad)}`);
+      const v = d.cohort.stat(bad);
+      assert.ok(v == null || Number.isFinite(v), `${d.id}: stat() must return a number or null`);
+    }
+  }
+});
