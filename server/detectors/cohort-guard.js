@@ -82,6 +82,27 @@ export function applyCohortGuard(candidates = [], cohort = {}, settings = {}) {
 
   stats.systemic = true;
 
+  // A DUTY is not excused by being commonly breached.
+  //
+  // Two different things were being run through one rule. "Assets worth 40
+  // years of declared income" breaks no rule — it is an inference, and how
+  // common it is genuinely bears on whether it means anything. But MPLADS is a
+  // statutory entitlement each MP is responsible for spending: not spending it
+  // is that member's failure whether 1% or 90% of members also fail. Base rate
+  // is evidence about an inference; it is not a defence against a duty.
+  //
+  // For a standard, the base rate is reported ALONGSIDE every individual
+  // finding — never instead of it.
+  if (cohort.standard) {
+    stats.kept = n;
+    stats.suppressed = 0;
+    return {
+      candidates: candidates.map((c) => annotate(c, stats, cohort, true)),
+      systemic: systemicFinding(candidates, cohort, stats),
+      stats,
+    };
+  }
+
   // Rank the candidates against each other on their own statistic. The adverse
   // tail is the low end for "under-utilisation", the high end for "overspend".
   const statOf = typeof cohort.stat === "function" ? cohort.stat : () => null;
@@ -119,12 +140,39 @@ function annotate(c, stats, cohort, isTail) {
     note: `${stats.fired} of ${stats.population} comparable subjects (${stats.fire_rate}%) show this same pattern`
       + (isTail ? " — this one is in the most extreme few." : "."),
   };
+  // How the base rate is phrased matters as much as whether it is applied.
+  // "A condition this widespread is primarily a finding about the programme
+  // rather than about this individual" — the previous wording — reads as an
+  // excuse, and for a duty it is simply false. A standard breached by many is
+  // still breached by each. For a statistical inference the base rate bears on
+  // how much the number MEANS, which is a claim about evidence, not about
+  // culpability.
+  const framing = cohort.standard
+    ? `Being common does not make it acceptable: this is a responsibility each holder carries individually, and ${cohort.subjectName ?? "the programme"} failing at scale is an additional finding, not a substitute for this one.`
+    : `This is a widespread pattern rather than a distinguishing one, so it ranks lower for investigation — that is a statement about how much the number reveals, not an excuse.`;
+  const ctx = { ...context, is_standard: !!cohort.standard };
+  const annotatedDetail = `${c.detail ?? ""} ${context.note} ${framing}`.trim();
   const out = {
     ...c,
-    cohort_context: context,
-    detail: `${c.detail ?? ""} ${context.note} A condition this widespread is primarily a finding about ${cohort.subjectName ?? "the programme"} rather than about this individual.`.trim(),
-    data: { ...(c.data ?? {}), cohort_context: context },
+    cohort_context: ctx,
+    detail: annotatedDetail,
+    data: { ...(c.data ?? {}), cohort_context: ctx },
   };
+  // Legacy detectors carry a SEPARATE `lead` payload, and that is the text that
+  // actually reaches the lead a human reads. Annotating only the candidate left
+  // the base rate stranded on an object nobody sees — the context has to travel
+  // with the claim, not sit beside it.
+  if (c.lead) {
+    out.lead = {
+      ...c.lead,
+      detail: `${c.lead.detail ?? ""} ${context.note} ${framing}`.trim(),
+      cohort_context: ctx,
+      data: { ...(c.lead.data ?? {}), cohort_context: ctx },
+    };
+    if (!isTail && typeof out.lead.signal_score === "number") {
+      out.lead.signal_score = Math.round(out.lead.signal_score / 2);
+    }
+  }
   // The tail keeps its score: being the most extreme of 472 peers is exactly
   // the claim worth making, and demoting it would defeat the guard's purpose.
   // Candidates we could NOT rank (no comparable statistic) are halved instead —
@@ -159,11 +207,18 @@ export function systemicFinding(candidates, cohort, stats) {
     // a bigger institutional failure than one affecting a fifth of it.
     signal_score: Math.min(90, 30 + Math.round(stats.fire_rate)),
     severity: stats.fire_rate >= 40 ? "SIGNIFICANT" : "NOTABLE",
-    headline: `${stats.fired} of ${stats.population} (${stats.fire_rate}%) show the same pattern in ${subject}.`,
-    detail: `This is a base-rate finding, not an accusation against any individual. `
-      + `${stats.fired} of ${stats.population} comparable subjects (${stats.fire_rate}%) cross the same threshold, `
-      + `which makes it a property of how ${subject} operates rather than of any one office-holder. `
-      + `The individual leads retained alongside this finding are the ${stats.kept} most extreme cases only.`,
+    headline: cohort.standard
+      ? `${stats.fired} of ${stats.population} (${stats.fire_rate}%) are failing the same duty: ${subject}.`
+      : `${stats.fired} of ${stats.population} (${stats.fire_rate}%) show the same pattern in ${subject}.`,
+    detail: cohort.standard
+      ? `${stats.fired} of ${stats.population} (${stats.fire_rate}%) fall short of the same standard in ${subject}. `
+        + `This is a finding about the programme AND about each of them: a duty breached at scale is not thereby excused, `
+        + `and every one of the ${stats.kept} individual findings is retained alongside this one. `
+        + `A failure rate this high is itself evidence that the accountability mechanism for ${subject} is not working.`
+      : `This is a base-rate finding, not an accusation against any individual. `
+        + `${stats.fired} of ${stats.population} comparable subjects (${stats.fire_rate}%) cross the same threshold, `
+        + `so the measure does not distinguish this group from its peers — which bears on what the number reveals, not on whether it matters. `
+        + `The individual leads retained alongside this finding are the ${stats.kept} most extreme cases.`,
     data: {
       statistic: "cohort_base_rate",
       population: stats.population,

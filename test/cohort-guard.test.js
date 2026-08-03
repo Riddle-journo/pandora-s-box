@@ -100,7 +100,11 @@ test("every surviving candidate carries the base rate, so it cannot be read as a
     assert.equal(c.cohort_context.cohort_fire_rate_pct, 27.1);
     assert.equal(c.data.cohort_context.cohort_population, 472);
     assert.match(c.detail, /128 of 472 comparable subjects/);
-    assert.match(c.detail, /rather than about this individual/);
+    // Carrying the base rate must not slide into excusing the subject. The
+    // original wording ("primarily a finding about the programme rather than
+    // about this individual") did exactly that, and for a duty it is false.
+    assert.match(c.detail, /not an excuse/);
+    assert.doesNotMatch(c.detail, /rather than about this individual/);
   }
 });
 
@@ -166,4 +170,79 @@ test("REGRESSION: the 128-MP MPLADS lead does not recur", () => {
   assert.match(r.systemic[0].headline, /27\.1%/);
   assert.equal(r.systemic[0].subject_kind, "programme");
   assert.equal(r.systemic[0].data.suppressed_as_typical, 104);
+});
+
+// ── Duty vs inference ──────────────────────────────────────────────────────
+//
+// The correction Pandoro pushed back on: the first version of this guard ran
+// two different things through one rule. "Assets worth 40 years of declared
+// income" breaks no rule — it is an inference, and how common it is genuinely
+// bears on whether it means anything. MPLADS is a statutory entitlement each
+// member is responsible for spending: leaving it idle is that member's failure
+// whether 1% or 90% of members also leave it idle.
+//
+// Base rate is evidence about an inference. It is not a defence against a duty.
+
+test("a STANDARD keeps every individual finding and still reports the failure rate", () => {
+  const r = applyCohortGuard(candidates(128), { ...COHORT, population: 472, standard: true });
+  assert.equal(r.stats.systemic, true, "the 27.1% rate is still surfaced");
+  assert.equal(r.candidates.length, 128, "not one individual finding is dropped");
+  assert.equal(r.stats.suppressed, 0);
+  assert.ok(r.systemic, "and the programme-level finding is emitted ON TOP, not instead");
+});
+
+test("a standard's wording does not excuse the individual", () => {
+  const r = applyCohortGuard(candidates(128), { ...COHORT, population: 472, standard: true });
+  const one = r.candidates[0];
+  assert.match(one.detail, /Being common does not make it acceptable/);
+  assert.match(one.detail, /each holder carries individually/);
+  assert.doesNotMatch(one.detail, /rather than about this individual/,
+    "the excusing sentence must not reappear");
+  assert.equal(one.cohort_context.is_standard, true);
+
+  assert.match(r.systemic.headline, /failing the same duty/);
+  assert.match(r.systemic.detail, /not thereby excused/);
+  assert.match(r.systemic.detail, /accountability mechanism .* is not working/);
+});
+
+test("an INFERENCE still narrows to the tail, and says why without excusing", () => {
+  const r = applyCohortGuard(candidates(128), { ...COHORT, population: 472 });
+  assert.equal(r.candidates.length, 24, "a statistical pattern still ranks by distinctiveness");
+  const one = r.candidates[0];
+  assert.match(one.detail, /widespread pattern rather than a distinguishing one/);
+  assert.match(one.detail, /not an excuse/);
+  assert.equal(one.cohort_context.is_standard, false);
+});
+
+test("REGRESSION: the MPLADS 128 are no longer filtered out of the queue", () => {
+  // The original complaint was that 128 MPs not using their constituency fund
+  // was treated as a conspiracy. The first fix over-corrected and treated it as
+  // unremarkable. Both are wrong: each of the 128 failed a duty, AND the 27.1%
+  // rate is its own finding about the scheme.
+  const r = guardDetector(candidates(128), {
+    ...COHORT, population: 472, standard: true,
+    groupBy: (c) => c.data.extreme, directionFor: () => "low",
+  });
+  assert.equal(r.candidates.length, 128, "every member who left the fund idle is still named");
+  assert.equal(r.systemic.length, 1, "and the scheme-level failure rate is reported alongside");
+  assert.equal(r.candidates[0].signal_score, 30, "individual scores are not discounted for being typical");
+});
+
+test("REGRESSION: the base rate reaches the LEAD text, not just the candidate", () => {
+  // Legacy detectors carry a separate `lead` payload, and that is the text a
+  // human actually reads. The first version annotated only the candidate, so
+  // every lead went out with no base rate attached at all — the context was
+  // computed correctly and then stranded on an object nobody sees.
+  const withLead = candidates(128).map((c) => ({
+    ...c,
+    lead: { actor_id: c.subject.politician_id, vector: "STAT_FUND_UTILIZATION", detail: "lead detail.", signal_score: 30, data: {} },
+  }));
+  const r = applyCohortGuard(withLead, { ...COHORT, population: 472, standard: true });
+  for (const c of r.candidates) {
+    assert.ok(c.lead, "the lead payload survives the guard");
+    assert.match(c.lead.detail, /128 of 472 comparable subjects/, "the base rate travels with the claim");
+    assert.match(c.lead.detail, /Being common does not make it acceptable/);
+    assert.equal(c.lead.cohort_context.cohort_fire_rate_pct, 27.1);
+    assert.equal(c.lead.data.cohort_context.is_standard, true);
+  }
 });

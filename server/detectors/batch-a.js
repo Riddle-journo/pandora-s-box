@@ -71,6 +71,13 @@ export const DETECTORS_A = [
     // is a fact about how MPLADS runs, not about 128 individuals. The two tails
     // are judged separately — they are opposite conditions with opposite rates.
     cohort: {
+      // A STANDARD, not a statistical curiosity. MPLADS is a statutory
+      // entitlement each member is responsible for spending on their own
+      // constituency; leaving it idle is that member's failure whether 1% or
+      // 90% of members also leave it idle. So every individual finding is
+      // kept, and the 27.1% failure rate is reported as an ADDITIONAL finding
+      // about the scheme's accountability — not as a reason to drop the 128.
+      standard: true,
       metric: "mplads_utilization_pct",
       subjectKind: "programme",
       subjectName: "MPLADS (Members of Parliament Local Area Development Scheme)",
@@ -564,6 +571,9 @@ export const DETECTORS_A = [
     // administrative property of the scheme. Only the worst few are about a
     // person; the rate itself is the story.
     cohort: {
+      // Same reasoning: recommending works and not completing them is a
+      // failure of the member's own responsibility for that fund.
+      standard: true,
       metric: "mplads_works_recommended",
       subjectKind: "programme",
       subjectName: "MPLADS works completion",
