@@ -174,7 +174,58 @@ export function fetchFailureInventory() {
 }
 
 /** Test seam: forget the recorded failures. */
-export function resetFetchFailureInventory() { failures.clear(); }
+export function resetFetchFailureInventory() { failures.clear(); tripped.clear(); }
+
+// ── Circuit breaker ────────────────────────────────────────────────────────
+//
+// Several fetchers hit the SAME endpoint once per politician. When that
+// endpoint is down, a full-roster run pays for it 4,559 times.
+//
+// Measured on a single real ingest: cbi.gov.in/press-releases times out after
+// ~24 seconds, and enforcementdirectorate.gov.in/press-release 404s. Across the
+// 2,931 politicians who have never been ingested, the CBI timeout ALONE is
+// about twenty hours of waiting for a page that is not coming.
+//
+// After a source fails repeatedly within one process, stop calling it for the
+// rest of that run. Deliberately per-PROCESS and never persisted: a site that
+// was down this morning must get a clean try on the next run, and a breaker
+// that outlived the process would quietly turn a blip into permanent lost
+// coverage — the opposite of what this project needs.
+//
+// A tripped breaker is a loud, counted event, not a silent skip: it lands in
+// the same inventory the health CLI reads, so "we stopped asking" is visible.
+const CIRCUIT_THRESHOLD = Number(process.env.FETCH_CIRCUIT_THRESHOLD ?? 3);
+const tripped = new Map();   // source -> { at, failures, reason }
+
+/**
+ * Should this source be skipped for the rest of this process?
+ *
+ * @param {string} source  the SAME id passed to noteFetchFailure
+ * @param {{ threshold?: number }} [opts]
+ */
+export function circuitOpen(source, { threshold = CIRCUIT_THRESHOLD } = {}) {
+  if (threshold <= 0) return false;              // 0 disables the breaker entirely
+  if (tripped.has(source)) return true;
+  // Count every phase recorded under this source id, plus the "source:sub" ids
+  // the press-release scanner uses per listing.
+  let count = 0, reason = "";
+  for (const f of failures.values()) {
+    if (f.source === source || f.source.startsWith(`${source}:`)) {
+      count += f.count;
+      if (!reason) reason = f.last_message;
+    }
+  }
+  if (count < threshold) return false;
+  tripped.set(source, { at: new Date().toISOString(), failures: count, reason });
+  flog.warn({ source, failures: count, threshold, reason },
+    `${source}: circuit OPEN — skipping this source for the rest of this run after ${count} failures`);
+  return true;
+}
+
+/** Sources skipped this process, for the health CLI and the ops console. */
+export function openCircuits() {
+  return [...tripped.entries()].map(([source, v]) => ({ source, ...v }));
+}
 
 /**
  * Freshness honesty: stamp cached/stale data so a downstream consumer can tell a

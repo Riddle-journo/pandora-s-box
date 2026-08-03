@@ -9,7 +9,7 @@
 //   2. Fallback — if no order PDF is found/matched, the search-results-page
 //      excerpt (today's behaviour), so we never regress.
 import { fetchText, htmlToText, contextAround, fetchPdfText, mapLimit, sleep , TIMEOUT_DEFAULT } from "./http.js";
-import { noteFetchFailure, noteParseMiss } from "./observe.js";
+import { noteFetchFailure, noteParseMiss, circuitOpen } from "./observe.js";
 
 const SEBI_BASE = "https://www.sebi.gov.in";
 const SUMMARY = "SEBI enforcement orders — insider trading, market manipulation, or promoter violations (admissible public record from a statutory regulator).";
@@ -113,6 +113,11 @@ const orderRow = (p, url, content) => ({
 });
 
 export async function fetchSEBIOrders(p) {
+  // SEBI answers 403 to this search (bot detection). It is queried once per
+  // politician, so a full-roster run would issue 4,559 requests it already knows
+  // will be refused — and hammering a regulator that has said no is both futile
+  // and the fastest way to lose the IP for the sources that do work.
+  if (circuitOpen("sebi")) return [];
   const url = `${SEBI_BASE}/enforcement/orders/?text=${encodeURIComponent(p.name)}`;
   const html = await fetchText(url, { timeoutMs: TIMEOUT_DEFAULT, source: "sebi" });
   // fetchText already recorded the transport failure; this records that SEBI

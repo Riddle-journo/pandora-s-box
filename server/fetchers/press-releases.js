@@ -5,7 +5,7 @@
 // PIB removed: government's own press bureau adds PR noise, not accountability signal.
 // Free, no key. Two-level scrape: listing page → individual release pages.
 import { fetchText, htmlToText, fetchPdfText, mapLimit, contextAround, isPdf , TIMEOUT_DEFAULT } from "./http.js";
-import { noteFetchFailure, noteParseMiss } from "./observe.js";
+import { noteFetchFailure, noteParseMiss, circuitOpen } from "./observe.js";
 
 
 // [label, source_type, tier, listing URL, base URL for resolving relative links]
@@ -62,6 +62,12 @@ function linksNear(html, name, base, windowChars = 2500) {
 
 export async function fetchPressReleases(p) {
   const all = await Promise.all(SOURCES.map(async ([label, source_type, tier, listingUrl, base]) => {
+    // This listing is fetched once per politician. When it is down — ED 404s,
+    // CBI times out after ~24s — a full-roster run pays that cost 4,559 times,
+    // which for CBI alone is about twenty hours of waiting. After a few
+    // failures the breaker skips it for the rest of this process (per-process
+    // only: the next run gets a clean try).
+    if (circuitOpen(`press_releases:${source_type}`)) return [];
     const html = await fetchText(listingUrl, { timeoutMs: TIMEOUT_DEFAULT, source: `press_releases:${source_type}` });
     // An ED/CBI listing that will not load is a whole enforcement channel
     // going dark for every politician in the run, not a quiet week.
